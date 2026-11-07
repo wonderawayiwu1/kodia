@@ -335,12 +335,17 @@ const prepareOpenAIOrAnthropicMessages = ({
 	imageFormat: ImageFormat, // only used by XML tool calling, whose messages can go to any provider
 	sendWorkspaceContextAsSystem: boolean,
 	tokenRatio: number, // real tokens per estimated token, for this model (see recordInputTokens)
-}): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean } => {
+}): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean } => {
 
 	// the model's real output limit; capped at half the window so small local models keep room for input
 	reservedOutputTokenSpace = Math.min(
 		contextWindow / 2,
 		reservedOutputTokenSpace ?? 4_096 // defaults to 4096
+	)
+	// effective input token budget: same value used for both pre-trim and post-trim calculations
+	const effectiveInputBudget = Math.max(
+		(contextWindow - reservedOutputTokenSpace) / tokenRatio,
+		1_250 // ensure we don't trim below this floor (just a random small value)
 	)
 	let messages: (SimpleLLMMessage | { role: 'system', content: string })[] = deepClone(messages_)
 
@@ -406,12 +411,9 @@ const prepareOpenAIOrAnthropicMessages = ({
 	let totalTokens = 0
 	for (const m of messages) { totalTokens += estimateTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0) }
 	// in estimated tokens: the budget is in real tokens, and estimates run below them (other tokenizer, tool schemas)
-	const tokensNeedToTrim = totalTokens - Math.max(
-		(contextWindow - reservedOutputTokenSpace) / tokenRatio, // can be 0, in which case tokensNeedToTrim=everything, bad
-		1_250 // ensure we don't trim below this floor (just a random small value)
-	)
+	const tokensNeedToTrim = totalTokens - effectiveInputBudget
 	// the caller can clear old tool results (once) instead of the lossy trimming below
-	const wasOverBudget = tokensNeedToTrim > 0
+	const wasInitiallyOverBudget = tokensNeedToTrim > 0
 	const estimatedInputTokens = totalTokens
 
 
@@ -422,6 +424,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	//                                    totalTokens
 	let remainingTokensToTrim = tokensNeedToTrim
 	let i = 0
+	let wasTrimmed = false
 
 	while (remainingTokensToTrim > 0) {
 		i += 1
@@ -443,13 +446,24 @@ const prepareOpenAIOrAnthropicMessages = ({
 			const charsToRemove = Math.ceil(remainingTokensToTrim * charsPerToken)
 			const targetLen = Math.max(m.content.length - charsToRemove - '...'.length, 0)
 			m.content = m.content.slice(0, targetLen).trim() + '...'
+			wasTrimmed = true
 			break
 		}
 
 		remainingTokensToTrim -= numTokensWillTrim
 		m.content = fullyTrimmedContent
 		alreadyTrimmedIdxes.add(trimIdx)
+		wasTrimmed = true
 	}
+
+	// Recalculate the actual post-trim token estimate using the same estimator,
+	// media-token accounting, and effective input budget as the initial calculation.
+	let postTrimTokens = 0
+	for (const m of messages) {
+		postTrimTokens += estimateTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0)
+	}
+	const postTrimTokensNeedToTrim = postTrimTokens - effectiveInputBudget
+	const wasStillOverBudgetAfterTrimming = postTrimTokensNeedToTrim > 0
 
 	// ================ system message hack ================
 	const newSysMsg = messages.shift()!.content
@@ -528,8 +542,10 @@ const prepareOpenAIOrAnthropicMessages = ({
 	return {
 		messages: llmMessages,
 		separateSystemMessage: separateSystemMessageStr,
-		estimatedInputTokens,
-		wasOverBudget,
+		estimatedInputTokens, // preserved: pre-trim total estimate, used by recordInputTokens calibration
+		wasInitiallyOverBudget,
+		wasStillOverBudgetAfterTrimming,
+		wasTrimmed,
 	} as const
 }
 
@@ -602,7 +618,7 @@ export const prepareMessages = (params: {
 	providerName: ProviderName,
 	sendWorkspaceContextAsSystem?: boolean,
 	tokenRatio?: number,
-}): { messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean } => {
+}): { messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean } => {
 
 	const specialFormat = params.specialToolFormat // this is just for ts stupidness
 
@@ -611,7 +627,7 @@ export const prepareMessages = (params: {
 		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false, tokenRatio: params.tokenRatio ?? 1 })
 		const messages = res.messages as AnthropicLLMChatMessage[]
 		const messages2 = prepareGeminiMessages(messages)
-		return { messages: messages2, separateSystemMessage: res.separateSystemMessage, estimatedInputTokens: res.estimatedInputTokens, wasOverBudget: res.wasOverBudget }
+		return { messages: messages2, separateSystemMessage: res.separateSystemMessage, estimatedInputTokens: res.estimatedInputTokens, wasInitiallyOverBudget: res.wasInitiallyOverBudget, wasStillOverBudgetAfterTrimming: res.wasStillOverBudgetAfterTrimming, wasTrimmed: res.wasTrimmed }
 	}
 
 	// with XML tools, the messages still go to the provider's own API, which sets the image format

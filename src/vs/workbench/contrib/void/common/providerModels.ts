@@ -12,7 +12,7 @@ import { ProviderName } from './voidSettingsTypes.js';
 export type DetectedModel = { modelName: string; capabilities?: Partial<VoidStaticModelInfo> };
 
 // the providers whose model list Kodia reads with the user's API key (OpenRouter's is public, see openRouterModels.ts)
-export const listableProviderNames = ['anthropic', 'openAI', 'gemini', 'mistral', 'xAI', 'groq', 'deepseek'] as const satisfies ProviderName[];
+export const listableProviderNames = ['anthropic', 'openAI', 'gemini', 'mistral', 'xAI', 'groq', 'deepseek', 'nvidia'] as const satisfies ProviderName[];
 export type ListableProviderName = typeof listableProviderNames[number];
 
 // the fields Kodia reads, from each provider's API reference
@@ -42,6 +42,7 @@ type MistralModel = {
 type XAIModel = { id: string; aliases?: string[]; input_modalities?: string[]; output_modalities?: string[]; context_length?: number | null };
 type GroqModel = { id: string; active?: boolean; context_window?: number; max_completion_tokens?: number };
 type DeepSeekModel = { id: string; context_window?: number; max_output_tokens?: number; input_modalities?: string[] };
+type NvidiaModel = { id: string; context_length?: number; type?: string; owned_by?: string };
 
 // what isn't a chat model, by name: these lists mix in embeddings, images, voice, moderation...
 const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
@@ -53,6 +54,7 @@ const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
 	// Voxtral is voice, Leanstral writes Lean proofs
 	mistral: /voxtral|leanstral|ocr|embed|moderation|shieldstral|timestral/,
 	xAI: /voice|tts|speech|transcri/,
+	nvidia: /embedding|whisper|tts|transcribe|dall-e|image|audio|live|voice|speech|search|moderation|computer-use|deep-research|sora|davinci|babbage|-pro\b|guard|safety|rerank|reranker|ocr|embed/,
 };
 
 // what Kodia no longer offers though the API still lists it: Gemini 1 and 2; 3.7 and 3.5 Flash, whose requests Google
@@ -167,6 +169,18 @@ const deepseekModels = (models: DeepSeekModel[]): DetectedModel[] => models.map(
 	}),
 }));
 
+// NVIDIA's /v1/models returns models the account has access to. The catalogue does not reliably expose
+// context windows or capabilities, so those are left undefined (unknown) and resolved from the model's
+// name/catalog instead. Verified fields are kept; everything else is marked unknown rather than invented.
+const nvidiaModels = (models: NvidiaModel[]): DetectedModel[] => models.map(m => ({
+	modelName: m.id,
+	capabilities: definedOnly({
+		contextWindow: positive(m.context_length),
+		// NVIDIA's catalogue does not expose tool/vision/output-limit metadata: unknown, not inferred from the name.
+	}),
+	// Preserve the exact model ID NVIDIA returns, including any owner prefix (e.g. nvidia/nemotron-3.5-super-vl-120b-a12b).
+}));
+
 // the providers' authors on OpenRouter; Groq serves other authors' models
 const openRouterAuthorOf: { [providerName in ListableProviderName]?: string } = { anthropic: 'anthropic', openAI: 'openai', gemini: 'google', xAI: 'x-ai', deepseek: 'deepseek', mistral: 'mistralai' };
 
@@ -203,7 +217,9 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 					: providerName === 'mistral' ? mistralModels(withName as MistralModel[])
 						: providerName === 'xAI' ? xAIModels(withName as XAIModel[])
 							: providerName === 'groq' ? groqModels(withName as GroqModel[])
-								: deepseekModels(withName as DeepSeekModel[]);
+								: providerName === 'deepseek' ? deepseekModels(withName as DeepSeekModel[])
+									: providerName === 'nvidia' ? nvidiaModels(withName as NvidiaModel[])
+										: deepseekModels(withName as DeepSeekModel[]);
 
 	const notChat = notChatModel[providerName];
 	const notOffered = notOfferedModel[providerName];

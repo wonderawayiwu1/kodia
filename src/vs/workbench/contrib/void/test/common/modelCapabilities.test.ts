@@ -133,6 +133,24 @@ suite('Kodia - model capabilities', () => {
 		}
 	});
 
+	test('NVIDIA: nemotron-3.5-super-vl keeps verified capabilities; unknown NVIDIA models are not given vision or a fake context limit', () => {
+		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(nemotron.isUnrecognizedModel, false, 'nemotron-3.5-super-vl is a recognized catalog model');
+		assert.strictEqual(nemotron.contextWindow, 1_048_576, 'verified: up to 1M tokens (1,048,576)');
+		assert.strictEqual(nemotron.reservedOutputTokenSpace, 32_768, 'verified: max_tokens maximum');
+		assert.strictEqual(nemotron.supportsVision, true, 'verified: NVIDIA advertises image and video input');
+		assert.strictEqual(nemotron.specialToolFormat, 'openai-style', 'verified: the API accepts a tools parameter');
+		assert.strictEqual(nemotron.supportsSystemMessage, 'system-role', 'verified: the API accepts a system role');
+		assert.ok(!!nemotron.reasoningCapabilities && nemotron.reasoningCapabilities.supportsReasoning, 'verified: configurable reasoning');
+		assert.ok(!!nemotron.reasoningCapabilities && nemotron.reasoningCapabilities.canIOReasoning, 'verified: model outputs reasoning_content');
+
+		// an NVIDIA model not in the catalog: no vision inferred from its name, context falls back safely
+		const unknown = getModelCapabilities('nvidia', 'meta/llama-3.1-8b-instruct', undefined);
+		assert.strictEqual(unknown.isUnrecognizedModel, true);
+		assert.strictEqual(unknown.supportsVision, false, 'vision is not inferred from the model name');
+		assert.strictEqual(unknown.contextWindow, 4_096, 'unknown context falls back to the safe default, not advertised as a real limit');
+	});
+
 	test('a per-model override wins over the detected capabilities', () => {
 		const overrides = overridesWith('ollama', 'mistral:7b', { supportsVision: true });
 		assert.strictEqual(getModelCapabilities('ollama', 'mistral:7b', overrides).supportsVision, true);

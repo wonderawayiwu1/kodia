@@ -888,9 +888,9 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			})
 			let prepared = await prepare()
 			// too long for the model: clear old tool results once, rather than truncating messages on every request
-			if (prepared.wasOverBudget && this._clearOldToolResults(threadId)) prepared = await prepare()
+			if (prepared.wasStillOverBudgetAfterTrimming && this._clearOldToolResults(threadId)) prepared = await prepare()
 			// still too long: summarize the older messages (when that fails, prepare's truncation is the fallback)
-			if (prepared.wasOverBudget && modelSelection && !interruptedWhenIdle) {
+			if (prepared.wasStillOverBudgetAfterTrimming && modelSelection && !interruptedWhenIdle) {
 				const summarized = await this._summarizeOlderMessages(threadId, { modelSelection, modelSelectionOptions, overridesOfModel, onInterrupt: () => { interruptedWhenIdle = true } })
 				if (!interruptedWhenIdle) this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
 				if (summarized && !interruptedWhenIdle) prepared = await prepare()

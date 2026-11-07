@@ -61,6 +61,9 @@ export const listProviderModels = async (providerName: ListableProviderName, api
 			return arrayOf((await getJson('https://api.groq.com/openai/v1/models', bearer(apiKey))).data);
 		case 'deepseek': // https://api-docs.deepseek.com/api/list-models
 			return arrayOf((await getJson('https://api.deepseek.com/models', bearer(apiKey))).data);
+		case 'nvidia': { // https://docs.api.nvidia.com/nim/reference/overview — GET /v1/models
+			return arrayOf((await getJson('https://integrate.api.nvidia.com/v1/models', bearer(apiKey))).data);
+		}
 		case 'xAI': {
 			// https://docs.x.ai/developers/rest-api-reference/inference/models: /v1/language-models has the modalities,
 			// /v1/models the context length

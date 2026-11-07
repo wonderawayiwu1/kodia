@@ -69,6 +69,9 @@ export const defaultProviderSettings = {
 		region: 'us-east-1', // add region setting
 		endpoint: '', // optionally allow overriding default
 	},
+	nvidia: {
+		apiKey: '', // NVIDIA API key (nvapi-...), obtained from https://build.nvidia.com/
+	},
 
 } as const
 
@@ -158,6 +161,9 @@ export const catalogModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
+	nvidia: [ // https://docs.api.nvidia.com/nim — discovered dynamically from GET /v1/models
+		'nvidia/nemotron-3.5-super-vl-120b-a12b',
+	],
 
 
 } as const satisfies Record<ProviderName, string[]>
@@ -182,6 +188,7 @@ export const defaultModelsOfProvider = {
 	microsoftAzure: [],
 	awsBedrock: [],
 	liteLLM: [],
+	nvidia: ['nvidia/nemotron-3.5-super-vl-120b-a12b'],
 } as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }
 
 
@@ -1603,6 +1610,65 @@ const awsBedrockSettings: VoidStaticProviderInfo = {
 	},
 }
 
+// ---------------- NVIDIA (hosted inference, https://integrate.api.nvidia.com/v1) ----------------
+// Capabilities below are verified against NVIDIA's official documentation
+// (https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b/modelcard).
+// Verified: context length up to 1M tokens; inputs include text, images and video; tool calling and
+// agentic coding supported; reasoning controlled via `chat_template_kwargs.enable_thinking`.
+// Vision IS advertised: NVIDIA lists Image and Video as input types for this model.
+// Reasoning output arrives in the OpenAI-compatible `reasoning_content` delta field — see
+// nvidiaSettings.providerReasoningIOSettings.output.nameOfFieldInDelta below.
+// Kodia's media pipeline carries images (image_url data URLs, matching NVIDIA's documented format).
+// Video is documented by NVIDIA but Kodia's ChatMedia type has no video kind, so video attachments
+// are not yet carried by the client; this is a pre-existing pipeline limitation, not a provider
+// limitation, and vision is only enabled for this verified model — not for other NVIDIA models.
+const nvidiaReasoningCapabilities = {
+	supportsReasoning: true as const,
+	canTurnOffReasoning: true,
+	canIOReasoning: true, // verified: the model streams `reasoning_content` in deltas
+	reasoningSlider: { type: 'effort_slider' as const, values: ['none', 'low', 'high'], default: 'high' },
+}
+
+const nvidiaModelOptions = {
+	// https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b/modelcard
+	'nvidia/nemotron-3.5-super-vl-120b-a12b': {
+		contextWindow: 1_048_576, // verified: up to 1M tokens (advertised maximum; hosted deployment may differ)
+		reservedOutputTokenSpace: 32_768, // verified: max_tokens maximum
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true, // verified: NVIDIA lists Image as an input type
+		supportsPDF: false,
+		specialToolFormat: 'openai-style', // verified: the API accepts a `tools` parameter
+		supportsSystemMessage: 'system-role', // verified: the API accepts a `system` role
+		reasoningCapabilities: nvidiaReasoningCapabilities,
+	},
+} as const satisfies { [s: string]: VoidStaticModelInfo }
+
+const nvidiaIncludeInPayloadReasoning = (reasoningInfo: SendableReasoningInfo) => {
+	if (!reasoningInfo?.isReasoningEnabled) return null
+	if (reasoningInfo.type === 'effort_slider_value') {
+		if (reasoningInfo.reasoningEffort === 'none') {
+			return { chat_template_kwargs: { enable_thinking: false } }
+		}
+		if (reasoningInfo.reasoningEffort === 'low') {
+			return { chat_template_kwargs: { enable_thinking: true, low_effort: true } }
+		}
+		return { chat_template_kwargs: { enable_thinking: true } }
+	}
+	return null
+}
+
+const nvidiaSettings: VoidStaticProviderInfo = {
+	modelOptions: nvidiaModelOptions,
+	modelOptionsFallback: (modelName) => null,
+	providerReasoningIOSettings: {
+		input: { includeInPayload: nvidiaIncludeInPayloadReasoning },
+		output: { nameOfFieldInDelta: 'reasoning_content' }, // verified: model streams `reasoning_content`
+	},
+}
+
+
 
 // ---------------- VLLM, OLLAMA, OPENAICOMPAT (self-hosted / local) ----------------
 const ollamaModelOptions = {
@@ -1986,6 +2052,7 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 	googleVertex: googleVertexSettings,
 	microsoftAzure: microsoftAzureSettings,
 	awsBedrock: awsBedrockSettings,
+	nvidia: nvidiaSettings,
 } as const
 
 

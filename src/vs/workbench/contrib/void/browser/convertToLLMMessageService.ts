@@ -30,8 +30,10 @@ export interface IConvertToLLMMessageService {
 	readonly _serviceBrand: undefined;
 	prepareLLMSimpleMessages: (opts: { simpleMessages: SimpleLLMMessage[], systemMessage: string, modelSelection: ModelSelection | null, featureName: FeatureName }) => { messages: LLMChatMessage[], separateSystemMessage: string | undefined }
 	// turnId: the same for every request of one agent turn, which then reuses one system prompt (see _chatSystemMessage)
-	// wasOverBudget: the history didn't fit and older messages were truncated (clear old tool results and prepare again)
-	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasOverBudget: boolean }>
+	// wasInitiallyOverBudget: the history exceeded the estimated budget before trimming
+	// wasStillOverBudgetAfterTrimming: the history still exceeds the estimated budget after trimming
+	// wasTrimmed: whether any message content was modified by the trimming loop
+	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean }>
 	// calibrates token estimates for this model with the input tokens the provider reported for that request
 	recordInputTokens(modelSelection: ModelSelection, estimatedInputTokens: number, actualInputTokens: number): void
 	// the editor state to append to a chat message when the user sends it ('' if the system message is disabled)
@@ -280,7 +282,7 @@ class ConvertToLLMMessageService extends Disposable implements IConvertToLLMMess
 	}
 
 	prepareLLMChatMessages: IConvertToLLMMessageService['prepareLLMChatMessages'] = async ({ chatMessages, chatMode, modelSelection, turnId }) => {
-		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined, estimatedInputTokens: 0, wasOverBudget: false }
+		if (modelSelection === null) return { messages: [], separateSystemMessage: undefined, estimatedInputTokens: 0, wasInitiallyOverBudget: false, wasStillOverBudgetAfterTrimming: false, wasTrimmed: false }
 
 		const { overridesOfModel } = this.voidSettingsService.state
 
