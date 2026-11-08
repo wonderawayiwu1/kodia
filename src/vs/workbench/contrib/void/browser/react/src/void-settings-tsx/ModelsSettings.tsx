@@ -16,6 +16,7 @@ import { WarningBox } from './WarningBox.js'
 import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
 import { isFreeOpenRouterModel } from '../../../../common/openRouterModels.js';
 import { AddButton, AddRowButton, AnimatedCheckmarkButton, GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
+import { SearchProvidersSettings } from './SearchProvidersSettings.js';
 
 const ButtonLeftTextRightOption = ({ text, leftButton }: { text: string, leftButton?: React.ReactNode }) => {
 
@@ -757,6 +758,10 @@ export const ModelsSection = () => {
 					/>
 				</div>}
 			</div>)}
+		</SettingGroup>
+
+		<SettingGroup title='Web Search Providers' description='Configure search APIs for web search and agent tools. Drag to reorder priority.'>
+			<SearchProvidersSettings />
 		</SettingGroup>
 
 		<SettingGroup title='Local servers' description='Models running on your computer: free, and your code stays on your machine.'>

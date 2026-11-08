@@ -85,6 +85,22 @@ export interface IVoidSettingsService {
 	addMCPUserStateOfNames(userStateOfName: MCPUserStateOfName): Promise<void>;
 	removeMCPUserStateOfNames(serverNames: string[]): Promise<void>;
 	setMCPServerState(serverName: string, state: MCPUserState): Promise<void>;
+
+	// Web Search Provider Settings (Phase 1)
+	setSearchProviderSettings(providerName: 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo', settings: {
+		apiKey?: string;
+		enabled: boolean;
+		priority: number;
+		maxResults: number;
+		timeoutMs: number;
+	}): Promise<void>;
+	getSearchProviderSettings(providerName: 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo'): {
+		enabled: boolean;
+		priority: number;
+		maxResults: number;
+		timeoutMs: number;
+		hasKey: boolean;
+	};
 }
 
 
@@ -336,7 +352,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			}
 			// add disableSystemMessage feature
 			if (readS.globalSettings.disableSystemMessage === undefined) readS.globalSettings.disableSystemMessage = false;
-			
+
 			// add autoAcceptLLMChanges feature
 			if (readS.globalSettings.autoAcceptLLMChanges === undefined) readS.globalSettings.autoAcceptLLMChanges = false;
 
@@ -689,6 +705,47 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		await this._setMCPUserStateOfName(newMCPServerStates)
 		this._metricsService.capture('Update MCP Server State', { serverName, state });
 	}
+
+	// Web Search Provider Settings (Phase 1)
+	setSearchProviderSettings = async (providerName: 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo', settings: {
+		apiKey?: string;
+		enabled: boolean;
+		priority: number;
+		maxResults: number;
+		timeoutMs: number;
+	}) => {
+		const newGlobalSettings = {
+			...this.state.globalSettings,
+			webSearchProviders: {
+				...this.state.globalSettings.webSearchProviders,
+				[providerName]: {
+					...this.state.globalSettings.webSearchProviders[providerName],
+					...settings,
+				},
+			},
+		};
+
+		const newState: VoidSettingsState = {
+			...this.state,
+			globalSettings: newGlobalSettings,
+		};
+
+		this.state = _validatedModelState(newState);
+		await this._storeState();
+		this._onDidChangeState.fire();
+	};
+
+	getSearchProviderSettings = (providerName: 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo') => {
+		const settings = this.state.globalSettings.webSearchProviders[providerName];
+		// Never return the actual API key - only return whether a key exists
+		return {
+			enabled: settings.enabled,
+			priority: settings.priority,
+			maxResults: settings.maxResults,
+			timeoutMs: settings.timeoutMs,
+			hasKey: !!settings.apiKey && settings.apiKey.length > 0,
+		};
+	};
 
 }
 

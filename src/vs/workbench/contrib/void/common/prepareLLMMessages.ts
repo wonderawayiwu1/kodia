@@ -398,6 +398,9 @@ const prepareOpenAIOrAnthropicMessages = ({
 		let largestIndex = -1
 		let largestWeight = -Infinity
 		for (let i = 0; i < messages.length; i += 1) {
+			// Skip already-trimmed messages and messages that are too short to trim
+			if (alreadyTrimmedIdxes.has(i)) continue
+			if (messages[i].content.length <= TRIM_TO_LEN) continue
 			const m = messages[i]
 			const w = weight(m, messages_, i)
 			if (w > largestWeight) {
@@ -431,13 +434,14 @@ const prepareOpenAIOrAnthropicMessages = ({
 		if (i > 100) break
 
 		const trimIdx = _findLargestByWeight(messages)
+		// No eligible messages left to trim
+		if (trimIdx === -1) break
+
 		const m = messages[trimIdx]
 		const msgTokens = estimateTokens(m.content)
 
 		// if can finish here, do
-		const fullyTrimmedContent = m.content.length > TRIM_TO_LEN
-			? m.content.substring(0, TRIM_TO_LEN - '...'.length) + '...'
-			: m.content
+		const fullyTrimmedContent = m.content.substring(0, TRIM_TO_LEN - '...'.length) + '...'
 		const numTokensWillTrim = msgTokens - estimateTokens(fullyTrimmedContent)
 		if (numTokensWillTrim > remainingTokensToTrim) {
 			// don't need to trim this message all the way down — cut a proportional number of

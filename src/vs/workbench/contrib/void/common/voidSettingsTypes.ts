@@ -25,6 +25,17 @@ export const otherLocalProviderNames = ['vLLM', 'lmStudio'] as const satisfies P
 export const localProviderNames = [...ollamaProviderNames, ...mlxProviderNames, ...otherLocalProviderNames] satisfies ProviderName[] // all local names
 export const nonlocalProviderNames = providerNames.filter((name) => !(localProviderNames as string[]).includes(name)) // all non-local names
 
+// Web Search Provider Types (separate from LLM ProviderName)
+export type WebSearchProviderName = 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo';
+
+export interface SearchProviderSettings {
+	apiKey?: string;           // encrypted at rest; undefined for DDG
+	enabled: boolean;          // default: false
+	priority: number;          // drag-drop order (0 = highest)
+	maxResults: number;        // default: 10
+	timeoutMs: number;         // default: 15000
+}
+
 type CustomSettingName = UnionOfKeys<typeof defaultProviderSettings[ProviderName]>
 type CustomProviderSettings<providerName extends ProviderName> = {
 	[k in CustomSettingName]: k extends keyof typeof defaultProviderSettings[providerName] ? string : undefined
@@ -486,6 +497,15 @@ export type GlobalSettings = {
 	disableSystemMessage: boolean;
 	autoAcceptLLMChanges: boolean;
 	oneHourPromptCache: boolean; // Claude: keep the prompt cache 1 hour (2x write price) instead of 5 minutes
+	// Web Search settings (Phase 1)
+	webSearchProviders: Record<'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo', {
+		apiKey?: string;
+		enabled: boolean;
+		priority: number;
+		maxResults: number;
+		timeoutMs: number;
+	}>;
+	webSearchFreeOnly: boolean; // user preference, default: true (zero-spend enforcement in later phases)
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -505,6 +525,16 @@ export const defaultGlobalSettings: GlobalSettings = {
 	disableSystemMessage: false,
 	autoAcceptLLMChanges: false,
 	oneHourPromptCache: false,
+	// Web Search settings (Phase 1)
+	webSearchProviders: {
+		brave: { apiKey: undefined, enabled: false, priority: 0, maxResults: 10, timeoutMs: 15000 },
+		tavily: { apiKey: undefined, enabled: false, priority: 1, maxResults: 10, timeoutMs: 15000 },
+		exa: { apiKey: undefined, enabled: false, priority: 2, maxResults: 10, timeoutMs: 15000 },
+		you: { apiKey: undefined, enabled: false, priority: 3, maxResults: 10, timeoutMs: 15000 },
+		nvidia: { apiKey: undefined, enabled: false, priority: 4, maxResults: 10, timeoutMs: 15000 },
+		duckduckgo: { apiKey: undefined, enabled: false, priority: 5, maxResults: 10, timeoutMs: 15000 },
+	},
+	webSearchFreeOnly: true, // zero-spend preference (enforcement in later phases)
 }
 
 export type GlobalSettingName = keyof GlobalSettings
