@@ -31,6 +31,7 @@ import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
+import { IWebSearchService, SearchRequest } from '../common/webSearchTypes.js'
 
 
 // tool use for AI
@@ -244,6 +245,7 @@ export class ToolsService implements IToolsService {
 	) {
 		const queryBuilder = instantiationService.createInstance(QueryBuilder);
 		const webFetchService = ProxyChannel.toService<IKodiaWebFetchService>(mainProcessService.getChannel('void-channel-webFetch'))
+		const webSearchService = ProxyChannel.toService<IWebSearchService>(mainProcessService.getChannel('void-channel-webSearch'))
 
 		const recentPages = new Map<string, WebFetchResult>()
 		const fetchPage = async (url: string) => {
@@ -391,6 +393,20 @@ export class ToolsService implements IToolsService {
 				if (!/^https?:\/\//i.test(url)) throw new Error(`Invalid LLM output: url must start with http:// or https://, got "${url}".`)
 				const pageNumber = validatePageNum(pageNumberUnknown)
 				return { url, pageNumber }
+			},
+
+			web_search: (params: RawToolParamsObj) => {
+				const { query: queryUnknown, max_results: maxResultsUnknown } = params
+				const query = validateStr('query', queryUnknown).trim()
+				if (query.length === 0) throw new Error(`Invalid LLM output: query must not be empty.`)
+				let maxResults: number | undefined
+				if (maxResultsUnknown !== undefined && maxResultsUnknown !== null) {
+					const parsed = Number.parseInt(String(maxResultsUnknown), 10)
+					if (!Number.isInteger(parsed)) throw new Error(`Invalid LLM output: max_results must be an integer.`)
+					if (parsed < 1 || parsed > 20) throw new Error(`Invalid LLM output: max_results must be between 1 and 20.`)
+					maxResults = parsed
+				}
+				return { query, maxResults }
 			},
 
 			// ---
@@ -628,6 +644,13 @@ export class ToolsService implements IToolsService {
 				return { result: { url: page.url, title: page.title, content, totalLen: page.text.length, hasNextPage } }
 			},
 
+			web_search: async ({ query, maxResults }) => {
+				const request: SearchRequest = { query, maxResults }
+				const response = await webSearchService.search(request)
+				const result: BuiltinToolResultType['web_search'] = { results: response.results }
+				return { result }
+			},
+
 			// ---
 
 			create_file_or_folder: async ({ uri, isFolder }) => {
@@ -784,6 +807,18 @@ export class ToolsService implements IToolsService {
 				const truncated = result.hasNextPage ? `${nextPageStr(true)}\nMore info because truncated: this page has ${result.totalLen} characters.` : ''
 				return `${header}\n\n${content}${truncated}`
 			},
+
+			web_search: (params, result) => {
+				if (!result.results || result.results.length === 0) {
+					return 'No results found for the search query.'
+				}
+				const lines = result.results.map((r, i) => {
+					const date = r.publishedDate ? ` (${r.publishedDate})` : ''
+					return `${i + 1}. ${r.title}\n${r.url}${date}\n${r.snippet || '(no snippet)'}`
+				})
+				return lines.join('\n\n')
+			},
+
 			// ---
 			create_file_or_folder: (params, result) => {
 				return `URI ${params.uri.fsPath} successfully created.`

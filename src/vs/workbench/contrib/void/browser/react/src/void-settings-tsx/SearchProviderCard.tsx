@@ -15,13 +15,14 @@ interface SearchProviderCardProps {
 	providerName: WebSearchProviderName;
 	settings: SearchProviderSettings;
 	onSettingsChange: (providerName: WebSearchProviderName, changes: Partial<SearchProviderSettings>) => void;
-	onTestConnection: (providerName: WebSearchProviderName) => void;
+	onTestConnection: () => void;
 	hasExistingKey: boolean;
 	onDragStart: (e: React.DragEvent, providerName: WebSearchProviderName) => void;
 	onDragOver: (e: React.DragEvent) => void;
 	onDrop: (e: React.DragEvent, targetProvider: WebSearchProviderName) => void;
 	onDragEnd: () => void;
 	draggedId: WebSearchProviderName | null;
+	isTesting?: boolean;
 }
 
 export const SearchProviderCard = ({
@@ -35,33 +36,18 @@ export const SearchProviderCard = ({
 	onDrop,
 	onDragEnd,
 	draggedId,
+	isTesting = false,
 }: SearchProviderCardProps) => {
 	const displayInfo = SEARCH_PROVIDER_DISPLAY_INFO[providerName];
 	const isNvidia = providerName === 'nvidia';
 	const isDuckDuckGo = providerName === 'duckduckgo';
 	const [showKey, setShowKey] = useState(false);
-	const [inputValue, setInputValue] = useState(settings.apiKey || '');
+	const [inputValue, setInputValue] = useState(settings?.apiKey || '');
 	const [showWarning, setShowWarning] = useState(false);
 
 	const accessor = useAccessor();
 	const metricsService = accessor.get('IMetricsService');
 	const voidSettingsService = accessor.get('IVoidSettingsService');
-
-	const handleTestConnection = useCallback(() => {
-		onTestConnection(providerName);
-	}, [onTestConnection, providerName]);
-
-	const handleKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-		const value = e.target.value;
-		setInputValue(value);
-		setShowWarning(value.length > 0 && value.length < 10);
-	};
-
-	const handleKeyBlur = () => {
-		if (inputValue !== settings.apiKey) {
-			onSettingsChange(providerName, { apiKey: inputValue });
-		}
-	};
 
 	const formatPriority = (priority: number) => `${priority + 1}`;
 
@@ -82,7 +68,7 @@ export const SearchProviderCard = ({
 					onMouseDown={(e) => e.preventDefault()}
 				>
 					<GripVertical className='size-5 text-void-fg-4 hover:text-void-fg-2' />
-					<span className='text-xs text-void-fg-4'>{formatPriority(settings.priority)}</span>
+					<span className='text-xs text-void-fg-4'>{formatPriority(settings?.priority ?? 0)}</span>
 				</div>
 
 				{/* Provider info */}
@@ -108,12 +94,12 @@ export const SearchProviderCard = ({
 				{/* Enable toggle */}
 				<div className='flex items-center gap-3'>
 					<VoidSwitch
-						value={settings.enabled}
+						value={settings?.enabled ?? false}
 						onChange={(newVal) => onSettingsChange(providerName, { enabled: newVal })}
 						size='sm'
 					/>
 					<label className='text-sm text-void-fg-3 w-24 shrink-0'>Enabled</label>
-					<span className='text-sm text-void-fg-3'>{settings.enabled ? 'Enabled' : 'Disabled'}</span>
+					<span className='text-sm text-void-fg-3'>{settings?.enabled ? 'Enabled' : 'Disabled'}</span>
 				</div>
 
 				{/* API Key input (not for DDG or NVIDIA) */}
@@ -125,9 +111,17 @@ export const SearchProviderCard = ({
 								id={`apiKey-${providerName}`}
 								type={showKey ? 'text' : 'password'}
 								value={inputValue}
-								onChange={handleKeyChange}
-								onBlur={handleKeyBlur}
-								placeholder={settings.apiKey ? '••••••••' : 'Enter API key'}
+								onChange={(e) => {
+									const value = e.target.value;
+									setInputValue(value);
+									setShowWarning(value.length > 0 && value.length < 10);
+								}}
+								onBlur={() => {
+									if (inputValue !== settings?.apiKey) {
+										onSettingsChange(providerName, { apiKey: inputValue });
+									}
+								}}
+								placeholder={settings?.apiKey ? '••••••••' : 'Enter API key'}
 								className='flex-1 min-w-0 px-2 py-1 text-sm bg-void-bg-2 border border-void-border-2 rounded focus:border-void-border-1 focus:outline-none'
 							/>
 							<button
@@ -153,7 +147,7 @@ export const SearchProviderCard = ({
 						type='number'
 						min='1'
 						max='50'
-						value={settings.maxResults}
+						value={settings?.maxResults ?? 10}
 						onChange={(e) => onSettingsChange(providerName, { maxResults: parseInt(e.target.value) || 10 })}
 						className='w-24 px-2 py-1 text-sm bg-void-bg-2 border border-void-border-2 rounded focus:border-void-border-1 focus:outline-none'
 					/>
@@ -168,7 +162,7 @@ export const SearchProviderCard = ({
 						min='1000'
 						max='60000'
 						step='1000'
-						value={settings.timeoutMs}
+						value={settings?.timeoutMs ?? 15000}
 						onChange={(e) => onSettingsChange(providerName, { timeoutMs: parseInt(e.target.value) || 15000 })}
 						className='w-28 px-2 py-1 text-sm bg-void-bg-2 border border-void-border-2 rounded focus:border-void-border-1 focus:outline-none'
 					/>
@@ -178,11 +172,11 @@ export const SearchProviderCard = ({
 				<div className='flex items-center gap-3'>
 					<div className='w-24 shrink-0'></div>
 					<VoidButtonBgDarken
-						onClick={handleTestConnection}
+						onClick={onTestConnection}
 						className='px-3 py-1 text-xs'
-						disabled={!settings.enabled}
+						disabled={!(settings?.enabled ?? false) || isTesting}
 					>
-						Test Connection
+						{isTesting ? 'Testing...' : 'Test Connection'}
 					</VoidButtonBgDarken>
 					<a
 						href={displayInfo.docsUrl}

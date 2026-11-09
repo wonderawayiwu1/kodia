@@ -359,6 +359,15 @@ export const builtinTools: {
 		},
 	},
 
+	web_search: {
+		name: 'web_search',
+		description: `Searches the web using the Brave Search API and returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, documentation, or answers not in the codebase. Each search needs the user's approval.`,
+		params: {
+			query: { description: 'The search query.' },
+			max_results: { description: 'Optional. Maximum number of results to return (1-20). Defaults to 10.' },
+		},
+	},
+
 	// --- editing (create/delete) ---
 
 	create_file_or_folder: {
@@ -464,7 +473,7 @@ export const isABuiltinToolName = (toolName: string): toolName is BuiltinToolNam
 const toolsNotOfferedToModels: ReadonlySet<BuiltinToolName> = new Set(['read_project_memory'])
 
 // tools that change nothing but still need approval: Gather mode offers them too
-const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url'])
+const readOnlyToolsNeedingApproval: ReadonlySet<BuiltinToolName> = new Set(['fetch_url', 'web_search'])
 
 // explicitTools: Kodia Agents Window — an agent that runs its own tools offers exactly those, instead of the chat mode's
 export const availableTools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | undefined, explicitTools?: InternalToolInfo[]) => {

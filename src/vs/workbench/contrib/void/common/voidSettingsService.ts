@@ -361,6 +361,24 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			}
 
 			if (!Array.isArray(readS.globalSettings.instructionsFrameworks)) readS.globalSettings.instructionsFrameworks = []
+
+			// Ensure webSearchProviders exists with defaults (migration for new feature)
+			if (!readS.globalSettings.webSearchProviders) {
+				readS.globalSettings.webSearchProviders = defaultGlobalSettings.webSearchProviders;
+			} else {
+				// Ensure all providers exist, fill in any missing ones with defaults
+				for (const providerName of ['brave', 'tavily', 'exa', 'you', 'nvidia', 'duckduckgo'] as const) {
+					if (!readS.globalSettings.webSearchProviders[providerName]) {
+						readS.globalSettings.webSearchProviders[providerName] = defaultGlobalSettings.webSearchProviders[providerName];
+					} else {
+						// Fill in any missing fields for existing providers
+						readS.globalSettings.webSearchProviders[providerName] = {
+							...defaultGlobalSettings.webSearchProviders[providerName],
+							...readS.globalSettings.webSearchProviders[providerName],
+						};
+					}
+				}
+			}
 		}
 		catch (e) {
 			readS = defaultState()
@@ -719,7 +737,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			webSearchProviders: {
 				...this.state.globalSettings.webSearchProviders,
 				[providerName]: {
-					...this.state.globalSettings.webSearchProviders[providerName],
+					...this.state.globalSettings.webSearchProviders?.[providerName],
 					...settings,
 				},
 			},
@@ -736,8 +754,17 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 	};
 
 	getSearchProviderSettings = (providerName: 'brave' | 'tavily' | 'exa' | 'you' | 'nvidia' | 'duckduckgo') => {
-		const settings = this.state.globalSettings.webSearchProviders[providerName];
+		const settings = this.state.globalSettings.webSearchProviders?.[providerName];
 		// Never return the actual API key - only return whether a key exists
+		if (!settings) {
+			return {
+				enabled: false,
+				priority: 0,
+				maxResults: 10,
+				timeoutMs: 15000,
+				hasKey: false,
+			};
+		}
 		return {
 			enabled: settings.enabled,
 			priority: settings.priority,

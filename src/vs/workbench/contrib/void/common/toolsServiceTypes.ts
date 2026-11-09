@@ -2,6 +2,7 @@ import { URI } from '../../../../base/common/uri.js'
 import { RawMCPToolCall } from './mcpServiceTypes.js';
 import { builtinTools } from './prompt/prompts.js';
 import { RawToolParamsObj } from './sendLLMMessageTypes.js';
+import { SearchResult } from './webSearchTypes.js';
 
 
 
@@ -35,6 +36,7 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'kill_persistent_terminal': 'terminal',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
+	'web_search': 'web pages',
 }
 
 
@@ -63,6 +65,7 @@ export type BuiltinToolCallParams = {
 	'read_lint_errors': { uri: URI },
 	'read_project_memory': {},
 	'fetch_url': { url: string, pageNumber: number },
+	'web_search': { query: string, maxResults?: number },
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
 	'write_project_memory': { section: string, content: string },
@@ -92,6 +95,7 @@ export type BuiltinToolResultType = {
 	'read_project_memory': { content: string },
 	// url: where redirects ended
 	'fetch_url': { url: string, title: string | null, content: string, totalLen: number, hasNextPage: boolean },
+	'web_search': { results: SearchResult[] },
 	// ---
 	'rewrite_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
 	'edit_file': Promise<{ lintErrors: LintErrorItem[] | null }>,

@@ -3,6 +3,8 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
+
 /**
  * Web Search Provider Types
  *
@@ -53,6 +55,14 @@ export interface SearchResponse {
 	query: string;
 	totalResults?: number;
 	responseTimeMs: number;
+}
+
+// Service identifier for the main-process web search service.
+// Implemented in electron-main; never exposes or transmits API keys.
+export const IWebSearchService = createDecorator<IWebSearchService>('webSearchService');
+export interface IWebSearchService {
+	readonly _serviceBrand: undefined;
+	search(request: SearchRequest): Promise<SearchResponse>;
 }
 
 // Settings for a single web search provider
