@@ -812,9 +812,15 @@ export class ToolsService implements IToolsService {
 				if (!result.results || result.results.length === 0) {
 					return 'No results found for the search query.'
 				}
-				const lines = result.results.map((r, i) => {
+				// Filter out results with empty titles or URLs (should not happen after normalization, but defensive)
+				const validResults = result.results.filter(r => r.title && r.title.trim().length > 0 && r.url && r.url.trim().length > 0)
+				if (validResults.length === 0) {
+					return 'No results found for the search query.'
+				}
+				const lines = validResults.map((r, i) => {
 					const date = r.publishedDate ? ` (${r.publishedDate})` : ''
-					return `${i + 1}. ${r.title}\n${r.url}${date}\n${r.snippet || '(no snippet)'}`
+					const snippet = r.snippet && r.snippet.trim().length > 0 ? r.snippet : '(no description available)'
+					return `${i + 1}. ${r.title}\n${r.url}${date}\n${snippet}`
 				})
 				return lines.join('\n\n')
 			},

@@ -9,7 +9,7 @@ import { StorageScope } from '../../../../../platform/storage/common/storage.js'
 import { IApplicationStorageMainService } from '../../../../../platform/storage/electron-main/storageMainService.js';
 import { IEncryptionMainService } from '../../../../../platform/encryption/common/encryptionService.js';
 import { BraveSearchMainService } from '../../electron-main/braveSearchMainService.js';
-import { SearchRequest } from '../../common/webSearchTypes.js';
+import { SearchRequest, SearchProviderSettings } from '../../common/webSearchTypes.js';
 
 // Preserve import for type resolution (only used in type assertions)
 const _preserveApplicationStorageMainService = IApplicationStorageMainService;
@@ -43,6 +43,15 @@ const disabledSettings = JSON.stringify({
 		},
 	},
 });
+
+// Test settings object to pass to search method
+const testSettings: SearchProviderSettings = {
+	apiKey: 'test-key-123',
+	enabled: true,
+	priority: 0,
+	maxResults: 10,
+	timeoutMs: 15000,
+};
 
 const mockStorage = (value: string | undefined) => ({
 	get: (_key: string, _scope: StorageScope) => value,
@@ -96,8 +105,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.provider, 'brave');
 		assert.strictEqual(response.query, 'test query');
@@ -126,8 +137,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results[0].publishedDate, '2025-06-15');
 	});
@@ -142,8 +155,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results[0].publishedDate, undefined);
 		assert.strictEqual(response.results[0].title, 'Example Result');
@@ -159,8 +174,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results[0].title, 'Minimal Result');
 		assert.strictEqual(response.results[0].snippet, '');
@@ -179,8 +196,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results[0].score, undefined);
 		assert.strictEqual(response.results[0].title, 'Unranked Result');
@@ -196,8 +215,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([item]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results[0].title, 'Safe Result');
 		assert.ok(lastFetchUrl?.includes('safesearch=moderate'), `Expected safesearch=moderate in URL, got: ${lastFetchUrl}`);
@@ -212,9 +233,11 @@ suite('Brave Search - Main Service', () => {
 		mockStorage(encryptedBlob);
 		mockEncryption(noKeySettings);
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(noKeySettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(noKeySettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('not configured') && !err.message.includes('test-key')
 		);
 	});
@@ -222,9 +245,11 @@ suite('Brave Search - Main Service', () => {
 	test('no stored settings throws missing key', async () => {
 		mockStorage(undefined);
 
-		const service = new BraveSearchMainService(mockStorage(undefined), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(undefined));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('not configured')
 		);
 	});
@@ -233,9 +258,11 @@ suite('Brave Search - Main Service', () => {
 		mockStorage(encryptedBlob);
 		mockEncryption(decryptedSettings, true);
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings, true));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings, true));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('decryption failed')
 		);
 	});
@@ -244,9 +271,11 @@ suite('Brave Search - Main Service', () => {
 		mockStorage(encryptedBlob);
 		mockEncryption(disabledSettings);
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(disabledSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(disabledSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('disabled')
 		);
 		assert.strictEqual(fetchCallCount, 0, 'fetch must not be called when Brave is disabled');
@@ -257,9 +286,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(401, JSON.stringify({ error: 'invalid key' })));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('401') && !err.message.includes('test-key-123')
 		);
 	});
@@ -269,9 +300,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(429, JSON.stringify({ error: 'rate limited' })));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('429') && !err.message.includes('test-key-123')
 		);
 	});
@@ -281,9 +314,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(500, 'Internal Server Error'));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('500') && !err.message.includes('test-key-123')
 		);
 	});
@@ -293,9 +328,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(200, 'not json at all'));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('invalid response')
 		);
 	});
@@ -305,8 +342,10 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveOkResponse([]));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
-		const response = await service.search(validRequest);
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
+		const response = await service.search(validRequest, testSettings);
 
 		assert.strictEqual(response.results.length, 0);
 		assert.strictEqual(response.totalResults, 0);
@@ -316,9 +355,11 @@ suite('Brave Search - Main Service', () => {
 		mockStorage(encryptedBlob);
 		mockEncryption('not json');
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption('not json'));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption('not json'));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('not configured')
 		);
 	});
@@ -329,9 +370,11 @@ suite('Brave Search - Main Service', () => {
 		const networkError = new Error('network unreachable');
 		globalThis.fetch = async () => { throw networkError; };
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('network unreachable') && !err.message.includes('test-key-123')
 		);
 	});
@@ -343,9 +386,11 @@ suite('Brave Search - Main Service', () => {
 		abortError.name = 'AbortError';
 		globalThis.fetch = async () => { throw abortError; };
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('timed out')
 		);
 	});
@@ -357,41 +402,51 @@ suite('Brave Search - Main Service', () => {
 		timeoutError.name = 'TimeoutError';
 		globalThis.fetch = async () => { throw timeoutError; };
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search(validRequest),
+			service.search(validRequest, testSettings),
 			(err: Error) => err.message.includes('timed out')
 		);
 	});
 
 	test('invalid empty query throws', async () => {
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search({ query: '' }),
+			service.search({ query: '' }, testSettings),
 			(err: Error) => err.message.includes('query is required')
 		);
 	});
 
 	test('invalid whitespace-only query throws', async () => {
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search({ query: '   ' }),
+			service.search({ query: '   ' }, testSettings),
 			(err: Error) => err.message.includes('query is required')
 		);
 	});
 
 	test('invalid maxResults below 1 throws', async () => {
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search({ query: 'q', maxResults: 0 }),
+			service.search({ query: 'q', maxResults: 0 }, testSettings),
 			(err: Error) => err.message.includes('maxResults')
 		);
 	});
 
 	test('invalid maxResults above 50 throws', async () => {
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		await assert.rejects(
-			service.search({ query: 'q', maxResults: 100 }),
+			service.search({ query: 'q', maxResults: 100 }, testSettings),
 			(err: Error) => err.message.includes('maxResults')
 		);
 	});
@@ -401,9 +456,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(401, JSON.stringify({ error: 'invalid key' })));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		try {
-			await service.search({ query: 'super secret query', maxResults: 5 });
+			await service.search({ query: 'super secret query', maxResults: 5 }, testSettings);
 			assert.fail('should have thrown');
 		} catch (err) {
 			const message = (err as Error).message;
@@ -416,9 +473,11 @@ suite('Brave Search - Main Service', () => {
 		mockEncryption(decryptedSettings);
 		mockFetch(braveResponse(401, JSON.stringify({ error: 'invalid key' })));
 
-		const service = new BraveSearchMainService(mockStorage(encryptedBlob), mockEncryption(decryptedSettings));
+		const service = new BraveSearchMainService();
+		service.setStorageService(mockStorage(encryptedBlob));
+		service.setEncryptionService(mockEncryption(decryptedSettings));
 		try {
-			await service.search(validRequest);
+			await service.search(validRequest, testSettings);
 			assert.fail('should have thrown');
 		} catch (err) {
 			const message = (err as Error).message;

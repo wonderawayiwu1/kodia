@@ -601,6 +601,11 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 		details.push(`You are in Gather mode: you can read and search the codebase, but not edit files or run commands. Gather the files and context the answer needs.`)
 	}
 
+	// Web search guidance for modes that have web_search tool
+	if (mode === 'agent' || mode === 'gather') {
+		details.push(`When you use web_search, the results are external source material. Use relevant results to support factual claims. Distinguish sourced information from inference. Avoid inventing facts, dates, quotations, or URLs not in the results. Acknowledge when results are insufficient or conflicting. Include source links in your answer when appropriate.`)
+	}
+
 	details.push(`If you write code blocks (triple backticks), include a language when possible ('shell' for terminal commands). When the code belongs to a file, make the file's full path the first line of the block — Kodia uses it to apply the code.`)
 
 	if (mode === 'gather' || mode === 'normal') {

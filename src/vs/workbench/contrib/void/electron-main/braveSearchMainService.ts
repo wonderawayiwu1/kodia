@@ -3,52 +3,110 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { StorageScope } from '../../../../platform/storage/common/storage.js';
 import { IApplicationStorageMainService } from '../../../../platform/storage/electron-main/storageMainService.js';
 import { IEncryptionMainService } from '../../../../platform/encryption/common/encryptionService.js';
-import { IWebSearchService, SearchRequest, SearchResponse, SearchResult } from '../common/webSearchTypes.js';
-import { VOID_SETTINGS_STORAGE_KEY } from '../common/storageKeys.js';
+import { SearchRequest, SearchResponse, SearchResult, SearchProviderSettings } from '../common/webSearchTypes.js';
+import { WebSearchProvider } from './webSearchProvider.js';
 
 const BRAVE_API_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const BRAVE_MAX_COUNT = 20;
 const DEFAULT_TIMEOUT_MS = 15000;
 
-interface StoredWebSearchProviderSettings {
-	apiKey?: string;
-	enabled: boolean;
-	priority: number;
-	maxResults: number;
-	timeoutMs: number;
-}
-
-interface StoredGlobalSettings {
-	webSearchProviders: Record<string, StoredWebSearchProviderSettings>;
-}
-
-interface StoredVoidSettings {
-	globalSettings?: StoredGlobalSettings;
-}
-
-export class BraveSearchMainService implements IWebSearchService {
-	_serviceBrand: undefined;
+/**
+ * Brave Search provider implementation.
+ * Extends the shared WebSearchProvider base class.
+ */
+export class BraveSearchMainService extends WebSearchProvider {
+	readonly name = 'brave' as const;
+	readonly requiresApiKey = true;
+	readonly maxResultsLimit = BRAVE_MAX_COUNT;
+	readonly defaultTimeoutMs = DEFAULT_TIMEOUT_MS;
 
 	constructor(
-		@IApplicationStorageMainService private readonly _storageService: IApplicationStorageMainService,
-		@IEncryptionMainService private readonly _encryptionService: IEncryptionMainService,
+		@IApplicationStorageMainService private readonly _storageService?: IApplicationStorageMainService,
+		@IEncryptionMainService private readonly _encryptionService?: IEncryptionMainService,
 	) {
+		super();
 	}
 
-	async search(request: SearchRequest): Promise<SearchResponse> {
-		this._validateRequest(request);
+	// Allow tests to inject services after construction
+	setStorageService(service: IApplicationStorageMainService): void {
+		(this._storageService as any) = service;
+	}
 
-		const settings = await this._readBraveSettings();
-		const apiKey = settings.apiKey;
-		if (!apiKey) {
-			throw new Error('Brave Search API key is not configured. Please add it in Kodia Settings.');
+	setEncryptionService(service: IEncryptionMainService): void {
+		(this._encryptionService as any) = service;
+	}
+
+	validateSettings(settings: SearchProviderSettings): { valid: boolean; errors: string[] } {
+		const errors: string[] = [];
+
+		if (typeof settings.maxResults === 'number') {
+			if (settings.maxResults < 1 || settings.maxResults > 50) {
+				errors.push('maxResults must be between 1 and 50');
+			}
 		}
 
-		if (!settings.enabled) {
-			throw new Error('Brave Search is disabled. Enable it in Kodia Settings.');
+		if (typeof settings.timeoutMs === 'number') {
+			if (settings.timeoutMs < 1000 || settings.timeoutMs > 60000) {
+				errors.push('timeoutMs must be between 1000 and 60000');
+			}
+		}
+
+		if (typeof settings.priority === 'number') {
+			if (settings.priority < 0 || settings.priority > 10) {
+				errors.push('priority must be between 0 and 10');
+			}
+		}
+
+		if (settings.enabled && (!settings.apiKey || settings.apiKey.trim() === '')) {
+			errors.push('API key is required for Brave Search');
+		}
+
+		return { valid: errors.length === 0, errors };
+	}
+
+	async testConnection(settings: SearchProviderSettings): Promise<{ success: boolean; message: string }> {
+		if (!settings.apiKey) {
+			return { success: false, message: 'Brave Search API key is not configured.' };
+		}
+
+		try {
+			const url = new URL(BRAVE_API_ENDPOINT);
+			url.searchParams.set('q', 'test connection');
+			url.searchParams.set('count', '1');
+			url.searchParams.set('search_lang', 'en');
+			url.searchParams.set('safesearch', 'moderate');
+
+			const res = await fetch(url, {
+				signal: AbortSignal.timeout(5000),
+				headers: {
+					'Accept': 'application/json',
+					'X-Subscription-Token': settings.apiKey,
+				},
+			});
+
+			if (!res.ok) {
+				if (res.status === 401 || res.status === 403) {
+					return { success: false, message: 'Brave Search authentication failed. Please check your API key.' };
+				}
+				return { success: false, message: `Brave Search API responded with status ${res.status}.` };
+			}
+
+			return { success: true, message: 'Brave Search connection successful!' };
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			if (errorMessage.includes('timeout') || errorMessage.includes('TimeoutError')) {
+				return { success: false, message: 'Brave Search connection timed out.' };
+			}
+			return { success: false, message: `Brave Search connection failed: ${errorMessage}` };
+		}
+	}
+
+	async search(request: SearchRequest, settings: SearchProviderSettings): Promise<SearchResponse> {
+		const apiKey = settings.apiKey;
+		if (!apiKey) {
+			throw new Error('Brave Search API key is not configured.');
 		}
 
 		const maxResults = Math.min(Math.max(1, request.maxResults ?? settings.maxResults), BRAVE_MAX_COUNT);
@@ -89,45 +147,29 @@ export class BraveSearchMainService implements IWebSearchService {
 		}
 
 		const webResults = this._getWebResults(body);
-		const results: SearchResult[] = webResults.map((item: unknown, index: number) => this._mapResult(item));
+
+		// Map results, filtering out invalid ones (null returns from normalizeResult)
+		const mappedResults: SearchResult[] = [];
+		for (const item of webResults) {
+			const mapped = this.normalizeResult(item, mappedResults.length);
+			if (mapped) {
+				mappedResults.push(mapped);
+			}
+		}
+
+		// Deduplicate by normalized URL (keep first occurrence)
+		const deduplicatedResults = this.deduplicateByUrl(mappedResults);
+
+		// Enforce maxResults limit
+		const finalResults = this.enforceMaxResults(deduplicatedResults, maxResults);
 
 		return {
-			results,
+			results: finalResults,
 			provider: 'brave',
 			query: request.query,
-			totalResults: results.length,
+			totalResults: finalResults.length,
 			responseTimeMs: Date.now() - startTime,
 		};
-	}
-
-	private async _readBraveSettings(): Promise<StoredWebSearchProviderSettings> {
-		const encrypted = this._storageService.get(VOID_SETTINGS_STORAGE_KEY, StorageScope.APPLICATION);
-		if (!encrypted) {
-			return { enabled: false, priority: 0, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS };
-		}
-
-		const decrypted = await this._encryptionService.decrypt(encrypted);
-		let state: StoredVoidSettings;
-		try {
-			state = JSON.parse(decrypted);
-		} catch {
-			return { enabled: false, priority: 0, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS };
-		}
-		return state.globalSettings?.webSearchProviders?.brave ?? {
-			enabled: false,
-			priority: 0,
-			maxResults: 10,
-			timeoutMs: DEFAULT_TIMEOUT_MS,
-		};
-	}
-
-	private _validateRequest(request: SearchRequest): void {
-		if (typeof request.query !== 'string' || request.query.trim().length === 0) {
-			throw new Error('Search query is required.');
-		}
-		if (request.maxResults !== undefined && (typeof request.maxResults !== 'number' || request.maxResults < 1 || request.maxResults > 50)) {
-			throw new Error('maxResults must be between 1 and 50.');
-		}
 	}
 
 	private _getWebResults(body: unknown): unknown[] {
@@ -139,16 +181,44 @@ export class BraveSearchMainService implements IWebSearchService {
 		return Array.isArray(results) ? results : [];
 	}
 
-	private _mapResult(item: unknown): SearchResult {
+	/**
+	 * Normalizes a raw Brave API result to the common SearchResult format.
+	 * Returns null if the result should be filtered out.
+	 */
+	protected normalizeResult(item: unknown, index: number): SearchResult | null {
 		const obj = item as { title?: unknown; url?: unknown; snippet?: unknown; description?: unknown; page_age?: unknown };
-		const url = typeof obj.url === 'string' ? obj.url : '';
+
+		const rawTitle = typeof obj.title === 'string' ? obj.title.trim() : '';
+		const rawUrl = typeof obj.url === 'string' ? obj.url.trim() : '';
+		const rawSnippet = typeof obj.snippet === 'string' ? obj.snippet.trim()
+			: (typeof obj.description === 'string' ? obj.description.trim() : '');
+
+		// Require a meaningful title
+		if (rawTitle.length === 0) {
+			return null;
+		}
+
+		// Require a valid HTTP/HTTPS URL
+		if (!this.isValidHttpUrl(rawUrl)) {
+			return null;
+		}
+
+		// Normalize URL (remove fragment, normalize case)
+		const normalizedUrl = this.normalizeUrl(rawUrl);
+
+		// Extract domain for displayUrl
+		const displayUrl = this.extractDomain(normalizedUrl);
+
+		// Parse and normalize publishedDate if available
+		const publishedDate = this.parsePublishedDate(obj.page_age);
+
 		return {
-			title: typeof obj.title === 'string' ? obj.title : '',
-			url,
-			displayUrl: url,
-			snippet: typeof obj.snippet === 'string' ? obj.snippet : (typeof obj.description === 'string' ? obj.description : ''),
+			title: rawTitle,
+			url: normalizedUrl,
+			displayUrl,
+			snippet: rawSnippet,
 			source: 'brave',
-			publishedDate: typeof obj.page_age === 'string' ? obj.page_age : undefined,
+			publishedDate,
 			retrievalTimestamp: Date.now(),
 		};
 	}
