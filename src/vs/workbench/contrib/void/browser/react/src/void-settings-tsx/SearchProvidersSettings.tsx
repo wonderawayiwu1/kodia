@@ -6,7 +6,7 @@
 import React, { useCallback, useState } from 'react';
 import { useAccessor, useSettingsState } from '../util/services.js';
 import { SearchProviderCard } from './SearchProviderCard.js';
-import { WebSearchProviderName, SearchProviderSettings, SearchRequest, IWebSearchService } from '../../../../common/webSearchTypes.js';
+import { WebSearchProviderName, SearchProviderSettings, IWebSearchService } from '../../../../common/webSearchTypes.js';
 import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO } from '../../../../common/webSearchSettings.js';
 import { SettingGroup } from './SettingsControls.js';
 import { IVoidSettingsService } from '../../../../common/voidSettingsService.js';
@@ -23,8 +23,6 @@ const WEB_SEARCH_PROVIDERS: WebSearchProviderName[] = [
 	'nvidia',
 	'duckduckgo',
 ];
-
-const TEST_QUERY = 'Kodia Brave Search connection test';
 
 export const SearchProvidersSettings = () => {
 	const accessor = useAccessor();
@@ -128,57 +126,33 @@ export const SearchProvidersSettings = () => {
 			return;
 		}
 
-		// For Brave - test the actual connection via IWebSearchService
-		if (providerName === 'brave') {
-			// Check if API key is configured
-			if (!providerSettings?.apiKey) {
-				notificationService.warn(`${displayInfo.title} API key is not configured. Please add an API key first.`);
-				return;
-			}
+		// For all providers requiring API keys - test via IWebSearchService.testProviderConnection
+		setTestingProvider(providerName);
+		metricsService.capture('Web Search Test Connection', { provider: providerName });
 
-			setTestingProvider(providerName);
-			metricsService.capture('Web Search Test Connection', { provider: providerName });
+		try {
+			const result = await webSearchService.testProviderConnection(providerName);
 
-			try {
-				const request: SearchRequest = {
-					query: TEST_QUERY,
-					maxResults: 1,
-				};
-
-				const response = await webSearchService.search(request);
-
-				// Success - even empty results count as successful connection
-				notificationService.info(`${displayInfo.title} connection successful! (${response.results.length} result${response.results.length !== 1 ? 's' : ''} returned)`);
-			} catch (error) {
-				const errorMessage = error instanceof Error ? error.message : String(error);
-
-				// Sanitize error message to avoid leaking sensitive info
-				let userMessage: string;
-				if (errorMessage.includes('API key') || errorMessage.includes('authentication') || errorMessage.includes('unauthorized') || errorMessage.includes('401') || errorMessage.includes('403')) {
-					userMessage = `${displayInfo.title} authentication failed. Please check your API key.`;
-				} else if (errorMessage.includes('timed out') || errorMessage.includes('timeout')) {
-					userMessage = `${displayInfo.title} connection timed out. Please check your network.`;
-				} else if (errorMessage.includes('network') || errorMessage.includes('fetch') || errorMessage.includes('ENOTFOUND') || errorMessage.includes('ECONNREFUSED')) {
-					userMessage = `${displayInfo.title} network error. Please check your internet connection.`;
-				} else if (errorMessage.includes('disabled')) {
-					userMessage = `${displayInfo.title} is disabled. Enable it in settings.`;
-				} else {
-					userMessage = `${displayInfo.title} connection failed.`;
-				}
-
+			if (result.success) {
+				notificationService.info(`${displayInfo.title} connection successful!`);
+			} else {
 				notificationService.notify({
-					message: userMessage,
-					source: errorMessage,
+					message: result.message,
+					source: providerName,
 					severity: Severity.Error,
 				});
-			} finally {
-				setTestingProvider(null);
 			}
-			return;
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			notificationService.notify({
+				message: `${displayInfo.title} connection failed: ${errorMessage}`,
+				source: errorMessage,
+				severity: Severity.Error,
+			});
+		} finally {
+			setTestingProvider(null);
 		}
-
-		// For Tavily, Exa, You - connection test not yet implemented
-		notificationService.info(`${displayInfo.title} connection test is not yet implemented.`);
+		return;
 	}, [metricsService, notificationService, webSearchService, webSearchProviders, testingProvider]);
 
 	return (
