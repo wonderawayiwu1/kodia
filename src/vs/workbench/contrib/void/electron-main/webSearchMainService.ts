@@ -13,6 +13,7 @@ import { BraveSearchMainService } from './braveSearchMainService.js';
 import { TavilySearchMainService } from './tavilySearchMainService.js';
 import { ExaSearchMainService } from './exaSearchMainService.js';
 import { YouSearchMainService } from './youSearchMainService.js';
+import { NvidiaRerankerMainService } from './nvidiaRerankerMainService.js';
 import { WebSearchError, WebSearchErrorType } from './webSearchErrors.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -35,6 +36,8 @@ export class WebSearchMainService implements IWebSearchService {
 		'duckduckgo',
 	];
 
+	private readonly _reranker: NvidiaRerankerMainService;
+
 	private _initialized = false;
 
 	constructor(
@@ -42,6 +45,7 @@ export class WebSearchMainService implements IWebSearchService {
 		@IEncryptionMainService private readonly _encryptionService: IEncryptionMainService,
 	) {
 		// Providers will be initialized lazily on first search
+		this._reranker = new NvidiaRerankerMainService(this._storageService, this._encryptionService);
 	}
 
 	private _ensureInitialized(): void {
@@ -111,6 +115,34 @@ export class WebSearchMainService implements IWebSearchService {
 			nvidia: { enabled: false, priority: 4, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
 			duckduckgo: { enabled: false, priority: 5, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
 		};
+	}
+
+	/**
+	 * Reads the global settings for NVIDIA reranker from encrypted storage.
+	 */
+	private async _readRerankerSettings(): Promise<{ enabled: boolean; maxPassages: number }> {
+		try {
+			const encrypted = this._storageService.get(VOID_SETTINGS_STORAGE_KEY, StorageScope.APPLICATION);
+			if (!encrypted) {
+				return { enabled: false, maxPassages: 20 };
+			}
+
+			const decrypted = await this._encryptionService.decrypt(encrypted);
+			const state = JSON.parse(decrypted);
+
+			const globalSettings = state.globalSettings ?? {};
+			const enabled = globalSettings.webSearchRerankerEnabled === true;
+			const maxPassages = (typeof globalSettings.webSearchRerankerMaxPassages === 'number' &&
+				globalSettings.webSearchRerankerMaxPassages >= 1 &&
+				globalSettings.webSearchRerankerMaxPassages <= 100)
+				? globalSettings.webSearchRerankerMaxPassages
+				: 20;
+
+			return { enabled, maxPassages };
+		} catch (error) {
+			console.warn('[WebSearchMainService] Failed to read reranker settings:', error instanceof Error ? error.message : String(error));
+			return { enabled: false, maxPassages: 20 };
+		}
 	}
 
 	/**
@@ -190,13 +222,9 @@ export class WebSearchMainService implements IWebSearchService {
 
 				const response = await provider.search(providerRequest, settings);
 
-				return {
-					...response,
-					provider: name,
-					query: request.query,
-					totalResults: response.results.length,
-					responseTimeMs: Date.now() - startTime,
-				};
+				// Apply NVIDIA reranking if enabled
+				const rerankedResponse = await this._applyReranking(request.query, response, name);
+				return rerankedResponse;
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
 
@@ -220,6 +248,51 @@ export class WebSearchMainService implements IWebSearchService {
 
 		// All providers failed
 		throw lastError ?? new Error('All enabled web search providers failed.');
+	}
+
+	/**
+	 * Applies NVIDIA reranking to search results if enabled.
+	 * Runs after a successful provider search, before returning results.
+	 */
+	private async _applyReranking(
+		query: string,
+		response: SearchResponse,
+		providerName: WebSearchProviderName
+	): Promise<SearchResponse> {
+		// Check if reranking is enabled
+		const { enabled, maxPassages } = await this._readRerankerSettings();
+		if (!enabled) {
+			return response;
+		}
+
+		// Skip if no results to rerank
+		if (!response.results || response.results.length <= 1) {
+			return response;
+		}
+
+		try {
+			const rerankedResults = await this._reranker.rerank(query, response.results, {
+				maxPassages,
+				timeoutMs: 15000,
+			});
+
+			// If reranking failed (returned original results), log but continue
+			if (rerankedResults === response.results) {
+				return response;
+			}
+
+			return {
+				...response,
+				results: rerankedResults,
+				totalResults: rerankedResults.length,
+				provider: `${providerName}+nvidia-reranker`,
+			};
+		} catch (error) {
+			// Fail open: log error but return original results
+			console.warn(`[WebSearchMainService] Reranking failed for provider ${providerName}, returning original results:`,
+				error instanceof Error ? error.message : String(error));
+			return response;
+		}
 	}
 
 	/**
