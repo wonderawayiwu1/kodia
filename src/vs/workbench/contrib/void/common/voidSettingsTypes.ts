@@ -506,6 +506,9 @@ export type GlobalSettings = {
 		timeoutMs: number;
 	}>;
 	webSearchFreeOnly: boolean; // user preference, default: true (zero-spend enforcement in later phases)
+	// NVIDIA Reranker settings (Phase 2)
+	webSearchRerankerEnabled: boolean; // default: false (opt-in)
+	webSearchRerankerMaxPassages: number; // default: 20, max: 100
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -535,6 +538,9 @@ export const defaultGlobalSettings: GlobalSettings = {
 		duckduckgo: { apiKey: undefined, enabled: false, priority: 5, maxResults: 10, timeoutMs: 15000 },
 	},
 	webSearchFreeOnly: true, // zero-spend preference (enforcement in later phases)
+	// NVIDIA Reranker settings (Phase 2)
+	webSearchRerankerEnabled: false, // opt-in, disabled by default
+	webSearchRerankerMaxPassages: 20, // default max passages to rerank
 }
 
 export type GlobalSettingName = keyof GlobalSettings

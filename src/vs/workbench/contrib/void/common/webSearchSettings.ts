@@ -62,6 +62,8 @@ export const DEFAULT_SEARCH_PROVIDER_SETTINGS: Record<WebSearchProviderName, Sea
  */
 export const DEFAULT_WEB_SEARCH_GLOBAL_SETTINGS = {
 	webSearchFreeOnly: true,
+	webSearchRerankerEnabled: false,
+	webSearchRerankerMaxPassages: 20,
 };
 
 /**
@@ -108,6 +110,13 @@ export const SEARCH_PROVIDER_DISPLAY_INFO: Record<WebSearchProviderName, {
 		description: 'Free instant answers. No API key required.',
 		docsUrl: 'https://duckduckgo.com/api',
 		requiresApiKey: false,
+	},
+	// NVIDIA Reranker (not a search provider, but a post-processing service)
+	'nvidia-reranker': {
+		title: 'NVIDIA Nemotron Reranker',
+		description: 'Reorders search results using NVIDIA Nemotron-3.5-Rerank-8B for improved relevance.',
+		docsUrl: 'https://docs.nvidia.com/nim/nemo-retriever/reranking/latest/',
+		requiresApiKey: false, // Reuses existing NVIDIA LLM key
 	},
 };
 
@@ -185,5 +194,62 @@ export function normalizeSearchProviderSettings(
 		priority: typeof settings.priority === 'number' ? Math.max(0, Math.min(10, settings.priority)) : defaults.priority,
 		maxResults: typeof settings.maxResults === 'number' ? Math.max(1, Math.min(50, settings.maxResults)) : defaults.maxResults,
 		timeoutMs: typeof settings.timeoutMs === 'number' ? Math.max(1000, Math.min(60000, settings.timeoutMs)) : defaults.timeoutMs,
+	};
+}
+
+/**
+ * Validates NVIDIA reranker settings
+ */
+export function validateNvidiaRerankerSettings(settings: {
+	webSearchRerankerEnabled?: boolean;
+	webSearchRerankerMaxPassages?: number;
+}): { valid: boolean; errors: string[] } {
+	const errors: string[] = [];
+
+	if (typeof settings.webSearchRerankerEnabled !== 'boolean' && settings.webSearchRerankerEnabled !== undefined) {
+		errors.push('webSearchRerankerEnabled must be a boolean');
+	}
+
+	if (typeof settings.webSearchRerankerMaxPassages === 'number') {
+		if (settings.webSearchRerankerMaxPassages < 1 || settings.webSearchRerankerMaxPassages > 100) {
+			errors.push('webSearchRerankerMaxPassages must be between 1 and 100');
+		}
+	} else if (settings.webSearchRerankerMaxPassages !== undefined) {
+		errors.push('webSearchRerankerMaxPassages must be a number');
+	}
+
+	return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Returns default NVIDIA reranker settings
+ */
+export function getDefaultNvidiaRerankerSettings(): {
+	webSearchRerankerEnabled: boolean;
+	webSearchRerankerMaxPassages: number;
+} {
+	return {
+		webSearchRerankerEnabled: false,
+		webSearchRerankerMaxPassages: 20,
+	};
+}
+
+/**
+ * Validates and normalizes NVIDIA reranker settings
+ */
+export function normalizeNvidiaRerankerSettings(settings: {
+	webSearchRerankerEnabled?: boolean;
+	webSearchRerankerMaxPassages?: number;
+}): {
+	webSearchRerankerEnabled: boolean;
+	webSearchRerankerMaxPassages: number;
+} {
+	const defaults = getDefaultNvidiaRerankerSettings();
+
+	return {
+		webSearchRerankerEnabled: settings.webSearchRerankerEnabled ?? defaults.webSearchRerankerEnabled,
+		webSearchRerankerMaxPassages: typeof settings.webSearchRerankerMaxPassages === 'number'
+			? Math.max(1, Math.min(100, settings.webSearchRerankerMaxPassages))
+			: defaults.webSearchRerankerMaxPassages,
 	};
 }

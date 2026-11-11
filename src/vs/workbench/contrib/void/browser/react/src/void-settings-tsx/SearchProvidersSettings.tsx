@@ -7,7 +7,7 @@ import React, { useCallback, useState } from 'react';
 import { useAccessor, useSettingsState } from '../util/services.js';
 import { SearchProviderCard } from './SearchProviderCard.js';
 import { WebSearchProviderName, SearchProviderSettings, IWebSearchService } from '../../../../common/webSearchTypes.js';
-import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO } from '../../../../common/webSearchSettings.js';
+import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO, validateNvidiaRerankerSettings, normalizeNvidiaRerankerSettings, getDefaultNvidiaRerankerSettings } from '../../../../common/webSearchSettings.js';
 import { SettingGroup } from './SettingsControls.js';
 import { IVoidSettingsService } from '../../../../common/voidSettingsService.js';
 import { IMetricsService } from '../../../../common/metricsService.js';
@@ -36,6 +36,9 @@ export const SearchProvidersSettings = () => {
 	const globalSettings = settingsState?.globalSettings ?? {};
 	const webSearchProviders = globalSettings.webSearchProviders ?? DEFAULT_SEARCH_PROVIDER_SETTINGS;
 	const freeOnly = globalSettings.webSearchFreeOnly ?? true;
+	// Reranker settings
+	const rerankerEnabled = globalSettings.webSearchRerankerEnabled ?? false;
+	const rerankerMaxPassages = globalSettings.webSearchRerankerMaxPassages ?? 20;
 
 	// Track drag state for drag-and-drop reordering
 	const [draggedId, setDraggedId] = useState<WebSearchProviderName | null>(null);
@@ -105,6 +108,22 @@ export const SearchProvidersSettings = () => {
 		await voidSettingsService.setSearchProviderSettings(providerName, newSettings);
 	}, [voidSettingsService]);
 
+	const handleRerankerSettingsChange = useCallback(async (changes: { webSearchRerankerEnabled?: boolean; webSearchRerankerMaxPassages?: number }) => {
+		const validation = validateNvidiaRerankerSettings(changes);
+		if (!validation.valid) {
+			notificationService.notify({
+				message: `Invalid reranker settings: ${validation.errors.join(', ')}`,
+				severity: Severity.Error,
+			});
+			return;
+		}
+
+		const normalized = normalizeNvidiaRerankerSettings(changes);
+
+		await voidSettingsService.setGlobalSetting('webSearchRerankerEnabled', normalized.webSearchRerankerEnabled);
+		await voidSettingsService.setGlobalSetting('webSearchRerankerMaxPassages', normalized.webSearchRerankerMaxPassages);
+	}, [voidSettingsService, notificationService]);
+
 	const handleTestConnection = useCallback(async (providerName: WebSearchProviderName) => {
 		// Prevent duplicate requests
 		if (testingProvider !== null) {
@@ -167,6 +186,53 @@ export const SearchProvidersSettings = () => {
 					description='When enabled, only providers with verified free access will be used. Local usage counters are estimates only, not authoritative provider balances.'
 				/>
 			</div>
+
+			<SettingGroup title='NVIDIA Nemotron Reranker' description='Optional post-processing to reorder search results by relevance using NVIDIA Nemotron-3.5-Rerank-8B.'>
+				<div className='mb-4'>
+					<VoidSwitch
+						value={rerankerEnabled}
+						onChange={(newVal) => {
+							handleRerankerSettingsChange({ webSearchRerankerEnabled: newVal });
+						}}
+						label='Enable NVIDIA reranking'
+						description="When enabled, search queries and selected result snippets are sent to NVIDIA's hosted Nemotron-3.5-Rerank-8B service to reorder results by relevance. This sends your search query and result text to NVIDIA's servers. Disabled by default."
+					/>
+				</div>
+
+				<div className='mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800'>
+					<p className='font-medium mb-1'>Privacy Notice</p>
+					<ul className='list-disc pl-5 space-y-1'>
+						<li>This feature sends your search query and selected result snippets to NVIDIA&apos;s hosted reranking API.</li>
+						<li>Data is processed on NVIDIA&apos;s servers, not locally.</li>
+						<li>NVIDIA&apos;s hosted service terms may allow submitted inputs and outputs to be recorded or used to improve their services.</li>
+						<li>Do not enable for confidential, sensitive, or proprietary searches unless you accept NVIDIA&apos;s applicable data-handling terms.</li>
+						<li>This feature is opt-in and disabled by default.</li>
+					</ul>
+				</div>
+
+				<div className='mb-4'>
+					<VoidSimpleInputBox
+						label='Maximum passages to rerank'
+						value={String(rerankerMaxPassages)}
+						onChangeValue={(newVal) => {
+							const num = parseInt(newVal, 10);
+							if (!isNaN(num)) {
+								handleRerankerSettingsChange({ webSearchRerankerMaxPassages: num });
+							}
+						}}
+						placeholder='20'
+						type='number'
+						min={1}
+						max={100}
+						description="Maximum number of search result passages sent to NVIDIA for reranking per query. Higher values may improve relevance but increase latency and cost. Default: 20."
+					/>
+				</div>
+
+				<div className='text-sm text-gray-600'>
+					<p>Requires an NVIDIA API key configured in the <a href='#' className='underline hover:text-blue-600'>NVIDIA LLM provider settings</a>.</p>
+					<p>Reranking uses your existing NVIDIA API key (nvapi-...). No separate key is needed.</p>
+				</div>
+			</SettingGroup>
 
 			<div className='space-y-4'>
 				{WEB_SEARCH_PROVIDERS.map((providerName) => {
