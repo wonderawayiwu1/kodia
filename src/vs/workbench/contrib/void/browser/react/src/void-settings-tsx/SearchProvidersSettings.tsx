@@ -174,6 +174,39 @@ export const SearchProvidersSettings = () => {
 		return;
 	}, [metricsService, notificationService, webSearchService, webSearchProviders, testingProvider]);
 
+	const handleTestRerankerConnection = useCallback(async () => {
+		// Prevent duplicate requests
+		if (testingProvider !== null) {
+			return;
+		}
+
+		setTestingProvider('nvidia-reranker' as WebSearchProviderName);
+		metricsService.capture('Web Search Test Connection', { provider: 'nvidia-reranker' });
+
+		try {
+			const result = await webSearchService.testRerankerConnection();
+
+			if (result.success) {
+				notificationService.info('NVIDIA reranker connection successful!');
+			} else {
+				notificationService.notify({
+					message: result.message,
+					source: 'nvidia-reranker',
+					severity: Severity.Error,
+				});
+			}
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			notificationService.notify({
+				message: `NVIDIA reranker connection failed: ${errorMessage}`,
+				source: errorMessage,
+				severity: Severity.Error,
+			});
+		} finally {
+			setTestingProvider(null);
+		}
+	}, [metricsService, notificationService, webSearchService, testingProvider]);
+
 	return (
 		<SettingGroup title='Web Search Providers' description='Configure search providers for web search and agent tools. Drag to reorder priority.'>
 			<div className='mb-4'>
@@ -226,6 +259,23 @@ export const SearchProvidersSettings = () => {
 						max={100}
 						description="Maximum number of search result passages sent to NVIDIA for reranking per query. Higher values may improve relevance but increase latency and cost. Default: 20."
 					/>
+				</div>
+
+				<div className='mb-4 flex items-center gap-3'>
+					<VoidSwitch
+						value={testingProvider === 'nvidia-reranker'}
+						onChange={() => {}}
+						disabled
+						label={testingProvider === 'nvidia-reranker' ? 'Testing connection...' : 'Test NVIDIA reranker connection'}
+					/>
+					<button
+						type='button'
+						onClick={handleTestRerankerConnection}
+						disabled={testingProvider !== null}
+						className='px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+					>
+						Test Connection
+					</button>
 				</div>
 
 				<div className='text-sm text-gray-600'>

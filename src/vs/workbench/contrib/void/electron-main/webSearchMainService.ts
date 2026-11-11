@@ -322,4 +322,34 @@ export class WebSearchMainService implements IWebSearchService {
 
 		return provider.testConnection(settings);
 	}
+
+	/**
+	 * Tests the NVIDIA reranker connection.
+	 * Used by the settings UI "Test Connection" button for the NVIDIA reranker.
+	 */
+	async testRerankerConnection(): Promise<{ success: boolean; message: string }> {
+		// Check if reranking is enabled in settings (but don't require it to be enabled for testing)
+		const { enabled, maxPassages } = await this._readRerankerSettings();
+
+		// Check if NVIDIA API key is available
+		const apiKey = await this._reranker._getNvidiaApiKey();
+		if (!apiKey) {
+			return { success: false, message: 'NVIDIA API key is not configured. Configure your NVIDIA API key in the LLM provider settings.' };
+		}
+
+		// Use a small number of passages for testing
+		const testPassages = 2;
+		const testMaxPassages = Math.min(maxPassages ?? 2, 2);
+
+		// Use the reranker's testConnection method with a timeout suitable for testing
+		try {
+			const result = await this._reranker.testConnection();
+			return result;
+		} catch (error) {
+			return {
+				success: false,
+				message: `Connection test failed: ${error instanceof Error ? error.message : String(error)}`
+			};
+		}
+	}
 }

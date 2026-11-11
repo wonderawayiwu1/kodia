@@ -8,6 +8,7 @@ import { IEncryptionMainService } from '../../../../platform/encryption/common/e
 import { SearchResult } from '../common/webSearchTypes.js';
 import { StorageScope } from '../../../../platform/storage/common/storage.js';
 import { VOID_SETTINGS_STORAGE_KEY } from '../common/storageKeys.js';
+import { WebSearchError, WebSearchErrorType } from './webSearchErrors.js';
 
 const NVIDIA_RERANK_ENDPOINT = 'https://ai.api.nvidia.com/v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking';
 const NVIDIA_RERANK_MODEL = 'nvidia/nemotron-3.5-rerank-8b';
@@ -130,6 +131,113 @@ export class NvidiaRerankerMainService {
 			}
 			console.warn('[NvidiaReranker] Request failed:', error instanceof Error ? error.message : String(error));
 			return results;
+		}
+	}
+
+	/**
+	 * Tests the connection to the NVIDIA reranking API.
+	 * Uses a synthetic test request to verify API key validity and endpoint reachability.
+	 */
+	async testConnection(): Promise<{ success: boolean; message: string }> {
+		// Get NVIDIA API key from settings
+		const apiKey = await this._getNvidiaApiKey();
+		if (!apiKey) {
+			return { success: false, message: 'NVIDIA API key is not configured. Configure your NVIDIA API key in the LLM provider settings.' };
+		}
+
+		// Synthetic test request
+		const testQuery = 'Kodia NVIDIA reranker connectivity test';
+		const testPassages = [
+			{ text: 'Kodia is a code editor built for software development.' },
+			{ text: 'A weather report describes temperature and rainfall forecasts.' },
+		];
+
+		const requestBody = {
+			model: NVIDIA_RERANK_MODEL,
+			query: { text: testQuery },
+			passages: testPassages,
+			truncate: 'END' as const,
+		};
+
+		try {
+			const response = await fetch(NVIDIA_RERANK_ENDPOINT, {
+				signal: AbortSignal.timeout(10000),
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'Authorization': `Bearer ${apiKey}`,
+				},
+				body: JSON.stringify(requestBody),
+			});
+
+			if (!response.ok) {
+				// Sanitize error messages based on status code
+				let message: string;
+				switch (response.status) {
+					case 401:
+						message = 'Authentication failed. Please check your NVIDIA API key.';
+						break;
+					case 403:
+						message = 'Permission denied. Your API key may not have access to the reranking service.';
+						break;
+					case 429:
+						// Try to read response for rate limit details
+						try {
+							const errorBody = await response.clone().json();
+							if (errorBody?.error?.code === 'spend_cap_exceeded' ||
+								errorBody?.error?.message?.toLowerCase().includes('spend cap')) {
+								message = 'NVIDIA spend cap exceeded. Please check your account billing.';
+							} else {
+								message = 'Rate limit exceeded. Please try again later.';
+							}
+						} catch {
+							message = 'Rate limit exceeded. Please try again later.';
+						}
+						break;
+					case 402:
+						message = 'NVIDIA account billing issue. Please check your account billing and credits.';
+						break;
+					case 400:
+					case 422:
+						message = 'Invalid request. Please check your API key and configuration.';
+						break;
+					case 500:
+					case 502:
+					case 503:
+					case 504:
+						message = 'NVIDIA service temporarily unavailable. Please try again later.';
+						break;
+					default:
+						message = `NVIDIA API responded with status ${response.status}.`;
+				}
+				return { success: false, message };
+			}
+
+			// Validate response structure
+			const data = await response.json();
+			const rankings = data?.rankings;
+
+			if (!Array.isArray(rankings) || rankings.length === 0) {
+				return { success: false, message: 'NVIDIA API returned an invalid response (missing rankings).' };
+			}
+
+			// Validate ranking structure
+			for (const entry of rankings) {
+				if (typeof entry.index !== 'number' || !Number.isInteger(entry.index) ||
+					typeof entry.logit !== 'number' || !Number.isFinite(entry.logit)) {
+					return { success: false, message: 'NVIDIA API returned invalid ranking data.' };
+				}
+			}
+
+			return { success: true, message: 'NVIDIA reranker connection successful!' };
+		} catch (error) {
+			if (error instanceof DOMException && error.name === 'AbortError') {
+				return { success: false, message: 'Connection test timed out. Please check your network.' };
+			}
+			if (error instanceof DOMException && error.name === 'TimeoutError') {
+				return { success: false, message: 'Connection test timed out. Please check your network.' };
+			}
+			return { success: false, message: `Connection test failed: ${error instanceof Error ? error.message : String(error)}` };
 		}
 	}
 

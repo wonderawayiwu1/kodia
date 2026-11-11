@@ -64,6 +64,7 @@ export interface IWebSearchService {
 	readonly _serviceBrand: undefined;
 	search(request: SearchRequest): Promise<SearchResponse>;
 	testProviderConnection(providerName: WebSearchProviderName): Promise<{ success: boolean; message: string }>;
+	testRerankerConnection(): Promise<{ success: boolean; message: string }>;
 }
 
 // Settings for a single web search provider
