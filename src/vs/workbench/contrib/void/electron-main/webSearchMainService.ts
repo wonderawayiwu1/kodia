@@ -40,6 +40,10 @@ export class WebSearchMainService implements IWebSearchService {
 
 	private _initialized = false;
 
+	// Search result cache (LRU with TTL)
+	private _searchCache: Map<string, { response: SearchResponse; timestamp: number }> = new Map();
+	private _cacheMaxSize = 1000;
+
 	constructor(
 		@IApplicationStorageMainService private readonly _storageService: IApplicationStorageMainService,
 		@IEncryptionMainService private readonly _encryptionService: IEncryptionMainService,
@@ -146,6 +150,34 @@ export class WebSearchMainService implements IWebSearchService {
 	}
 
 	/**
+	 * Reads the global settings for search cache from encrypted storage.
+	 */
+	private async _readCacheSettings(): Promise<{ enabled: boolean; ttlMs: number }> {
+		try {
+			const encrypted = this._storageService.get(VOID_SETTINGS_STORAGE_KEY, StorageScope.APPLICATION);
+			if (!encrypted) {
+				return { enabled: false, ttlMs: 3600 * 1000 };
+			}
+
+			const decrypted = await this._encryptionService.decrypt(encrypted);
+			const state = JSON.parse(decrypted);
+
+			const globalSettings = state.globalSettings ?? {};
+			const enabled = globalSettings.webSearchCacheEnabled === true;
+			const ttlSeconds = (typeof globalSettings.webSearchCacheTTL === 'number' &&
+				globalSettings.webSearchCacheTTL >= 60 &&
+				globalSettings.webSearchCacheTTL <= 86400)
+				? globalSettings.webSearchCacheTTL
+				: 3600;
+
+			return { enabled, ttlMs: ttlSeconds * 1000 };
+		} catch (error) {
+			console.warn('[WebSearchMainService] Failed to read cache settings:', error instanceof Error ? error.message : String(error));
+			return { enabled: false, ttlMs: 3600 * 1000 };
+		}
+	}
+
+	/**
 	 * Gets enabled providers sorted by priority (lowest priority number = highest priority).
 	 */
 	private async _getEnabledProvidersSorted(): Promise<{ name: WebSearchProviderName; provider: WebSearchProvider; settings: SearchProviderSettings }[]> {
@@ -180,6 +212,11 @@ export class WebSearchMainService implements IWebSearchService {
 
 	async search(request: SearchRequest): Promise<SearchResponse> {
 		this._validateRequest(request);
+
+		// Read cache settings
+		const cacheSettings = await this._readCacheSettings();
+		const cacheEnabled = cacheSettings.enabled;
+		const cacheTTLMs = cacheSettings.ttlMs;
 
 		const enabledProviders = await this._getEnabledProvidersSorted();
 
@@ -218,10 +255,31 @@ export class WebSearchMainService implements IWebSearchService {
 					maxResults,
 				};
 
+				// Generate cache key
+				const cacheKey = this._generateCacheKey(name, providerRequest, settings);
+
+				// Check cache if enabled
+				if (cacheEnabled) {
+					const cached = this._getFromCache(cacheKey, cacheTTLMs);
+					if (cached) {
+						console.log(`[WebSearchMainService] Cache hit for provider ${name}`);
+						return {
+							...cached.response,
+							provider: `${cached.response.provider} (cached)` as WebSearchProviderName,
+						};
+					}
+				}
+
 				const response = await provider.search(providerRequest, settings);
 
 				// Apply NVIDIA reranking if enabled
 				const rerankedResponse = await this._applyReranking(request.query, response, name);
+
+				// Cache the successful response
+				if (cacheEnabled) {
+					this._setCache(cacheKey, rerankedResponse);
+				}
+
 				return rerankedResponse;
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
@@ -291,6 +349,69 @@ export class WebSearchMainService implements IWebSearchService {
 				error instanceof Error ? error.message : String(error));
 			return response;
 		}
+	}
+
+	/**
+	 * Generates a cache key for a search request.
+	 * The key includes all parameters that affect the search results.
+	 */
+	private _generateCacheKey(providerName: WebSearchProviderName, request: SearchRequest, settings: SearchProviderSettings): string {
+		const keyParts = [
+			providerName,
+			request.query,
+			request.maxResults ?? settings.maxResults,
+			request.strategy ?? 'balanced',
+			request.filters?.timeRange ?? 'none',
+			request.filters?.domains?.sort().join(',') ?? 'none',
+			request.filters?.excludeDomains?.sort().join(',') ?? 'none',
+			request.filters?.safeSearch ? 'safe' : 'off',
+		];
+		return keyParts.join('|');
+	}
+
+	/**
+	 * Gets a cached search response if available and not expired.
+	 */
+	private _getFromCache(key: string, ttlMs: number): { response: SearchResponse; timestamp: number } | undefined {
+		const cached = this._searchCache.get(key);
+		if (!cached) {
+			return undefined;
+		}
+
+		// Check if expired
+		if (Date.now() - cached.timestamp > ttlMs) {
+			this._searchCache.delete(key);
+			return undefined;
+		}
+
+		// Update LRU: move to end (most recently used)
+		this._searchCache.delete(key);
+		this._searchCache.set(key, cached);
+		return cached;
+	}
+
+	/**
+	 * Stores a search response in the cache.
+	 * Implements LRU eviction when cache reaches maximum size.
+	 */
+	private _setCache(key: string, response: SearchResponse): void {
+		// Remove if already exists (to update position)
+		if (this._searchCache.has(key)) {
+			this._searchCache.delete(key);
+		}
+
+		// Evict oldest if at capacity
+		if (this._searchCache.size >= this._cacheMaxSize) {
+			const firstKey = this._searchCache.keys().next().value;
+			if (firstKey !== undefined) {
+				this._searchCache.delete(firstKey);
+			}
+		}
+
+		this._searchCache.set(key, {
+			response,
+			timestamp: Date.now(),
+		});
 	}
 
 	/**

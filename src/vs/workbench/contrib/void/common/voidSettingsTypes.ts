@@ -509,6 +509,9 @@ export type GlobalSettings = {
 	// NVIDIA Reranker settings (Phase 2)
 	webSearchRerankerEnabled: boolean; // default: false (opt-in)
 	webSearchRerankerMaxPassages: number; // default: 20, max: 100
+	// Search Cache settings (Phase 3)
+	webSearchCacheEnabled: boolean; // default: false (opt-in)
+	webSearchCacheTTL: number; // default: 3600 seconds (1 hour), max: 86400 (24 hours)
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -541,6 +544,9 @@ export const defaultGlobalSettings: GlobalSettings = {
 	// NVIDIA Reranker settings (Phase 2)
 	webSearchRerankerEnabled: false, // opt-in, disabled by default
 	webSearchRerankerMaxPassages: 20, // default max passages to rerank
+	// Search Cache settings (Phase 3)
+	webSearchCacheEnabled: false, // opt-in, disabled by default
+	webSearchCacheTTL: 3600, // default TTL in seconds (1 hour)
 }
 
 export type GlobalSettingName = keyof GlobalSettings

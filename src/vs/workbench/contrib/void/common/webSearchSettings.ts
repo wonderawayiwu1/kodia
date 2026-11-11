@@ -64,6 +64,8 @@ export const DEFAULT_WEB_SEARCH_GLOBAL_SETTINGS = {
 	webSearchFreeOnly: true,
 	webSearchRerankerEnabled: false,
 	webSearchRerankerMaxPassages: 20,
+	webSearchCacheEnabled: false,
+	webSearchCacheTTL: 3600,
 };
 
 /**
@@ -244,5 +246,62 @@ export function normalizeNvidiaRerankerSettings(settings: {
 		webSearchRerankerMaxPassages: typeof settings.webSearchRerankerMaxPassages === 'number'
 			? Math.max(1, Math.min(100, settings.webSearchRerankerMaxPassages))
 			: defaults.webSearchRerankerMaxPassages,
+	};
+}
+
+/**
+ * Validates search cache settings
+ */
+export function validateSearchCacheSettings(settings: {
+	webSearchCacheEnabled?: boolean;
+	webSearchCacheTTL?: number;
+}): { valid: boolean; errors: string[] } {
+	const errors: string[] = [];
+
+	if (typeof settings.webSearchCacheEnabled !== 'boolean' && settings.webSearchCacheEnabled !== undefined) {
+		errors.push('webSearchCacheEnabled must be a boolean');
+	}
+
+	if (typeof settings.webSearchCacheTTL === 'number') {
+		if (settings.webSearchCacheTTL < 60 || settings.webSearchCacheTTL > 86400) {
+			errors.push('webSearchCacheTTL must be between 60 and 86400 seconds (1 minute to 24 hours)');
+		}
+	} else if (settings.webSearchCacheTTL !== undefined) {
+		errors.push('webSearchCacheTTL must be a number');
+	}
+
+	return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Returns default search cache settings
+ */
+export function getDefaultSearchCacheSettings(): {
+	webSearchCacheEnabled: boolean;
+	webSearchCacheTTL: number;
+} {
+	return {
+		webSearchCacheEnabled: false,
+		webSearchCacheTTL: 3600,
+	};
+}
+
+/**
+ * Validates and normalizes search cache settings
+ */
+export function normalizeSearchCacheSettings(settings: {
+	webSearchCacheEnabled?: boolean;
+	webSearchCacheTTL?: number;
+}): {
+	webSearchCacheEnabled: boolean;
+	webSearchCacheTTL: number;
+} {
+	const defaults = getDefaultSearchCacheSettings();
+
+	return {
+		webSearchCacheEnabled: settings.webSearchCacheEnabled ?? defaults.webSearchCacheEnabled,
+		webSearchCacheTTL: typeof settings.webSearchCacheTTL === 'number'
+			? Math.max(60, Math.min(86400, settings.webSearchCacheTTL))
+			: defaults.webSearchCacheTTL,
 	};
 }

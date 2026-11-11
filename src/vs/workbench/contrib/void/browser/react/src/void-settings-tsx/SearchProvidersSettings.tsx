@@ -7,13 +7,13 @@ import React, { useCallback, useState } from 'react';
 import { useAccessor, useSettingsState } from '../util/services.js';
 import { SearchProviderCard } from './SearchProviderCard.js';
 import { WebSearchProviderName, SearchProviderSettings, IWebSearchService } from '../../../../common/webSearchTypes.js';
-import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO, validateNvidiaRerankerSettings, normalizeNvidiaRerankerSettings, getDefaultNvidiaRerankerSettings } from '../../../../common/webSearchSettings.js';
+import { DEFAULT_SEARCH_PROVIDER_SETTINGS, SEARCH_PROVIDER_DISPLAY_INFO, validateNvidiaRerankerSettings, normalizeNvidiaRerankerSettings, getDefaultNvidiaRerankerSettings, validateSearchCacheSettings, normalizeSearchCacheSettings, getDefaultSearchCacheSettings } from '../../../../common/webSearchSettings.js';
 import { SettingGroup } from './SettingsControls.js';
 import { IVoidSettingsService } from '../../../../common/voidSettingsService.js';
 import { IMetricsService } from '../../../../common/metricsService.js';
 import { INotificationService } from '../../../../../../../platform/notification/common/notification.js';
 import Severity from '../../../../../../../base/common/severity.js';
-import { VoidSwitch } from '../util/inputs.js';
+import { VoidSwitch, VoidSimpleInputBox } from '../util/inputs.js';
 
 const WEB_SEARCH_PROVIDERS: WebSearchProviderName[] = [
 	'brave',
@@ -39,6 +39,9 @@ export const SearchProvidersSettings = () => {
 	// Reranker settings
 	const rerankerEnabled = globalSettings.webSearchRerankerEnabled ?? false;
 	const rerankerMaxPassages = globalSettings.webSearchRerankerMaxPassages ?? 20;
+	// Cache settings
+	const cacheEnabled = globalSettings.webSearchCacheEnabled ?? false;
+	const cacheTTL = globalSettings.webSearchCacheTTL ?? 3600;
 
 	// Track drag state for drag-and-drop reordering
 	const [draggedId, setDraggedId] = useState<WebSearchProviderName | null>(null);
@@ -122,6 +125,22 @@ export const SearchProvidersSettings = () => {
 
 		await voidSettingsService.setGlobalSetting('webSearchRerankerEnabled', normalized.webSearchRerankerEnabled);
 		await voidSettingsService.setGlobalSetting('webSearchRerankerMaxPassages', normalized.webSearchRerankerMaxPassages);
+	}, [voidSettingsService, notificationService]);
+
+	const handleCacheSettingsChange = useCallback(async (changes: { webSearchCacheEnabled?: boolean; webSearchCacheTTL?: number }) => {
+		const validation = validateSearchCacheSettings(changes);
+		if (!validation.valid) {
+			notificationService.notify({
+				message: `Invalid cache settings: ${validation.errors.join(', ')}`,
+				severity: Severity.Error,
+			});
+			return;
+		}
+
+		const normalized = normalizeSearchCacheSettings(changes);
+
+		await voidSettingsService.setGlobalSetting('webSearchCacheEnabled', normalized.webSearchCacheEnabled);
+		await voidSettingsService.setGlobalSetting('webSearchCacheTTL', normalized.webSearchCacheTTL);
 	}, [voidSettingsService, notificationService]);
 
 	const handleTestConnection = useCallback(async (providerName: WebSearchProviderName) => {
@@ -281,6 +300,54 @@ export const SearchProvidersSettings = () => {
 				<div className='text-sm text-gray-600'>
 					<p>Requires an NVIDIA API key configured in the <a href='#' className='underline hover:text-blue-600'>NVIDIA LLM provider settings</a>.</p>
 					<p>Reranking uses your existing NVIDIA API key (nvapi-...). No separate key is needed.</p>
+				</div>
+			</SettingGroup>
+
+			<SettingGroup title='Search Result Cache' description='Optional in-memory cache for search results to reduce API calls and improve response time for repeated queries.'>
+				<div className='mb-4'>
+					<VoidSwitch
+						value={cacheEnabled}
+						onChange={(newVal) => {
+							handleCacheSettingsChange({ webSearchCacheEnabled: newVal });
+						}}
+						label='Enable search result caching'
+						description="When enabled, successful search results are cached in memory for faster repeated queries. Cached results are stored in application memory only and expire after the configured TTL. Disabled by default."
+					/>
+				</div>
+
+				<div className='mb-4 p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-800'>
+					<p className='font-medium mb-1'>Cache Behavior</p>
+					<ul className='list-disc pl-5 space-y-1'>
+						<li>Only successful search results are cached.</li>
+						<li>Cache is stored in application memory only (not persisted to disk).</li>
+						<li>Cache is cleared when the application restarts.</li>
+						<li>Each provider has its own cache entries.</li>
+						<li>Cache entries expire after the configured TTL.</li>
+						<li>Reranked results are cached after reranking is applied.</li>
+					</ul>
+				</div>
+
+				<div className='mb-4'>
+					<VoidSimpleInputBox
+						label='Maximum cache TTL (seconds)'
+						value={String(cacheTTL)}
+						onChangeValue={(newVal) => {
+							const num = parseInt(newVal, 10);
+							if (!isNaN(num)) {
+								handleCacheSettingsChange({ webSearchCacheTTL: num });
+							}
+						}}
+						placeholder='3600'
+						type='number'
+						min={60}
+						max={86400}
+						description="Time-to-live for cache entries in seconds. Minimum: 60 (1 minute), Maximum: 86400 (24 hours). Default: 3600 (1 hour)."
+					/>
+				</div>
+
+				<div className='text-sm text-gray-600'>
+					<p>Cache is stored in application memory only and is cleared on restart.</p>
+					<p>Reranked results are cached after reranking is applied.</p>
 				</div>
 			</SettingGroup>
 
