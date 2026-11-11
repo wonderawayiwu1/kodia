@@ -212,8 +212,6 @@ export class WebSearchMainService implements IWebSearchService {
 					provider.maxResultsLimit
 				);
 
-				const startTime = Date.now();
-
 				// Create a modified request with the computed maxResults
 				const providerRequest: SearchRequest = {
 					...request,
@@ -285,7 +283,7 @@ export class WebSearchMainService implements IWebSearchService {
 				...response,
 				results: rerankedResults,
 				totalResults: rerankedResults.length,
-				provider: `${providerName}+nvidia-reranker`,
+				provider: (providerName + '+nvidia-reranker') as WebSearchProviderName,
 			};
 		} catch (error) {
 			// Fail open: log error but return original results
@@ -328,20 +326,7 @@ export class WebSearchMainService implements IWebSearchService {
 	 * Used by the settings UI "Test Connection" button for the NVIDIA reranker.
 	 */
 	async testRerankerConnection(): Promise<{ success: boolean; message: string }> {
-		// Check if reranking is enabled in settings (but don't require it to be enabled for testing)
-		const { enabled, maxPassages } = await this._readRerankerSettings();
-
 		// Check if NVIDIA API key is available
-		const apiKey = await this._reranker._getNvidiaApiKey();
-		if (!apiKey) {
-			return { success: false, message: 'NVIDIA API key is not configured. Configure your NVIDIA API key in the LLM provider settings.' };
-		}
-
-		// Use a small number of passages for testing
-		const testPassages = 2;
-		const testMaxPassages = Math.min(maxPassages ?? 2, 2);
-
-		// Use the reranker's testConnection method with a timeout suitable for testing
 		try {
 			const result = await this._reranker.testConnection();
 			return result;

@@ -111,13 +111,6 @@ export const SEARCH_PROVIDER_DISPLAY_INFO: Record<WebSearchProviderName, {
 		docsUrl: 'https://duckduckgo.com/api',
 		requiresApiKey: false,
 	},
-	// NVIDIA Reranker (not a search provider, but a post-processing service)
-	'nvidia-reranker': {
-		title: 'NVIDIA Nemotron Reranker',
-		description: 'Reorders search results using NVIDIA Nemotron-3.5-Rerank-8B for improved relevance.',
-		docsUrl: 'https://docs.nvidia.com/nim/nemo-retriever/reranking/latest/',
-		requiresApiKey: false, // Reuses existing NVIDIA LLM key
-	},
 };
 
 /**

@@ -8,7 +8,6 @@ import { IEncryptionMainService } from '../../../../platform/encryption/common/e
 import { SearchResult } from '../common/webSearchTypes.js';
 import { StorageScope } from '../../../../platform/storage/common/storage.js';
 import { VOID_SETTINGS_STORAGE_KEY } from '../common/storageKeys.js';
-import { WebSearchError, WebSearchErrorType } from './webSearchErrors.js';
 
 const NVIDIA_RERANK_ENDPOINT = 'https://ai.api.nvidia.com/v1/retrieval/nvidia/nemotron-3.5-rerank-8b/reranking';
 const NVIDIA_RERANK_MODEL = 'nvidia/nemotron-3.5-rerank-8b';
