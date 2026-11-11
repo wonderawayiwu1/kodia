@@ -12,6 +12,7 @@ import { WebSearchProvider } from './webSearchProvider.js';
 import { BraveSearchMainService } from './braveSearchMainService.js';
 import { TavilySearchMainService } from './tavilySearchMainService.js';
 import { ExaSearchMainService } from './exaSearchMainService.js';
+import { YouSearchMainService } from './youSearchMainService.js';
 import { WebSearchError, WebSearchErrorType } from './webSearchErrors.js';
 
 const DEFAULT_TIMEOUT_MS = 15000;
@@ -50,6 +51,7 @@ export class WebSearchMainService implements IWebSearchService {
 		this.registerProvider(new BraveSearchMainService(this._storageService, this._encryptionService));
 		this.registerProvider(new TavilySearchMainService(this._storageService, this._encryptionService));
 		this.registerProvider(new ExaSearchMainService(this._storageService, this._encryptionService));
+		this.registerProvider(new YouSearchMainService(this._storageService, this._encryptionService));
 		// Other providers will be registered as they are implemented
 		this._initialized = true;
 	}
