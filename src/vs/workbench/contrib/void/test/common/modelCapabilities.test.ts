@@ -5,12 +5,21 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { catalogModelsOfProvider, defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, ModelOverrides } from '../../common/modelCapabilities.js';
+import { catalogModelsOfProvider, defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, getModelContextDiagnostics, ModelOverrides } from '../../common/modelCapabilities.js';
 import { defaultOverridesOfModel, OverridesOfModel, ProviderName } from '../../common/voidSettingsTypes.js';
 
-// the default (empty) overrides, plus one model's
-const overridesWith = (providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides>): OverridesOfModel =>
-	({ ...defaultOverridesOfModel, [providerName]: { [modelName]: overrides } });
+// Build a full OverridesOfModel with all providers initialized
+function buildOverrides(providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides>): OverridesOfModel {
+	const allProviders: ProviderName[] = [
+		'anthropic', 'awsBedrock', 'deepseek', 'gemini', 'googleVertex', 'groq', 'liteLLM',
+		'lmStudio', 'mlx', 'mistral', 'nvidia', 'ollama', 'openAI', 'openAICompatible',
+		'openRouter', 'vLLM', 'xAI'
+	];
+	const result: Record<string, Record<string, Partial<ModelOverrides>>> = {};
+	for (const p of allProviders) result[p] = {};
+	result[providerName] = { [modelName]: overrides };
+	return result as OverridesOfModel;
+}
 
 suite('Kodia - model capabilities', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -152,7 +161,7 @@ suite('Kodia - model capabilities', () => {
 	});
 
 	test('a per-model override wins over the detected capabilities', () => {
-		const overrides = overridesWith('ollama', 'mistral:7b', { supportsVision: true });
+		const overrides = buildOverrides('ollama', 'mistral:7b', { supportsVision: true });
 		assert.strictEqual(getModelCapabilities('ollama', 'mistral:7b', overrides).supportsVision, true);
 	});
 
@@ -163,8 +172,345 @@ suite('Kodia - model capabilities', () => {
 		// no reasoning-specific reserve: reasoning on or off keeps the model's limit (it used to drop to 8192)
 		assert.strictEqual(getReservedOutputTokenSpace('anthropic', modelName, { isReasoningEnabled: true, overridesOfModel: undefined }), reservedOutputTokenSpace);
 
-		const overrides = overridesWith('anthropic', modelName, { reasoningCapabilities: { ...reasoningCapabilities, reasoningReservedOutputTokenSpace: 32_000 } });
+		const overrides = buildOverrides('anthropic', modelName, { reasoningCapabilities: { ...reasoningCapabilities, reasoningReservedOutputTokenSpace: 32_000 } });
 		assert.strictEqual(getReservedOutputTokenSpace('anthropic', modelName, { isReasoningEnabled: true, overridesOfModel: overrides }), 32_000);
 		assert.strictEqual(getReservedOutputTokenSpace('anthropic', modelName, { isReasoningEnabled: false, overridesOfModel: overrides }), reservedOutputTokenSpace);
+	});
+});
+
+suite('Kodia - model capabilities: source tracking and fallback behavior', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('Nemotron has verified source for context window and output tokens', () => {
+		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(nemotron.contextWindowSource, 'verified');
+		assert.strictEqual(nemotron.reservedOutputTokenSpaceSource, 'verified');
+		assert.ok(nemotron.reasoningCapabilities);
+		assert.strictEqual(nemotron.reasoningCapabilities!.reasoningReservedOutputTokenSpaceSource, 'verified');
+	});
+
+	test('Catalog models have catalog source by default', () => {
+		const gpt6 = getModelCapabilities('openAI', 'gpt-6-astra', undefined);
+		assert.strictEqual(gpt6.contextWindowSource, 'catalog');
+		assert.strictEqual(gpt6.reservedOutputTokenSpaceSource, 'catalog');
+	});
+
+	test('Unknown models on local providers get generous fallback context window', () => {
+		// Local providers (Ollama, vLLM, LM Studio, MLX) should get 32k context fallback
+		const localProviders: ProviderName[] = ['ollama', 'vLLM', 'lmStudio', 'mlx'];
+		for (const providerName of localProviders) {
+			const unknown = getModelCapabilities(providerName, 'some-unknown-model', undefined);
+			assert.strictEqual(unknown.isUnrecognizedModel, true);
+			assert.strictEqual(unknown.contextWindow, 32_000, `${providerName} should get 32k fallback`);
+			assert.strictEqual(unknown.reservedOutputTokenSpace, 8_192, `${providerName} should get 8k output fallback`);
+			assert.strictEqual(unknown.contextWindowSource, 'fallback');
+			assert.strictEqual(unknown.reservedOutputTokenSpaceSource, 'fallback');
+		}
+	});
+
+	test('Unknown models on cloud providers get conservative fallback', () => {
+		const cloudProviders: ProviderName[] = ['openAI', 'anthropic', 'gemini', 'groq', 'xAI', 'mistral', 'deepseek'];
+		for (const providerName of cloudProviders) {
+			const unknown = getModelCapabilities(providerName, 'some-unknown-model', undefined);
+			assert.strictEqual(unknown.isUnrecognizedModel, true);
+			assert.strictEqual(unknown.contextWindow, 4_096, `${providerName} should get 4k fallback`);
+			assert.strictEqual(unknown.reservedOutputTokenSpace, 4_096, `${providerName} should get 4k output fallback`);
+			assert.strictEqual(unknown.contextWindowSource, 'fallback');
+			assert.strictEqual(unknown.reservedOutputTokenSpaceSource, 'fallback');
+		}
+	});
+
+	test('User overrides can specify source as user-configured', () => {
+		const overrides = {
+			contextWindow: 100_000,
+			contextWindowSource: 'user-configured',
+			reservedOutputTokenSpace: 20_000,
+			reservedOutputTokenSpaceSource: 'user-configured',
+		};
+		const caps = getModelCapabilities('ollama', 'custom-model', buildOverrides('ollama', 'custom-model', overrides));
+		assert.strictEqual(caps.contextWindow, 100_000);
+		assert.strictEqual(caps.contextWindowSource, 'user-configured');
+		assert.strictEqual(caps.reservedOutputTokenSpace, 20_000);
+		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'user-configured');
+	});
+
+	test('Provider-api source is used for detected models', () => {
+		// This would require setting up detectedModelOptions, which is tested elsewhere
+		// Here we just verify the type is accepted
+		const overrides = {
+			contextWindow: 50_000,
+			contextWindowSource: 'provider-api',
+			reservedOutputTokenSpace: 10_000,
+			reservedOutputTokenSpaceSource: 'provider-api',
+		};
+		const caps = getModelCapabilities('ollama', 'detected-model', buildOverrides('ollama', 'detected-model', overrides));
+		assert.strictEqual(caps.contextWindowSource, 'provider-api');
+		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'provider-api');
+	});
+
+	test('Reasoning output token space source is tracked', () => {
+		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.ok(nemotron.reasoningCapabilities);
+		assert.strictEqual(nemotron.reasoningCapabilities!.reasoningReservedOutputTokenSpaceSource, 'verified');
+
+		// Test override
+		const overrides = {
+			reasoningCapabilities: {
+				...nemotron.reasoningCapabilities!,
+				reasoningReservedOutputTokenSpace: 16_000,
+				reasoningReservedOutputTokenSpaceSource: 'user-configured',
+			}
+		};
+		const caps = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', buildOverrides('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', overrides));
+		assert.strictEqual(caps.reasoningCapabilities!.reasoningReservedOutputTokenSpaceSource, 'user-configured');
+	});
+
+	test('Fallback unknown models get vision detection but conservative limits', () => {
+		// Vision models on local providers
+		const llava = getModelCapabilities('ollama', 'llava:7b', undefined);
+		assert.strictEqual(llava.supportsVision, true);
+		assert.strictEqual(llava.contextWindow, 32_000);
+		assert.strictEqual(llava.contextWindowSource, 'fallback');
+
+		// Vision models on cloud providers
+		const unknownVision = getModelCapabilities('openAI', 'some-vision-model', undefined);
+		assert.strictEqual(unknownVision.supportsVision, true);
+		assert.strictEqual(unknownVision.contextWindow, 4_096);
+		assert.strictEqual(unknownVision.contextWindowSource, 'fallback');
+	});
+});
+
+suite('Kodia - model capabilities: output-token validation and clamping', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('Nemotron retains its verified 1,048,576-token context and 32,768-token output reservation', () => {
+		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(nemotron.isUnrecognizedModel, false);
+		assert.strictEqual(nemotron.contextWindow, 1_048_576);
+		assert.strictEqual(nemotron.contextWindowSource, 'verified');
+		assert.strictEqual(nemotron.reservedOutputTokenSpace, 32_768);
+		assert.strictEqual(nemotron.reservedOutputTokenSpaceSource, 'verified');
+		assert.strictEqual(nemotron.supportsVision, true);
+		assert.strictEqual(nemotron.specialToolFormat, 'openai-style');
+		assert.strictEqual(nemotron.supportsSystemMessage, 'system-role');
+	});
+
+	test('Models with smaller verified context windows are not increased', () => {
+		// claude-haiku-4-5 has a verified 200k context — must not be bumped to 1M
+		const haiku = getModelCapabilities('anthropic', 'claude-haiku-4-5', undefined);
+		assert.strictEqual(haiku.contextWindow, 200_000);
+		assert.ok(haiku.contextWindow < 1_000_000, 'haiku context must not be increased to 1M');
+
+		// codestral-latest has a verified 128k context
+		const codestral = getModelCapabilities('mistral', 'codestral-latest', undefined);
+		assert.strictEqual(codestral.contextWindow, 128_000);
+		assert.strictEqual(codestral.contextWindowSource, 'catalog');
+
+		// gpt-5.4-mini has a verified 400k context — not 1M
+		const mini = getModelCapabilities('openAI', 'gpt-5.4-mini', undefined);
+		assert.strictEqual(mini.contextWindow, 400_000);
+		assert.strictEqual(mini.contextWindowSource, 'catalog');
+	});
+
+	test('User override with output tokens exceeding context is clamped to the context window', () => {
+		// Use a truly unknown model name (doesn't match any family)
+		const overrides = buildOverrides('ollama', 'my-private-model', {
+			contextWindow: 8_192,
+			reservedOutputTokenSpace: 32_768, // exceeds 8k context
+		});
+		const caps = getModelCapabilities('ollama', 'my-private-model', overrides);
+		assert.strictEqual(caps.contextWindow, 8_192);
+		// output is clamped to context window
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192);
+	});
+
+	test('User override with output tokens within context is preserved', () => {
+		const overrides = buildOverrides('ollama', 'my-private-model', {
+			contextWindow: 32_000,
+			reservedOutputTokenSpace: 8_192,
+		});
+		const caps = getModelCapabilities('ollama', 'my-private-model', overrides);
+		assert.strictEqual(caps.contextWindow, 32_000);
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192);
+	});
+
+	test('Invalid context window override is dropped, keeping the model\'s own value', () => {
+		const overrides = buildOverrides('ollama', 'my-private-model', {
+			contextWindow: -1,
+			reservedOutputTokenSpace: 8_192,
+		});
+		const caps = getModelCapabilities('ollama', 'my-private-model', overrides);
+		// unknown local model starts at 32000; invalid override is dropped
+		assert.strictEqual(caps.contextWindow, 32_000);
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192);
+	});
+
+	test('Non-numeric context window override is dropped', () => {
+		const overrides = buildOverrides('ollama', 'my-private-model', {
+			contextWindow: 'not-a-number' as any,
+			reservedOutputTokenSpace: 8_192,
+		});
+		const caps = getModelCapabilities('ollama', 'my-private-model', overrides);
+		assert.strictEqual(caps.contextWindow, 32_000); // model's own context
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192);
+	});
+
+	test('Null reserved output tokens is preserved', () => {
+		const overrides = buildOverrides('xAI', 'grok-4.7', {
+			reservedOutputTokenSpace: null,
+		});
+		const caps = getModelCapabilities('xAI', 'grok-4.7', overrides);
+		assert.strictEqual(caps.reservedOutputTokenSpace, null);
+	});
+});
+
+suite('Kodia - model capabilities: context diagnostics', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('getModelContextDiagnostics returns verified status for Nemotron', () => {
+		const d = getModelContextDiagnostics('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(d.modelName, 'nvidia/nemotron-3.5-super-vl-120b-a12b');
+		assert.strictEqual(d.providerName, 'nvidia');
+		assert.strictEqual(d.configuredContextWindow, 1_048_576);
+		assert.strictEqual(d.configuredContextWindowSource, 'verified');
+		assert.strictEqual(d.effectiveContextWindow, 1_048_576);
+		assert.strictEqual(d.reservedOutputTokens, 32_768);
+		assert.strictEqual(d.reservedOutputTokenSource, 'verified');
+		assert.strictEqual(d.usableInputTokens, 1_048_576 - 32_768);
+		assert.strictEqual(d.isVerified, true);
+		assert.strictEqual(d.isFallback, false);
+		assert.strictEqual(d.isUnrecognizedModel, false);
+	});
+
+	test('getModelContextDiagnostics reports fallback for unknown models', () => {
+		const d = getModelContextDiagnostics('openAI', 'some-unknown-model', undefined);
+		assert.strictEqual(d.isUnrecognizedModel, true);
+		assert.strictEqual(d.isFallback, true);
+		assert.strictEqual(d.isVerified, false);
+		assert.strictEqual(d.configuredContextWindow, 4_096);
+		assert.strictEqual(d.configuredContextWindowSource, 'fallback');
+		assert.strictEqual(d.usableInputTokens, 4_096 - 4_096);
+	});
+
+	test('getModelContextDiagnostics reports local provider fallback generously', () => {
+		const d = getModelContextDiagnostics('ollama', 'some-unknown-local-model', undefined);
+		assert.strictEqual(d.isUnrecognizedModel, true);
+		assert.strictEqual(d.isFallback, true);
+		assert.strictEqual(d.configuredContextWindow, 32_000);
+		assert.strictEqual(d.configuredContextWindowSource, 'fallback');
+	});
+
+	test('getModelContextDiagnostics reports user overrides', () => {
+		const overrides = buildOverrides('ollama', 'some-unknown-model', {
+			contextWindow: 16_384,
+			contextWindowSource: 'user-configured',
+			reservedOutputTokenSpace: 4_096,
+			reservedOutputTokenSpaceSource: 'user-configured',
+		});
+		const d = getModelContextDiagnostics('ollama', 'some-unknown-model', overrides);
+		assert.strictEqual(d.isOverridden, true);
+		assert.strictEqual(d.configuredContextWindow, 16_384);
+		assert.strictEqual(d.configuredContextWindowSource, 'user-configured');
+		assert.strictEqual(d.effectiveContextWindow, 16_384);
+		assert.strictEqual(d.usableInputTokens, 16_384 - 4_096);
+	});
+});
+
+suite('Kodia - model capabilities: local model configuration', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('Local model context can be configured via overrides without source changes', () => {
+		// A user can set a custom context window for a local model through overrides
+		const overrides = buildOverrides('lmStudio', 'my-custom-model', {
+			contextWindow: 131_072,
+			contextWindowSource: 'user-configured',
+			reservedOutputTokenSpace: 8_192,
+			reservedOutputTokenSpaceSource: 'user-configured',
+		});
+		const caps = getModelCapabilities('lmStudio', 'my-custom-model', overrides);
+		assert.strictEqual(caps.isUnrecognizedModel, true);
+		assert.strictEqual(caps.contextWindow, 131_072);
+		assert.strictEqual(caps.contextWindowSource, 'user-configured');
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192);
+		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'user-configured');
+	});
+
+	test('Local model output override exceeding context is clamped', () => {
+		// Use a truly unknown model name (doesn't match any family)
+		const overrides = buildOverrides('vLLM', 'my-private-model', {
+			contextWindow: 8_192,
+			reservedOutputTokenSpace: 65_536, // way above context
+		});
+		const caps = getModelCapabilities('vLLM', 'my-private-model', overrides);
+		assert.strictEqual(caps.contextWindow, 8_192);
+		assert.strictEqual(caps.reservedOutputTokenSpace, 8_192); // clamped to context
+	});
+
+	test('Unknown models remain explicitly unknown, not given misleading metadata', () => {
+		const unknown = getModelCapabilities('openAICompatible', 'totally-unknown-model-xyz', undefined);
+		assert.strictEqual(unknown.isUnrecognizedModel, true);
+		assert.strictEqual(unknown.contextWindow, 4_096);
+		assert.strictEqual(unknown.contextWindowSource, 'fallback');
+		assert.strictEqual(unknown.reservedOutputTokenSpaceSource, 'fallback');
+		// Should not advertise a huge context
+		assert.ok(unknown.contextWindow < 32_000, 'unknown model should not get a large context window');
+	});
+});
+
+suite('Kodia - model capabilities: model switching and backward compatibility', () => {
+	ensureNoDisposablesAreLeakedInTestSuite();
+
+	test('Switching models selects the correct configuration', () => {
+		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(nemotron.contextWindow, 1_048_576);
+
+		const haiku = getModelCapabilities('anthropic', 'claude-haiku-4-5', undefined);
+		assert.strictEqual(haiku.contextWindow, 200_000);
+
+		// unknown model on a local provider gets the generous local fallback
+		const small = getModelCapabilities('ollama', 'some-unknown-model', undefined);
+		assert.strictEqual(small.contextWindow, 32_000); // local fallback
+		assert.strictEqual(small.contextWindowSource, 'fallback');
+	});
+
+	test('Exact model identifiers take priority over similar names', () => {
+		// sonnet-5-5 must not be confused with sonnet-5
+		const s55 = getModelCapabilities('anthropic', 'claude-sonnet-5-5', undefined);
+		const s5 = getModelCapabilities('anthropic', 'claude-sonnet-5', undefined);
+		assert.strictEqual(s55.recognizedModelName, 'claude-sonnet-5-5');
+		assert.strictEqual(s5.recognizedModelName, 'claude-sonnet-5');
+		assert.strictEqual(s55.contextWindow, s5.contextWindow); // both 1M in this catalog
+	});
+
+	test('Provider-specific model matching: same model name on different providers', () => {
+		// qwen/qwen3.8-27b exists on both groq and openRouter with different contexts
+		const groqQwen = getModelCapabilities('groq', 'qwen/qwen3.8-27b', undefined);
+		const routerQwen = getModelCapabilities('openRouter', 'qwen/qwen3.8-27b', undefined);
+		assert.strictEqual(groqQwen.contextWindow, 131_042);
+		assert.strictEqual(routerQwen.contextWindow, 1_000_000);
+	});
+
+	test('OpenRouter model IDs are handled correctly', () => {
+		const caps = getModelCapabilities('openRouter', 'x-ai/grok-4.7', undefined);
+		assert.strictEqual(caps.isUnrecognizedModel, false);
+		assert.strictEqual(caps.contextWindow, 500_000);
+	});
+
+	test('Backward compatibility: no overrides behaves as before', () => {
+		// getModelCapabilities with undefined overrides returns the same as before
+		const caps = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
+		assert.strictEqual(caps.contextWindow, 1_048_576);
+		assert.strictEqual(caps.reservedOutputTokenSpace, 32_768);
+		assert.strictEqual(caps.isUnrecognizedModel, false);
+	});
+
+	test('Missing metadata is handled gracefully', () => {
+		// A model with no catalog entry and no fallback info
+		const caps = getModelCapabilities('openAICompatible', 'brand-new-unknown-model', undefined);
+		assert.strictEqual(caps.isUnrecognizedModel, true);
+		assert.strictEqual(caps.contextWindow, 4_096);
+		assert.strictEqual(caps.reservedOutputTokenSpace, 4_096);
+		assert.strictEqual(caps.contextWindowSource, 'fallback');
+		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'fallback');
 	});
 });

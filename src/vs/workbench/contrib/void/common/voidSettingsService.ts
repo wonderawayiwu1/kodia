@@ -22,6 +22,57 @@ import { defaultSettingsOfProvider, displayInfoOfProviderName, FeatureName, Prov
 // name is the name in the dropdown
 export type ModelOption = { name: string, selection: ModelSelection }
 
+// Sanitize per-model overrides before they are persisted. Ensures:
+// - contextWindow is a positive number (else dropped)
+// - reservedOutputTokenSpace never exceeds the effective context window (clamped)
+// - invalid/non-numeric values are replaced with safe defaults
+export const sanitizeModelOverrides = (
+	providerName: ProviderName,
+	modelName: string,
+	overrides: Partial<ModelOverrides>
+): Partial<ModelOverrides> => {
+	const caps = getModelCapabilities(providerName, modelName, undefined);
+	const contextWindow = Number.isFinite(caps.contextWindow) && caps.contextWindow > 0 ? caps.contextWindow : 4_096;
+	const cleaned: Partial<ModelOverrides> = {};
+
+	for (const [key, value] of Object.entries(overrides)) {
+		if (key === 'contextWindow') {
+			const n = Number(value);
+			if (Number.isFinite(n) && n > 0) cleaned.contextWindow = n;
+			// else: drop invalid context window
+		}
+		else if (key === 'contextWindowSource') {
+			if (value === 'verified' || value === 'catalog' || value === 'provider-api' || value === 'user-configured' || value === 'fallback') {
+				cleaned.contextWindowSource = value;
+			}
+		}
+		else if (key === 'reservedOutputTokenSpace') {
+			if (value === null || value === undefined) {
+				cleaned.reservedOutputTokenSpace = null;
+			}
+			else {
+				const n = Number(value);
+				if (Number.isFinite(n) && n > 0) {
+					// output must never exceed the effective context window
+					cleaned.reservedOutputTokenSpace = Math.min(n, contextWindow);
+				}
+				// else: drop invalid output value
+			}
+		}
+		else if (key === 'reservedOutputTokenSpaceSource') {
+			if (value === 'verified' || value === 'catalog' || value === 'provider-api' || value === 'user-configured' || value === 'fallback') {
+				cleaned.reservedOutputTokenSpaceSource = value;
+			}
+		}
+		else {
+			// pass through other override keys unchanged
+			cleaned[key as keyof ModelOverrides] = value as any;
+		}
+	}
+
+	return cleaned;
+};
+
 
 
 type SetSettingOfProviderFn = <S extends SettingName>(
@@ -434,6 +485,21 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 			readS = defaultState()
 		}
 
+		// Migrate and sanitize any persisted per-model overrides so invalid or outdated
+		// values (e.g. output larger than context) are clamped instead of stored as-is.
+		for (const providerName of providerNames) {
+			const providerOverrides = readS.overridesOfModel?.[providerName];
+			if (!providerOverrides) continue;
+			for (const modelName of Object.keys(providerOverrides)) {
+				const existing = providerOverrides[modelName];
+				if (!existing) continue;
+				const cleaned = sanitizeModelOverrides(providerName, modelName, existing);
+				if (JSON.stringify(cleaned) !== JSON.stringify(existing)) {
+					providerOverrides[modelName] = Object.keys(cleaned).length === 0 ? undefined : cleaned;
+				}
+			}
+		}
+
 		this.state = readS
 		this.state = _stateWithMergedDefaultModels(this.state)
 		this.state = _validatedModelState(this.state);
@@ -573,15 +639,16 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 	}
 
 	setOverridesOfModel = async (providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides> | undefined) => {
+		const sanitized = overrides === undefined ? undefined : sanitizeModelOverrides(providerName, modelName, overrides);
 		const newState: VoidSettingsState = {
 			...this.state,
 			overridesOfModel: {
 				...this.state.overridesOfModel,
 				[providerName]: {
 					...this.state.overridesOfModel[providerName],
-					[modelName]: overrides === undefined ? undefined : {
+					[modelName]: sanitized === undefined ? undefined : {
 						...this.state.overridesOfModel[providerName][modelName],
-						...overrides
+						...sanitized
 					},
 				}
 			}
@@ -591,7 +658,7 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		await this._storeState();
 		this._onDidChangeState.fire();
 
-		this._metricsService.capture('Update Model Overrides', { providerName, modelName, overrides });
+		this._metricsService.capture('Update Model Overrides', { providerName, modelName, overrides: sanitized });
 	}
 
 

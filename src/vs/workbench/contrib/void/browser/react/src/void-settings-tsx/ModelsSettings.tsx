@@ -13,7 +13,7 @@ import { useAccessor, useRefreshModelListener, useRefreshModelState, useSettings
 import { X, RefreshCw, Loader2, Check, Asterisk, Plus } from 'lucide-react'
 import { ChatMarkdownRender } from '../markdown/ChatMarkdownRender.js'
 import { WarningBox } from './WarningBox.js'
-import { getModelCapabilities, modelOverrideKeys, ModelOverrides } from '../../../../common/modelCapabilities.js';
+import { getModelCapabilities, modelOverrideKeys, ModelOverrides, getModelContextDiagnostics, ModelContextDiagnostics } from '../../../../common/modelCapabilities.js';
 import { isFreeOpenRouterModel } from '../../../../common/openRouterModels.js';
 import { AddButton, AddRowButton, AnimatedCheckmarkButton, GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 import { SearchProvidersSettings } from './SearchProvidersSettings.js';
@@ -125,6 +125,9 @@ const SimpleModelSettingsDialog = ({
 	const currentOverrides = settingsState.overridesOfModel?.[providerName]?.[modelName] ?? undefined;
 	const { recognizedModelName, isUnrecognizedModel } = defaultModelCapabilities
 
+	// context diagnostics for the currently selected model
+	const diagnostics: ModelContextDiagnostics = getModelContextDiagnostics(providerName, modelName, undefined);
+
 	// Create the placeholder with the default values for allowed keys
 	const partialDefaults: Partial<ModelOverrides> = {};
 	for (const k of modelOverrideKeys) { if (defaultModelCapabilities[k]) partialDefaults[k] = defaultModelCapabilities[k] as any; }
@@ -177,6 +180,30 @@ const SimpleModelSettingsDialog = ({
 				cleaned[k] = parsedInput[k] as any;
 			}
 		}
+
+		// validate: context window must be a positive number
+		if (cleaned.contextWindow !== undefined) {
+			const cw = Number(cleaned.contextWindow);
+			if (!Number.isFinite(cw) || cw <= 0) {
+				setErrorMsg('Context window must be a positive number.');
+				return;
+			}
+		}
+
+		// validate: reserved output must not exceed the effective context window
+		if (cleaned.reservedOutputTokenSpace !== undefined && cleaned.reservedOutputTokenSpace !== null) {
+			const out = Number(cleaned.reservedOutputTokenSpace);
+			const cw = cleaned.contextWindow !== undefined ? Number(cleaned.contextWindow) : defaultModelCapabilities.contextWindow;
+			if (!Number.isFinite(out) || out <= 0) {
+				setErrorMsg('Reserved output tokens must be a positive number.');
+				return;
+			}
+			if (out > cw) {
+				setErrorMsg(`Reserved output tokens (${out}) cannot exceed the context window (${cw}).`);
+				return;
+			}
+		}
+
 		await settingsStateService.setOverridesOfModel(providerName, modelName, cleaned);
 		onClose();
 	};
@@ -223,6 +250,26 @@ const SimpleModelSettingsDialog = ({
 						: isUnrecognizedModel
 							? `Model not recognized by Kodia.`
 							: `Kodia recognizes ${modelName} ("${recognizedModelName}").`}
+				</div>
+
+				{/* Context diagnostics */}
+				<div className="mb-4 p-3 rounded-sm bg-void-bg-2 border border-void-border-2">
+					<div className="text-xs font-semibold text-void-fg-3 mb-1 uppercase tracking-wider">Context window diagnostics</div>
+					<div className="text-sm text-void-fg-3 space-y-1">
+						<div className="flex justify-between"><span>Model:</span> <span className="text-void-fg-1">{diagnostics.modelName}</span></div>
+						<div className="flex justify-between"><span>Provider:</span> <span className="text-void-fg-1">{diagnostics.providerName}</span></div>
+						<div className="flex justify-between"><span>Configured context:</span> <span className="text-void-fg-1">{diagnostics.configuredContextWindow.toLocaleString()} tokens</span> <span className="text-xs text-void-fg-4">[{diagnostics.configuredContextWindowSource}]</span></div>
+						<div className="flex justify-between"><span>Effective context:</span> <span className="text-void-fg-1">{diagnostics.effectiveContextWindow.toLocaleString()} tokens</span></div>
+						<div className="flex justify-between"><span>Reserved output:</span> <span className="text-void-fg-1">{diagnostics.reservedOutputTokens === null ? 'default (4096)' : diagnostics.reservedOutputTokens.toLocaleString() + ' tokens'}</span> <span className="text-xs text-void-fg-4">[{diagnostics.reservedOutputTokenSource}]</span></div>
+						<div className="flex justify-between"><span>Usable input:</span> <span className="text-void-fg-1">{diagnostics.usableInputTokens.toLocaleString()} tokens</span></div>
+						<div className="flex justify-between"><span>Status:</span> <span className={`text-xs ${diagnostics.isFallback ? 'text-orange-500' : diagnostics.isVerified ? 'text-green-500' : 'text-void-fg-3'}`}>{
+							diagnostics.isFallback ? 'Fallback metadata (limit not established)'
+								: diagnostics.isVerified ? 'Verified / catalog'
+								: 'Catalog'
+						}</span></div>
+						{diagnostics.isOverridden && <div className="flex justify-between"><span>Overrides:</span> <span className="text-xs text-blue-500">User-configured overrides applied</span></div>}
+						{diagnostics.isUnrecognizedModel && <div className="flex justify-between"><span>Recognition:</span> <span className="text-xs text-orange-500">Unrecognized model — using fallback limits</span></div>}
+					</div>
 				</div>
 
 

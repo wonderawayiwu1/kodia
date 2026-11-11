@@ -193,12 +193,24 @@ export const defaultModelsOfProvider = {
 
 
 
+/**
+ * Source of a model's context/output limits.
+ * - 'verified': from official provider documentation
+ * - 'catalog': from Kodia's built-in catalog (may be derived from verified sources)
+ * - 'provider-api': from provider's /v1/models endpoint
+ * - 'user-configured': explicitly set by user in settings
+ * - 'fallback': conservative default when actual limit is unknown
+ */
+export type LimitSource = 'verified' | 'catalog' | 'provider-api' | 'user-configured' | 'fallback';
+
 export type VoidStaticModelInfo = { // not stateful
 	// Kodia uses the information below to know how to handle each model.
 	// for some examples, see openAIModelOptions and anthropicModelOptions (below).
 
 	contextWindow: number; // input tokens
+	contextWindowSource?: LimitSource; // where the context window value came from
 	reservedOutputTokenSpace: number | null; // reserve this much space in the context window for output, defaults to 4096 if null
+	reservedOutputTokenSpaceSource?: LimitSource; // where the output limit value came from
 
 	supportsSystemMessage: false | 'system-role' | 'developer-role' | 'separated'; // typically you should use 'system-role'. 'separated' means the system message is passed as a separate field (e.g. anthropic)
 	specialToolFormat?: 'openai-style' | 'anthropic-style' | 'gemini-style', // typically you should use 'openai-style'. null means "can't call tools by default", and asks the LLM to output XML in agent mode
@@ -215,6 +227,7 @@ export type VoidStaticModelInfo = { // not stateful
 		readonly canTurnOffReasoning: boolean; // whether or not the user can disable reasoning mode (false if the model only supports reasoning)
 		readonly canIOReasoning: boolean; // whether or not the model actually outputs reasoning (eg o1 lets us control reasoning but not output it)
 		readonly reasoningReservedOutputTokenSpace?: number; // overrides normal reservedOutputTokenSpace
+		readonly reasoningReservedOutputTokenSpaceSource?: LimitSource; // where the reasoning output limit came from
 		readonly reasoningSlider?:
 		| undefined
 		| { type: 'budget_slider'; min: number; max: number; default: number } // anthropic supports this (reasoning budget)
@@ -245,7 +258,9 @@ export type VoidStaticModelInfo = { // not stateful
 
 export const modelOverrideKeys = [
 	'contextWindow',
+	'contextWindowSource',
 	'reservedOutputTokenSpace',
+	'reservedOutputTokenSpaceSource',
 	'supportsSystemMessage',
 	'specialToolFormat',
 	'supportsFIM',
@@ -284,7 +299,9 @@ type VoidStaticProviderInfo = { // doesn't change (not stateful)
 
 const defaultModelOptions = {
 	contextWindow: 4_096,
+	contextWindowSource: 'fallback',
 	reservedOutputTokenSpace: 4_096,
+	reservedOutputTokenSpaceSource: 'fallback',
 	cost: { input: 0, output: 0 },
 	downloadable: false,
 	supportsSystemMessage: false,
@@ -470,6 +487,13 @@ const extensiveModelOptionsFallback: VoidStaticProviderInfo['modelOptionsFallbac
 			// Mistral and xAI read PDFs only through their own APIs (document_url chunks, Files + Responses), which other
 			// providers serving their models don't offer
 			...(obj === (mistralModelOptions as unknown) || obj === (xAIModelOptions as unknown) ? { supportsPDF: false } : {}),
+			// Provide default source fields for catalog entries that don't have them yet
+			contextWindowSource: opts.contextWindowSource ?? 'catalog',
+			reservedOutputTokenSpaceSource: opts.reservedOutputTokenSpaceSource ?? 'catalog',
+			reasoningCapabilities: opts.reasoningCapabilities ? {
+				...opts.reasoningCapabilities,
+				reasoningReservedOutputTokenSpaceSource: opts.reasoningCapabilities.reasoningReservedOutputTokenSpaceSource ?? 'catalog'
+			} : false,
 			cost: { input: 0, output: 0 },
 			downloadable: false,
 			...fallbackKnownValues
@@ -635,7 +659,9 @@ export const anthropicModelFeatures = {
 const anthropicModelOptions = {
 	'claude-fable-5-1': { // https://platform.claude.com/docs/en/models/fable-5-1/overview
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 10.00, cache_read: 0.25, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -643,11 +669,16 @@ const anthropicModelOptions = {
 		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: {
+			...anthropicAdaptiveThinkingCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'claude-mythos-5-1': { // invite-only (Project Glasswing) — same specs as Fable 5.1
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 10.00, cache_read: 0.25, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -655,11 +686,16 @@ const anthropicModelOptions = {
 		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: {
+			...anthropicAdaptiveThinkingCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'claude-fable-5': { // https://docs.anthropic.com/en/docs/about-claude/models/overview
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 10.00, cache_read: 1.00, cache_write: 12.50, output: 50.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -667,11 +703,16 @@ const anthropicModelOptions = {
 		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: {
+			...anthropicAdaptiveThinkingCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'claude-opus-5-5': { // https://docs.anthropic.com/en/docs/about-claude/models/overview — adaptive, default effort medium
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 4.00, cache_read: 0.20, cache_write: 5.00, output: 20.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -679,11 +720,16 @@ const anthropicModelOptions = {
 		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: {
+			...anthropicAdaptiveThinkingCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'claude-opus-5': { // https://docs.anthropic.com/en/docs/about-claude/models/overview — same price as Opus 4.8
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -691,11 +737,16 @@ const anthropicModelOptions = {
 		supportsPDF: true,
 		specialToolFormat: 'anthropic-style',
 		supportsSystemMessage: 'separated',
-		reasoningCapabilities: anthropicAdaptiveThinkingCapabilities,
+		reasoningCapabilities: {
+			...anthropicAdaptiveThinkingCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'claude-opus-4-8': { // https://docs.anthropic.com/en/docs/about-claude/models/overview
 		contextWindow: 1_000_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 5.00, cache_read: 0.50, cache_write: 6.25, output: 25.00 },
 		downloadable: false,
 		supportsFIM: false,
@@ -860,7 +911,9 @@ const openAI6SolLunaReasoningEffortCapabilities = {
 const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 	'gpt-6-astra': { // flagship — https://developers.openai.com/api/docs/models/gpt-6-astra
 		contextWindow: 1_050_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 10.00, output: 50.00, cache_read: 1.00, cache_write: 12.50 },
 		downloadable: false,
 		supportsFIM: false,
@@ -868,11 +921,16 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
-		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
+		reasoningCapabilities: {
+			...openAI6ReasoningEffortCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'gpt-6.1-sol': { // upgrade to GPT-6 Sol — https://developers.openai.com/api/docs/models/gpt-6.1-sol
 		contextWindow: 1_050_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 2.00, output: 10.00, cache_read: 0.10 },
 		downloadable: false,
 		supportsFIM: false,
@@ -881,11 +939,16 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
 		// low / medium (default) / high / xhigh / max — 'none' and 'minimal' are rejected, same set as Astra
-		reasoningCapabilities: openAI6ReasoningEffortCapabilities,
+		reasoningCapabilities: {
+			...openAI6ReasoningEffortCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'gpt-6-sol': { // coding / agents — https://developers.openai.com/api/docs/models/gpt-6-sol
 		contextWindow: 1_050_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 2.00, output: 10.00, cache_read: 0.20, cache_write: 2.50 },
 		downloadable: false,
 		supportsFIM: false,
@@ -893,11 +956,16 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
-		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
+		reasoningCapabilities: {
+			...openAI6SolLunaReasoningEffortCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'catalog'
+		},
 	},
 	'gpt-6-luna': { // high-volume — https://developers.openai.com/api/docs/models/gpt-6-luna
 		contextWindow: 1_050_000,
+		contextWindowSource: 'catalog',
 		reservedOutputTokenSpace: 128_000,
+		reservedOutputTokenSpaceSource: 'catalog',
 		cost: { input: 0.10, output: 0.50, cache_read: 0.01, cache_write: 0.125 },
 		downloadable: false,
 		supportsFIM: false,
@@ -1633,7 +1701,9 @@ const nvidiaModelOptions = {
 	// https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b/modelcard
 	'nvidia/nemotron-3.5-super-vl-120b-a12b': {
 		contextWindow: 1_048_576, // verified: up to 1M tokens (advertised maximum; hosted deployment may differ)
+		contextWindowSource: 'verified',
 		reservedOutputTokenSpace: 32_768, // verified: max_tokens maximum
+		reservedOutputTokenSpaceSource: 'verified',
 		cost: { input: 0, output: 0 },
 		downloadable: false,
 		supportsFIM: false,
@@ -1641,7 +1711,10 @@ const nvidiaModelOptions = {
 		supportsPDF: false,
 		specialToolFormat: 'openai-style', // verified: the API accepts a `tools` parameter
 		supportsSystemMessage: 'system-role', // verified: the API accepts a `system` role
-		reasoningCapabilities: nvidiaReasoningCapabilities,
+		reasoningCapabilities: {
+			...nvidiaReasoningCapabilities,
+			reasoningReservedOutputTokenSpaceSource: 'verified'
+		},
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
 
@@ -2093,8 +2166,10 @@ export const getModelCapabilities = (
 	for (const modelName_ in modelOptions) {
 		const lowercaseModelName_ = modelName_.toLowerCase()
 		if (lowercaseModelName === lowercaseModelName_) {
+			const baseCtx = modelOptions[modelName_].contextWindow;
+			const clean = sanitizeOverrideValues(baseCtx, overrides);
 			// spread the catalog entry under its own key: the user's spelling may differ in case
-			return { ...modelOptions[modelName_], ...overrides, modelName, recognizedModelName: modelName_, isUnrecognizedModel: false };
+			return clampModelOutputToContext({ ...modelOptions[modelName_], ...clean, modelName, recognizedModelName: modelName_, isUnrecognizedModel: false });
 		}
 	}
 
@@ -2102,16 +2177,92 @@ export const getModelCapabilities = (
 	const detected = detectedModelOptions[providerName]?.[modelName];
 	if (detected) {
 		const fromName = modelOptionsFallback(modelName) ?? { ...defaultModelOptions, supportsVision: looksLikeVisionModel(lowercaseModelName) };
-		return { ...fromName, ...detected, ...overrides, modelName, recognizedModelName: modelName, isUnrecognizedModel: false };
+		const baseCtx = fromName.contextWindow;
+		const clean = sanitizeOverrideValues(baseCtx, overrides);
+		return clampModelOutputToContext({ ...fromName, ...detected, ...clean, modelName, recognizedModelName: modelName, isUnrecognizedModel: false });
 	}
 
 	const result = modelOptionsFallback(modelName)
 	if (result) {
-		return { ...result, ...overrides, modelName: result.modelName, isUnrecognizedModel: false };
+		const baseCtx = result.contextWindow;
+		const clean = sanitizeOverrideValues(baseCtx, overrides);
+		return clampModelOutputToContext({ ...result, ...clean, modelName: result.modelName, isUnrecognizedModel: false });
 	}
 
 	// an unknown family can still be a known kind of vision model (llava, moondream, minicpm-v...)
-	return { modelName, ...defaultModelOptions, supportsVision: looksLikeVisionModel(modelName.toLowerCase()), ...overrides, isUnrecognizedModel: true };
+	// For local providers, provide a more generous default context window
+	const localProviderNamesSet: readonly ProviderName[] = ['lmStudio', 'mlx', 'ollama', 'vLLM'];
+	const isLocalProvider = localProviderNamesSet.includes(providerName);
+	const fallbackContextWindow = isLocalProvider ? 32_000 : 4_096;
+	const fallbackOutputTokens = isLocalProvider ? 8_192 : 4_096;
+	const clean = sanitizeOverrideValues(fallbackContextWindow, overrides);
+	return clampModelOutputToContext({
+		modelName,
+		...defaultModelOptions,
+		contextWindow: fallbackContextWindow,
+		contextWindowSource: 'fallback',
+		reservedOutputTokenSpace: fallbackOutputTokens,
+		reservedOutputTokenSpaceSource: 'fallback',
+		supportsVision: looksLikeVisionModel(modelName.toLowerCase()),
+		...clean,
+		isUnrecognizedModel: true
+	});
+}
+
+// Sanitize per-model override values before they are merged with catalog metadata:
+// - contextWindow: dropped if not a positive number (keeps the model's own value)
+// - reservedOutputTokenSpace: null preserved; non-numeric dropped; clamped to never exceed contextWindow
+const sanitizeOverrideValues = (baseContextWindow: number, overrides: Partial<ModelOverrides> | undefined): Partial<ModelOverrides> => {
+	if (!overrides) return {};
+	const clean: Partial<ModelOverrides> = {};
+	if (overrides.contextWindow !== undefined) {
+		const n = Number(overrides.contextWindow);
+		if (Number.isFinite(n) && n > 0) clean.contextWindow = n;
+		// else: invalid context window is dropped, keeping the model's own value
+	}
+	if (overrides.reservedOutputTokenSpace !== undefined) {
+		if (overrides.reservedOutputTokenSpace === null) {
+			clean.reservedOutputTokenSpace = null;
+		}
+		else {
+			const n = Number(overrides.reservedOutputTokenSpace);
+			if (Number.isFinite(n) && n > 0) {
+				clean.reservedOutputTokenSpace = Math.min(n, baseContextWindow);
+			}
+			// else: invalid output value is dropped
+		}
+	}
+	// pass through other override keys unchanged
+	for (const k of modelOverrideKeys) {
+		if (k === 'contextWindow' || k === 'reservedOutputTokenSpace') continue;
+		if (k in overrides) clean[k] = overrides[k as keyof ModelOverrides];
+	}
+	return clean;
+}
+
+// Clamp reservedOutputTokenSpace so it never exceeds the effective context window. Preserves
+// null (meaning "use the model default") and only applies a final safety clamp. Defaults
+// undefined source fields to 'catalog' for catalog-resolved models.
+const clampModelOutputToContext = (info: VoidStaticModelInfo & { modelName: string, isUnrecognizedModel: boolean, recognizedModelName?: string }): VoidStaticModelInfo & { modelName: string, isUnrecognizedModel: boolean, recognizedModelName?: string } => {
+	const contextWindow = Number.isFinite(info.contextWindow) && info.contextWindow > 0 ? info.contextWindow : 4_096;
+	let reserved = info.reservedOutputTokenSpace;
+	// null means "use default": keep it as-is
+	if (reserved !== null && reserved !== undefined) {
+		if (!Number.isFinite(reserved) || reserved <= 0) {
+			reserved = 4_096;
+		}
+		// Output must never exceed the effective context window.
+		if (reserved > contextWindow) {
+			reserved = contextWindow;
+		}
+	}
+	return {
+		...info,
+		contextWindow,
+		contextWindowSource: info.contextWindowSource ?? 'catalog',
+		reservedOutputTokenSpace: reserved,
+		reservedOutputTokenSpaceSource: info.reservedOutputTokenSpaceSource ?? 'catalog',
+	};
 }
 
 // Dollars for one request. `cost` is per million tokens; cache rates fall back to the input rate
@@ -2172,6 +2323,52 @@ export const getReservedOutputTokenSpace = (providerName: ProviderName, modelNam
 	} = getModelCapabilities(providerName, modelName, opts.overridesOfModel)
 	// the reasoning override only applies when set; otherwise the model's own output limit
 	return (opts.isReasoningEnabled && reasoningCapabilities ? reasoningCapabilities.reasoningReservedOutputTokenSpace : undefined) ?? reservedOutputTokenSpace
+}
+
+// Diagnostic summary of a model's context configuration. Intended for the settings UI.
+export type ModelContextDiagnostics = {
+	modelName: string;
+	providerName: ProviderName;
+	configuredContextWindow: number;
+	configuredContextWindowSource: LimitSource;
+	effectiveContextWindow: number;
+	reservedOutputTokens: number | null;
+	reservedOutputTokenSource: LimitSource;
+	usableInputTokens: number;
+	isVerified: boolean;
+	isOverridden: boolean;
+	isFallback: boolean;
+	isUnrecognizedModel: boolean;
+};
+
+export const getModelContextDiagnostics = (
+	providerName: ProviderName,
+	modelName: string,
+	overridesOfModel: OverridesOfModel | undefined
+): ModelContextDiagnostics => {
+	const caps = getModelCapabilities(providerName, modelName, overridesOfModel);
+	const overrides = overridesOfModel?.[providerName]?.[modelName];
+	const contextWindow = caps.contextWindow;
+	const reserved = caps.reservedOutputTokenSpace ?? null;
+	const isOverridden = !!overrides && (overrides.contextWindow !== undefined || overrides.reservedOutputTokenSpace !== undefined);
+	const isFallback = caps.contextWindowSource === 'fallback' || caps.reservedOutputTokenSpaceSource === 'fallback';
+	const isVerified = caps.contextWindowSource === 'verified' || caps.reservedOutputTokenSpaceSource === 'verified';
+	// usable input = context minus reserved output (with a floor so tiny contexts still have room)
+	const usableInputTokens = Math.max(contextWindow - (reserved ?? 0), 0);
+	return {
+		modelName,
+		providerName,
+		configuredContextWindow: contextWindow,
+		configuredContextWindowSource: caps.contextWindowSource ?? 'fallback',
+		effectiveContextWindow: contextWindow,
+		reservedOutputTokens: reserved,
+		reservedOutputTokenSource: caps.reservedOutputTokenSpaceSource ?? 'fallback',
+		usableInputTokens,
+		isVerified,
+		isOverridden,
+		isFallback,
+		isUnrecognizedModel: caps.isUnrecognizedModel,
+	};
 }
 
 // used to force reasoning state (complex) into something simple we can just read from when sending a message
