@@ -44,6 +44,9 @@ export class WebSearchMainService implements IWebSearchService {
 	private _searchCache: Map<string, { response: SearchResponse; timestamp: number }> = new Map();
 	private _cacheMaxSize = 1000;
 
+	// In-flight request deduplication
+	private _inFlightRequests: Map<string, Promise<SearchResponse>> = new Map();
+
 	constructor(
 		@IApplicationStorageMainService private readonly _storageService: IApplicationStorageMainService,
 		@IEncryptionMainService private readonly _encryptionService: IEncryptionMainService,
@@ -218,6 +221,9 @@ export class WebSearchMainService implements IWebSearchService {
 		const cacheEnabled = cacheSettings.enabled;
 		const cacheTTLMs = cacheSettings.ttlMs;
 
+		// Read reranker settings for cache key (must match _applyReranking logic)
+		const { enabled: rerankerEnabled, maxPassages: rerankerMaxPassages } = await this._readRerankerSettings();
+
 		const enabledProviders = await this._getEnabledProvidersSorted();
 
 		if (enabledProviders.length === 0) {
@@ -255,32 +261,50 @@ export class WebSearchMainService implements IWebSearchService {
 					maxResults,
 				};
 
-				// Generate cache key
-				const cacheKey = this._generateCacheKey(name, providerRequest, settings);
+				// Generate cache key (includes reranker settings to prevent stale results)
+				const cacheKey = this._generateCacheKey(name, providerRequest, settings, rerankerEnabled, rerankerMaxPassages);
 
 				// Check cache if enabled
 				if (cacheEnabled) {
 					const cached = this._getFromCache(cacheKey, cacheTTLMs);
 					if (cached) {
 						console.log(`[WebSearchMainService] Cache hit for provider ${name}`);
-						return {
-							...cached.response,
-							provider: `${cached.response.provider} (cached)` as WebSearchProviderName,
-						};
+						// Return cached response without modifying provider identifier
+						return cached.response;
 					}
 				}
 
-				const response = await provider.search(providerRequest, settings);
-
-				// Apply NVIDIA reranking if enabled
-				const rerankedResponse = await this._applyReranking(request.query, response, name);
-
-				// Cache the successful response
+				// In-flight request deduplication: check if identical request is already in progress
 				if (cacheEnabled) {
-					this._setCache(cacheKey, rerankedResponse);
+					const existingPromise = this._inFlightRequests.get(cacheKey);
+					if (existingPromise) {
+						console.log(`[WebSearchMainService] Deduplicating in-flight request for provider ${name}`);
+						return existingPromise;
+					}
 				}
 
-				return rerankedResponse;
+				// Execute search with deduplication promise
+				const searchPromise = this._executeProviderSearch(
+					name,
+					provider,
+					providerRequest,
+					settings,
+					request.query,
+					cacheEnabled,
+					cacheKey
+				);
+
+				if (cacheEnabled) {
+					this._inFlightRequests.set(cacheKey, searchPromise);
+				}
+
+				try {
+					return await searchPromise;
+				} finally {
+					if (cacheEnabled) {
+						this._inFlightRequests.delete(cacheKey);
+					}
+				}
 			} catch (error) {
 				lastError = error instanceof Error ? error : new Error(String(error));
 
@@ -304,6 +328,32 @@ export class WebSearchMainService implements IWebSearchService {
 
 		// All providers failed
 		throw lastError ?? new Error('All enabled web search providers failed.');
+	}
+
+	/**
+	 * Executes a single provider search with caching.
+	 * Extracted to support in-flight request deduplication.
+	 */
+	private async _executeProviderSearch(
+		name: WebSearchProviderName,
+		provider: WebSearchProvider,
+		providerRequest: SearchRequest,
+		settings: SearchProviderSettings,
+		originalQuery: string,
+		cacheEnabled: boolean,
+		cacheKey: string
+	): Promise<SearchResponse> {
+		const response = await provider.search(providerRequest, settings);
+
+		// Apply NVIDIA reranking if enabled
+		const rerankedResponse = await this._applyReranking(originalQuery, response, name);
+
+		// Cache the successful response
+		if (cacheEnabled) {
+			this._setCache(cacheKey, rerankedResponse);
+		}
+
+		return rerankedResponse;
 	}
 
 	/**
@@ -353,9 +403,16 @@ export class WebSearchMainService implements IWebSearchService {
 
 	/**
 	 * Generates a cache key for a search request.
-	 * The key includes all parameters that affect the search results.
+	 * The key includes all parameters that affect the search results,
+	 * including reranker settings since they affect the final output.
 	 */
-	private _generateCacheKey(providerName: WebSearchProviderName, request: SearchRequest, settings: SearchProviderSettings): string {
+	private _generateCacheKey(
+		providerName: WebSearchProviderName,
+		request: SearchRequest,
+		settings: SearchProviderSettings,
+		rerankerEnabled: boolean,
+		rerankerMaxPassages: number
+	): string {
 		const keyParts = [
 			providerName,
 			request.query,
@@ -365,6 +422,8 @@ export class WebSearchMainService implements IWebSearchService {
 			request.filters?.domains?.sort().join(',') ?? 'none',
 			request.filters?.excludeDomains?.sort().join(',') ?? 'none',
 			request.filters?.safeSearch ? 'safe' : 'off',
+			rerankerEnabled ? 'rerank-on' : 'rerank-off',
+			rerankerEnabled ? String(rerankerMaxPassages) : 'n/a',
 		];
 		return keyParts.join('|');
 	}
