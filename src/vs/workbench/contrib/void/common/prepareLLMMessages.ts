@@ -8,7 +8,7 @@
 
 import { deepClone } from '../../../../base/common/objects.js';
 import { getIsReasoningEnabledState, getReservedOutputTokenSpace, getModelCapabilities } from './modelCapabilities.js';
-import { estimateTokens } from './tokenizer.js';
+import { estimateTokens, getTokenizer, TokenizerSelection } from './tokenizer.js';
 import { reParsedToolXMLString } from './prompt/prompts.js';
 import { AnthropicDocumentBlock, AnthropicImageBlock, AnthropicLLMChatMessage, AnthropicReasoning, GeminiLLMChatMessage, LLMChatMessage, MistralDocumentPart, OpenAIFilePart, OpenAIImagePart, OpenAILLMChatMessage, RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { FeatureName, ModelSelection, OptionsOfModelSelection, OverridesOfModel, ProviderName } from './voidSettingsTypes.js';
@@ -323,6 +323,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	imageFormat,
 	sendWorkspaceContextAsSystem,
 	tokenRatio,
+	tokenizerSelection,
 }: {
 	messages: SimpleLLMMessage[],
 	systemMessage: string,
@@ -335,7 +336,11 @@ const prepareOpenAIOrAnthropicMessages = ({
 	imageFormat: ImageFormat, // only used by XML tool calling, whose messages can go to any provider
 	sendWorkspaceContextAsSystem: boolean,
 	tokenRatio: number, // real tokens per estimated token, for this model (see recordInputTokens)
+	tokenizerSelection?: TokenizerSelection, // model-aware tokenizer; falls back to generic estimateTokens when absent
 }): { messages: AnthropicOrOpenAILLMMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean } => {
+
+	// Use the model-aware tokenizer when available, otherwise fall back to the generic estimate.
+	const countTokens = tokenizerSelection ? tokenizerSelection.countTokens : estimateTokens;
 
 	// the model's real output limit; capped at half the window so small local models keep room for input
 	reservedOutputTokenSpace = Math.min(
@@ -369,7 +374,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	// the higher the weight, the higher the desire to truncate - TRIM HIGHEST WEIGHT MESSAGES
 	const alreadyTrimmedIdxes = new Set<number>()
 	const weight = (message: MesType, messages: MesType[], idx: number) => {
-		const base = estimateTokens(message.content)
+		const base = countTokens(message.content)
 
 		let multiplier: number
 		multiplier = 1 + (messages.length - 1 - idx) / messages.length // slow rampdown from 2 to 1 as index increases
@@ -412,7 +417,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	}
 
 	let totalTokens = 0
-	for (const m of messages) { totalTokens += estimateTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0) }
+	for (const m of messages) { totalTokens += countTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0) }
 	// in estimated tokens: the budget is in real tokens, and estimates run below them (other tokenizer, tool schemas)
 	const tokensNeedToTrim = totalTokens - effectiveInputBudget
 	// the caller can clear old tool results (once) instead of the lossy trimming below
@@ -438,11 +443,11 @@ const prepareOpenAIOrAnthropicMessages = ({
 		if (trimIdx === -1) break
 
 		const m = messages[trimIdx]
-		const msgTokens = estimateTokens(m.content)
+		const msgTokens = countTokens(m.content)
 
 		// if can finish here, do
 		const fullyTrimmedContent = m.content.substring(0, TRIM_TO_LEN - '...'.length) + '...'
-		const numTokensWillTrim = msgTokens - estimateTokens(fullyTrimmedContent)
+		const numTokensWillTrim = msgTokens - countTokens(fullyTrimmedContent)
 		if (numTokensWillTrim > remainingTokensToTrim) {
 			// don't need to trim this message all the way down — cut a proportional number of
 			// characters based on this message's own token density (code is denser than prose)
@@ -464,7 +469,7 @@ const prepareOpenAIOrAnthropicMessages = ({
 	// media-token accounting, and effective input budget as the initial calculation.
 	let postTrimTokens = 0
 	for (const m of messages) {
-		postTrimTokens += estimateTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0)
+		postTrimTokens += countTokens(m.content) + (m.role === 'user' ? mediaTokensOf(m.media) : 0)
 	}
 	const postTrimTokensNeedToTrim = postTrimTokens - effectiveInputBudget
 	const wasStillOverBudgetAfterTrimming = postTrimTokensNeedToTrim > 0
@@ -622,13 +627,14 @@ export const prepareMessages = (params: {
 	providerName: ProviderName,
 	sendWorkspaceContextAsSystem?: boolean,
 	tokenRatio?: number,
+	tokenizerSelection?: TokenizerSelection, // model-aware tokenizer; falls back to generic estimateTokens when absent
 }): { messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean } => {
 
 	const specialFormat = params.specialToolFormat // this is just for ts stupidness
 
 	// if need to convert to gemini style of messaes, do that (treat as anthropic style, then convert to gemini style)
 	if (params.providerName === 'gemini' || specialFormat === 'gemini-style') {
-		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false, tokenRatio: params.tokenRatio ?? 1 })
+		const res = prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat === 'gemini-style' ? 'anthropic-style' : undefined, imageFormat: 'anthropic', sendWorkspaceContextAsSystem: false, tokenRatio: params.tokenRatio ?? 1, tokenizerSelection: params.tokenizerSelection })
 		const messages = res.messages as AnthropicLLMChatMessage[]
 		const messages2 = prepareGeminiMessages(messages)
 		return { messages: messages2, separateSystemMessage: res.separateSystemMessage, estimatedInputTokens: res.estimatedInputTokens, wasInitiallyOverBudget: res.wasInitiallyOverBudget, wasStillOverBudgetAfterTrimming: res.wasStillOverBudgetAfterTrimming, wasTrimmed: res.wasTrimmed }
@@ -636,7 +642,7 @@ export const prepareMessages = (params: {
 
 	// with XML tools, the messages still go to the provider's own API, which sets the image format
 	const imageFormat: ImageFormat = params.providerName === 'anthropic' ? 'anthropic' : params.providerName === 'mistral' ? 'mistral' : 'openai'
-	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem, tokenRatio: params.tokenRatio ?? 1 })
+	return prepareOpenAIOrAnthropicMessages({ ...params, specialToolFormat: specialFormat, imageFormat, sendWorkspaceContextAsSystem: !!params.sendWorkspaceContextAsSystem, tokenRatio: params.tokenRatio ?? 1, tokenizerSelection: params.tokenizerSelection })
 }
 
 
@@ -658,12 +664,14 @@ export const prepareSimpleLLMMessages = ({ simpleMessages, systemMessage, aiInst
 		specialToolFormat,
 		contextWindow,
 		supportsSystemMessage,
+		tokenizerEncoding,
 	} = getModelCapabilities(providerName, modelName, overridesOfModel)
 
 	const modelSelectionOptions = optionsOfModelSelection[featureName][providerName]?.[modelName]
 
 	const isReasoningEnabled = getIsReasoningEnabledState(featureName, providerName, modelName, modelSelectionOptions, overridesOfModel)
 	const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName, { isReasoningEnabled, overridesOfModel })
+	const tokenizerSelection = getTokenizer(providerName, modelName, { tokenizerEncoding })
 
 	const { messages, separateSystemMessage } = prepareMessages({
 		messages: simpleMessages,
@@ -675,6 +683,7 @@ export const prepareSimpleLLMMessages = ({ simpleMessages, systemMessage, aiInst
 		contextWindow,
 		reservedOutputTokenSpace,
 		providerName,
+		tokenizerSelection,
 	})
 	return { messages, separateSystemMessage }
 }

@@ -21,7 +21,7 @@ import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
-import { estimateTokens } from '../../common/tokenizer.js';
+import { estimateTokens, getTokenizer } from '../../common/tokenizer.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
 import { createHash } from 'crypto';
 
@@ -408,15 +408,17 @@ const _trimMessagesForToolBudget = (
 	tools: unknown,
 	contextWindow: number,
 	reservedOutputTokenSpace: number | null | undefined,
+	tokenizer?: { countTokens: (text: string) => number },
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] => {
 	if (contextWindow > SMALL_CONTEXT_WINDOW_THRESHOLD || !tools) return messages
 
-	const toolTokens = estimateTokens(JSON.stringify(tools))
+	const countTokens = tokenizer ? tokenizer.countTokens : estimateTokens;
+	const toolTokens = countTokens(JSON.stringify(tools))
 	const outputSpace = Math.max(contextWindow * 1 / 2, reservedOutputTokenSpace ?? 4_096)
 	const budget = Math.max(contextWindow - outputSpace - toolTokens, 1_250)
 
 	const msgs = messages.map(m => ({ ...m }))
-	let overflow = msgs.reduce((sum, m) => sum + estimateTokens(_messageContentText(m.content)), 0) - budget
+	let overflow = msgs.reduce((sum, m) => sum + countTokens(_messageContentText(m.content)), 0) - budget
 
 	let guard = 0
 	while (overflow > 0 && guard < 100) {
@@ -427,7 +429,7 @@ const _trimMessagesForToolBudget = (
 		let largestTokens = -1
 		for (let i = 1; i < msgs.length - 1; i += 1) {
 			if (typeof msgs[i].content !== 'string') continue // don't touch multimodal content
-			const t = estimateTokens(msgs[i].content as string)
+			const t = countTokens(msgs[i].content as string)
 			if (t > largestTokens) { largestTokens = t; largestIdx = i }
 		}
 		if (largestIdx === -1 || largestTokens <= 0) break
@@ -438,7 +440,7 @@ const _trimMessagesForToolBudget = (
 		const charsToRemove = Math.ceil(Math.min(overflow, largestTokens) * charsPerToken)
 		const targetLen = Math.max(content.length - charsToRemove - 3, 0)
 		m.content = content.slice(0, targetLen).trim() + '...'
-		overflow -= largestTokens - estimateTokens(m.content as string)
+		overflow -= largestTokens - countTokens(m.content as string)
 	}
 	return msgs
 }
@@ -628,6 +630,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		additionalOpenAIPayload,
 		contextWindow,
 		supportsPredictedOutputs,
+		tokenizerEncoding,
 	} = getModelCapabilities(providerName, modelName_, overridesOfModel)
 
 	const { providerReasoningIOSettings } = getProviderCapabilities(providerName)
@@ -647,9 +650,10 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		{ tools: potentialTools } as const
 		: {}
 
+	const tokenizer = getTokenizer(providerName, modelName_, { tokenizerEncoding })
 	const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName_, { isReasoningEnabled: !!reasoningInfo?.isReasoningEnabled, overridesOfModel })
 	const preparedMessages = nativeToolsObj.tools
-		? _trimMessagesForToolBudget(messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[], nativeToolsObj.tools, contextWindow, reservedOutputTokenSpace)
+		? _trimMessagesForToolBudget(messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[], nativeToolsObj.tools, contextWindow, reservedOutputTokenSpace, tokenizer)
 		: messages as any
 
 	// instance

@@ -5,6 +5,7 @@
 
 import { FeatureName, ModelSelectionOptions, OverridesOfModel, ProviderName, SettingsOfProvider } from './voidSettingsTypes.js';
 import { LLMUsage } from './sendLLMMessageTypes.js';
+import { TokenizerEncoding } from './tokenizer.js';
 
 
 
@@ -218,6 +219,12 @@ export type VoidStaticModelInfo = { // not stateful
 	supportsVision?: boolean; // whether the model accepts images in user messages. Defaults to false: images are left out (with a note) rather than risking an API error
 	supportsPDF?: boolean; // whether the model reads PDFs sent as documents (Anthropic document blocks, OpenAI file parts, Gemini inline data). Defaults to false
 	supportsPredictedOutputs?: boolean; // whether the model accepts a `prediction` of its output (OpenAI-compatible), which speeds up rewrites that mostly repeat the original code. Defaults to false
+
+	// Optional tokenizer encoding hint. Only set when the exact model/tokenizer
+	// compatibility is established (e.g. OpenAI models using o200k_base or cl100k_base).
+	// Left undefined for providers whose tokenizer is not established (Anthropic,
+	// Gemini, NVIDIA, DeepSeek, Mistral, xAI, Groq, OpenRouter, local models).
+	tokenizerEncoding?: TokenizerEncoding;
 
 	additionalOpenAIPayload?: { [key: string]: string } // additional payload in the message body for requests that are openai-compatible (ollama, vllm, openai, openrouter, etc)
 
@@ -921,6 +928,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: {
 			...openAI6ReasoningEffortCapabilities,
 			reasoningReservedOutputTokenSpaceSource: 'catalog'
@@ -938,6 +946,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		// low / medium (default) / high / xhigh / max — 'none' and 'minimal' are rejected, same set as Astra
 		reasoningCapabilities: {
 			...openAI6ReasoningEffortCapabilities,
@@ -956,6 +965,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: {
 			...openAI6SolLunaReasoningEffortCapabilities,
 			reasoningReservedOutputTokenSpaceSource: 'catalog'
@@ -973,6 +983,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAI6SolLunaReasoningEffortCapabilities,
 	},
 	'gpt-5.6': { // alias → gpt-5.6-sol (flagship of the 5.6 family) — https://developers.openai.com/api/docs/models
@@ -985,6 +996,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
 	},
 	'gpt-5.6-terra': { // balanced tier — https://developers.openai.com/api/docs/models/gpt-5.6-terra
@@ -997,6 +1009,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
 	},
 	'gpt-5.6-luna': { // cost-optimized tier — https://developers.openai.com/api/docs/models/gpt-5.6-luna
@@ -1009,6 +1022,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAI56ReasoningEffortCapabilities,
 	},
 	'gpt-5.5': { // https://developers.openai.com/api/docs/models/gpt-5.5
@@ -1021,6 +1035,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
 	},
 	'gpt-5.4': { // https://developers.openai.com/api/docs/models/gpt-5.4
@@ -1033,6 +1048,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
 	},
 	'gpt-5.4-mini': { // https://developers.openai.com/api/docs/models/gpt-5.4-mini
@@ -1045,6 +1061,7 @@ const openAIModelOptions = { // https://platform.openai.com/docs/pricing
 		supportsPDF: true,
 		specialToolFormat: 'openai-style',
 		supportsSystemMessage: 'developer-role',
+		tokenizerEncoding: 'o200k_base',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
