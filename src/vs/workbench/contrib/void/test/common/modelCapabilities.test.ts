@@ -5,8 +5,8 @@
 
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
-import { catalogModelsOfProvider, defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, getModelContextDiagnostics, ModelOverrides } from '../../common/modelCapabilities.js';
-import { defaultOverridesOfModel, OverridesOfModel, ProviderName } from '../../common/voidSettingsTypes.js';
+import { catalogModelsOfProvider, defaultModelsOfProvider, getModelCapabilities, getReservedOutputTokenSpace, getModelContextDiagnostics, LimitSource, ModelOverrides } from '../../common/modelCapabilities.js';
+import { OverridesOfModel, ProviderName } from '../../common/voidSettingsTypes.js';
 
 // Build a full OverridesOfModel with all providers initialized
 function buildOverrides(providerName: ProviderName, modelName: string, overrides: Partial<ModelOverrides>): OverridesOfModel {
@@ -226,7 +226,7 @@ suite('Kodia - model capabilities: source tracking and fallback behavior', () =>
 			contextWindowSource: 'user-configured',
 			reservedOutputTokenSpace: 20_000,
 			reservedOutputTokenSpaceSource: 'user-configured',
-		};
+		} as const;
 		const caps = getModelCapabilities('ollama', 'custom-model', buildOverrides('ollama', 'custom-model', overrides));
 		assert.strictEqual(caps.contextWindow, 100_000);
 		assert.strictEqual(caps.contextWindowSource, 'user-configured');
@@ -242,7 +242,7 @@ suite('Kodia - model capabilities: source tracking and fallback behavior', () =>
 			contextWindowSource: 'provider-api',
 			reservedOutputTokenSpace: 10_000,
 			reservedOutputTokenSpaceSource: 'provider-api',
-		};
+		} as const;
 		const caps = getModelCapabilities('ollama', 'detected-model', buildOverrides('ollama', 'detected-model', overrides));
 		assert.strictEqual(caps.contextWindowSource, 'provider-api');
 		assert.strictEqual(caps.reservedOutputTokenSpaceSource, 'provider-api');
@@ -250,19 +250,22 @@ suite('Kodia - model capabilities: source tracking and fallback behavior', () =>
 
 	test('Reasoning output token space source is tracked', () => {
 		const nemotron = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', undefined);
-		assert.ok(nemotron.reasoningCapabilities);
-		assert.strictEqual(nemotron.reasoningCapabilities!.reasoningReservedOutputTokenSpaceSource, 'verified');
+		const nemotronReasoning = nemotron.reasoningCapabilities as { reasoningReservedOutputTokenSpaceSource: LimitSource };
+		assert.ok(nemotronReasoning);
+		assert.strictEqual(nemotronReasoning.reasoningReservedOutputTokenSpaceSource, 'verified');
 
 		// Test override
 		const overrides = {
 			reasoningCapabilities: {
 				...nemotron.reasoningCapabilities!,
 				reasoningReservedOutputTokenSpace: 16_000,
-				reasoningReservedOutputTokenSpaceSource: 'user-configured',
+				reasoningReservedOutputTokenSpaceSource: 'user-configured' as LimitSource,
 			}
 		};
-		const caps = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', buildOverrides('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', overrides));
-		assert.strictEqual(caps.reasoningCapabilities!.reasoningReservedOutputTokenSpaceSource, 'user-configured');
+		const caps = getModelCapabilities('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', buildOverrides('nvidia', 'nvidia/nemotron-3.5-super-vl-120b-a12b', overrides as Partial<ModelOverrides>));
+		const capsReasoning = caps.reasoningCapabilities as { reasoningReservedOutputTokenSpaceSource: LimitSource };
+		assert.ok(capsReasoning);
+		assert.strictEqual(capsReasoning.reasoningReservedOutputTokenSpaceSource, 'user-configured');
 	});
 
 	test('Fallback unknown models get vision detection but conservative limits', () => {

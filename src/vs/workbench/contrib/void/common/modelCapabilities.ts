@@ -2203,7 +2203,7 @@ export const getModelCapabilities = (
 	if (result) {
 		const baseCtx = result.contextWindow;
 		const clean = sanitizeOverrideValues(baseCtx, overrides);
-		return clampModelOutputToContext({ ...result, ...clean, modelName: result.modelName, isUnrecognizedModel: false });
+		return clampModelOutputToContext({ ...result, ...clean, modelName: result.modelName, recognizedModelName: result.modelName, isUnrecognizedModel: false });
 	}
 
 	// an unknown family can still be a known kind of vision model (llava, moondream, minicpm-v...)
@@ -2252,7 +2252,7 @@ const sanitizeOverrideValues = (baseContextWindow: number, overrides: Partial<Mo
 	// pass through other override keys unchanged
 	for (const k of modelOverrideKeys) {
 		if (k === 'contextWindow' || k === 'reservedOutputTokenSpace') continue;
-		if (k in overrides) clean[k] = overrides[k as keyof ModelOverrides];
+		if (k in overrides) (clean as Record<string, unknown>)[k] = overrides[k as keyof ModelOverrides];
 	}
 	return clean;
 }
@@ -2260,7 +2260,9 @@ const sanitizeOverrideValues = (baseContextWindow: number, overrides: Partial<Mo
 // Clamp reservedOutputTokenSpace so it never exceeds the effective context window. Preserves
 // null (meaning "use the model default") and only applies a final safety clamp. Defaults
 // undefined source fields to 'catalog' for catalog-resolved models.
-const clampModelOutputToContext = (info: VoidStaticModelInfo & { modelName: string, isUnrecognizedModel: boolean, recognizedModelName?: string }): VoidStaticModelInfo & { modelName: string, isUnrecognizedModel: boolean, recognizedModelName?: string } => {
+const clampModelOutputToContext = <T extends { modelName: string; isUnrecognizedModel: boolean }>(
+	info: VoidStaticModelInfo & T
+): VoidStaticModelInfo & T => {
 	const contextWindow = Number.isFinite(info.contextWindow) && info.contextWindow > 0 ? info.contextWindow : 4_096;
 	let reserved = info.reservedOutputTokenSpace;
 	// null means "use default": keep it as-is

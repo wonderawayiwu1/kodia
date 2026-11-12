@@ -28,6 +28,7 @@ import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_PROJECT_MEMORY_TOKENS,
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
+import { resolveCwdUri } from '../common/pathSecurity.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
@@ -51,8 +52,10 @@ const validateStr = (argName: string, value: unknown) => {
 }
 
 
-// We are NOT checking to make sure in workspace
-const validateURI = (uriStr: unknown) => {
+// Asserts that a URI targets a path inside at least one open workspace folder.
+// This is a lexical check only: it does not resolve symlinks or junctions.
+
+const validateURI = (uriStr: unknown, workspaceContextService: IWorkspaceContextService) => {
 	if (uriStr === null) throw new Error(`Invalid LLM output: uri was null.`)
 	if (typeof uriStr !== 'string') throw new Error(`Invalid LLM output format: Provided uri must be a string, but it's a(n) ${typeof uriStr}. Full value: ${JSON.stringify(uriStr)}.`)
 
@@ -80,9 +83,9 @@ const validateURI = (uriStr: unknown) => {
 	}
 }
 
-const validateOptionalURI = (uriStr: unknown) => {
+const validateOptionalURI = (uriStr: unknown, workspaceContextService: IWorkspaceContextService) => {
 	if (isFalsy(uriStr)) return null
-	return validateURI(uriStr)
+	return validateURI(uriStr, workspaceContextService)
 }
 
 const validateOptionalStr = (argName: string, str: unknown) => {
@@ -290,7 +293,7 @@ export class ToolsService implements IToolsService {
 		this.validateParams = {
 			read_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, start_line: startLineUnknown, end_line: endLineUnknown, page_number: pageNumberUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const pageNumber = validatePageNum(pageNumberUnknown)
 
 				let startLine = validateNumber(startLineUnknown, { default: null })
@@ -304,13 +307,13 @@ export class ToolsService implements IToolsService {
 			ls_dir: (params: RawToolParamsObj) => {
 				const { uri: uriStr, page_number: pageNumberUnknown } = params
 
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const pageNumber = validatePageNum(pageNumberUnknown)
 				return { uri, pageNumber }
 			},
 			get_dir_tree: (params: RawToolParamsObj) => {
 				const { uri: uriStr, } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				return { uri }
 			},
 			search_pathnames_only: (params: RawToolParamsObj) => {
@@ -336,7 +339,7 @@ export class ToolsService implements IToolsService {
 				} = params
 				const queryStr = validateStr('query', queryUnknown)
 				const pageNumber = validatePageNum(pageNumberUnknown)
-				const searchInFolder = validateOptionalURI(searchInFolderUnknown)
+				const searchInFolder = validateOptionalURI(searchInFolderUnknown, workspaceContextService)
 				const isRegex = validateBoolean(isRegexUnknown, { default: false })
 				return {
 					query: queryStr,
@@ -347,14 +350,14 @@ export class ToolsService implements IToolsService {
 			},
 			search_in_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, query: queryUnknown, is_regex: isRegexUnknown } = params;
-				const uri = validateURI(uriStr);
+				const uri = validateURI(uriStr, workspaceContextService);
 				const query = validateStr('query', queryUnknown);
 				const isRegex = validateBoolean(isRegexUnknown, { default: false });
 				return { uri, query, isRegex };
 			},
 			go_to_definition: (params: RawToolParamsObj) => {
 				const { uri: uriStr, line: lineUnknown, symbol: symbolUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const line = validateLine(lineUnknown)
 				const symbol = validateStr('symbol', symbolUnknown).trim()
 				if (!symbol) throw new Error(`Invalid LLM output: symbol was empty.`)
@@ -362,7 +365,7 @@ export class ToolsService implements IToolsService {
 			},
 			find_references: (params: RawToolParamsObj) => {
 				const { uri: uriStr, line: lineUnknown, symbol: symbolUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const line = validateLine(lineUnknown)
 				const symbol = validateStr('symbol', symbolUnknown).trim()
 				if (!symbol) throw new Error(`Invalid LLM output: symbol was empty.`)
@@ -379,7 +382,7 @@ export class ToolsService implements IToolsService {
 				const {
 					uri: uriUnknown,
 				} = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				return { uri }
 			},
 
@@ -413,7 +416,7 @@ export class ToolsService implements IToolsService {
 
 			create_file_or_folder: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown } = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				const uriStr = validateStr('uri', uriUnknown)
 				const isFolder = checkIfIsFolder(uriStr)
 				return { uri, isFolder }
@@ -421,7 +424,7 @@ export class ToolsService implements IToolsService {
 
 			delete_file_or_folder: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, is_recursive: isRecursiveUnknown } = params
-				const uri = validateURI(uriUnknown)
+				const uri = validateURI(uriUnknown, workspaceContextService)
 				const isRecursive = validateBoolean(isRecursiveUnknown, { default: false })
 				const uriStr = validateStr('uri', uriUnknown)
 				const isFolder = checkIfIsFolder(uriStr)
@@ -430,14 +433,14 @@ export class ToolsService implements IToolsService {
 
 			rewrite_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, new_content: newContentUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const newContent = validateStr('newContent', newContentUnknown)
 				return { uri, newContent }
 			},
 
 			edit_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, search_replace_blocks: searchReplaceBlocksUnknown } = params
-				const uri = validateURI(uriStr)
+				const uri = validateURI(uriStr, workspaceContextService)
 				const searchReplaceBlocks = validateStr('searchReplaceBlocks', searchReplaceBlocksUnknown)
 				return { uri, searchReplaceBlocks }
 			},
@@ -475,6 +478,34 @@ export class ToolsService implements IToolsService {
 				const { persistent_terminal_id: terminalIdUnknown } = params;
 				const persistentTerminalId = validateProposedTerminalId(terminalIdUnknown);
 				return { persistentTerminalId };
+			},
+
+			// Terminal session management (Stage 5A Day 1)
+			list_terminals: (params: RawToolParamsObj) => {
+				return {}
+			},
+			read_terminal: (params: RawToolParamsObj) => {
+				const { terminal_id: terminalIdUnknown } = params
+				const terminalId = validateProposedTerminalId(terminalIdUnknown)
+				const { offset: offsetUnknown } = params
+				const offset = offsetUnknown === undefined || offsetUnknown === null ? undefined : Number(offsetUnknown)
+				return { terminalId, offset }
+			},
+			send_command_to_terminal: (params: RawToolParamsObj) => {
+				const { terminal_id: terminalIdUnknown, command: commandUnknown } = params
+				const terminalId = validateProposedTerminalId(terminalIdUnknown)
+				const command = validateStr('command', commandUnknown)
+				return { terminalId, command }
+			},
+			interrupt_terminal: (params: RawToolParamsObj) => {
+				const { terminal_id: terminalIdUnknown } = params
+				const terminalId = validateProposedTerminalId(terminalIdUnknown)
+				return { terminalId }
+			},
+			close_terminal: (params: RawToolParamsObj) => {
+				const { terminal_id: terminalIdUnknown } = params
+				const terminalId = validateProposedTerminalId(terminalIdUnknown)
+				return { terminalId }
 			},
 
 		}
@@ -536,6 +567,9 @@ export class ToolsService implements IToolsService {
 			},
 
 			search_for_files: async ({ query: queryStr, isRegex, searchInFolder, pageNumber }) => {
+				// searchInFolder containment/risk is evaluated by the autonomy policy
+				// in _runToolCall (chatThreadService). Access outside the workspace is
+				// permitted; only operation risk and mode gate it. Do not re-check here.
 				const searchFolders = searchInFolder === null ?
 					workspaceContextService.getWorkspace().folders.map(f => f.uri)
 					: [searchInFolder]
@@ -707,7 +741,8 @@ export class ToolsService implements IToolsService {
 			},
 			// ---
 			run_command: async ({ command, cwd, terminalId }) => {
-				const { resPromise, interrupt } = await this.terminalToolService.runCommand(command, { type: 'temporary', cwd, terminalId })
+				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
+				const { resPromise, interrupt } = await this.terminalToolService.runCommand(command, { type: 'temporary', cwd: resolvedCwd?.fsPath ?? cwd, terminalId })
 				return { result: resPromise, interruptTool: interrupt }
 			},
 			run_persistent_command: async ({ command, persistentTerminalId }) => {
@@ -715,12 +750,35 @@ export class ToolsService implements IToolsService {
 				return { result: resPromise, interruptTool: interrupt }
 			},
 			open_persistent_terminal: async ({ cwd }) => {
-				const persistentTerminalId = await this.terminalToolService.createPersistentTerminal({ cwd })
+				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
+				const persistentTerminalId = await this.terminalToolService.createPersistentTerminal({ cwd: resolvedCwd?.fsPath ?? cwd })
 				return { result: { persistentTerminalId } }
 			},
 			kill_persistent_terminal: async ({ persistentTerminalId }) => {
 				// Close the background terminal by sending exit
 				await this.terminalToolService.killPersistentTerminal(persistentTerminalId)
+				return { result: {} }
+			},
+
+			// Terminal session management (Stage 5A Day 1)
+			list_terminals: async () => {
+				const terminals = this.terminalToolService.listTerminals()
+				return { result: { terminals } }
+			},
+			read_terminal: async ({ terminalId, offset }) => {
+				const result = await this.terminalToolService.readTerminalIncremental(terminalId, offset)
+				return { result }
+			},
+			send_command_to_terminal: async ({ terminalId, command }) => {
+				await this.terminalToolService.sendCommandToTerminal(terminalId, command)
+				return { result: { result: `Command sent to terminal "${terminalId}": ${command}` } }
+			},
+			interrupt_terminal: async ({ terminalId }) => {
+				await this.terminalToolService.interruptTerminal(terminalId)
+				return { result: {} }
+			},
+			close_terminal: async ({ terminalId }) => {
+				await this.terminalToolService.closeTerminal(terminalId)
 				return { result: {} }
 			},
 		}
@@ -889,6 +947,31 @@ export class ToolsService implements IToolsService {
 			},
 			kill_persistent_terminal: (params, _result) => {
 				return `Successfully closed terminal "${params.persistentTerminalId}".`;
+			},
+
+			// Terminal session management (Stage 5A Day 1)
+			list_terminals: (_params, result) => {
+				const { terminals } = result
+				if (terminals.length === 0) return 'No terminals found.'
+				return terminals.map(t => {
+					const status = t.exitCode !== undefined ? `exited (${t.exitCode})` : (t.processId !== undefined ? 'running' : 'unknown')
+					const cwdStr = t.cwd ?? '(default)'
+					return `Terminal ${t.terminalId} [${t.type}] ${status} cwd="${cwdStr}" title="${t.title}"`
+				}).join('\n')
+			},
+			read_terminal: (_params, result) => {
+				const { output, isAtEnd } = result
+				if (!output) return isAtEnd ? '(no new output, terminal idle)' : '(no new output)'
+				return `${output}${isAtEnd ? '' : '\n...(more output available, call read_terminal again)'}`
+			},
+			send_command_to_terminal: (_params, result) => {
+				return result.result
+			},
+			interrupt_terminal: (_params, _result) => {
+				return 'Sent interrupt (Ctrl+C) to terminal.'
+			},
+			close_terminal: (_params, _result) => {
+				return 'Terminal closed.'
 			},
 		}
 

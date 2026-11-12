@@ -6,6 +6,7 @@
 
 import { defaultModelsOfProvider, defaultProviderSettings, ModelOverrides, VoidStaticModelInfo } from './modelCapabilities.js';
 import { ToolApprovalType } from './toolsServiceTypes.js';
+import { AutonomyMode, defaultAutonomyMode } from './autonomyPolicy.js';
 import { InstructionsFramework } from './instructionsFrameworks.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
@@ -491,6 +492,8 @@ export type GlobalSettings = {
 	enableFastApply: boolean;
 	chatMode: ChatMode;
 	autoApprove: { [approvalType in ToolApprovalType]?: boolean };
+	agentAutonomyMode: AutonomyMode;
+	autonomyOperationPolicy: Record<string, 'allow' | 'requireApproval' | 'block'>;
 	showInlineSuggestions: boolean;
 	includeToolLintErrors: boolean;
 	isOnboardingComplete: boolean;
@@ -525,6 +528,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	enableFastApply: true,
 	chatMode: 'agent',
 	autoApprove: {},
+	agentAutonomyMode: defaultAutonomyMode,
+	autonomyOperationPolicy: {},
 	showInlineSuggestions: true,
 	includeToolLintErrors: true,
 	isOnboardingComplete: false,

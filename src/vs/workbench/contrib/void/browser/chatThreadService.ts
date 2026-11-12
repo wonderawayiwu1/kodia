@@ -18,9 +18,10 @@ import { AnthropicReasoning, getErrorMessage, LLMUsage, RawToolCallObj, RawToolP
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { FeatureName, ModelSelection, ModelSelectionOptions, OverridesOfModel } from '../common/voidSettingsTypes.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
-import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
+import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, ToolCallParams, ToolName, ToolResult } from '../common/toolsServiceTypes.js';
 import { IToolsService } from './toolsService.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { evaluateAutonomy, isPathOutsideWorkspace, AutonomyMode } from '../common/autonomyPolicy.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { ChatMessage, CheckpointEntry, CodespanLocationLink, StagingSelectionItem, ToolMessage } from '../common/chatThreadServiceTypes.js';
 import { Position } from '../../../../editor/common/core/position.js';
@@ -47,6 +48,34 @@ import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
 const CHAT_RETRIES = 3
 const RETRY_DELAY = 2500
 
+
+// File tools that access the filesystem and require workspace containment approval
+const FILE_ACCESS_TOOLS: Set<BuiltinToolName> = new Set([
+	'read_file',
+	'ls_dir',
+	'get_dir_tree',
+	'search_in_file',
+	'go_to_definition',
+	'find_references',
+	'read_lint_errors',
+	'create_file_or_folder',
+	'delete_file_or_folder',
+	'rewrite_file',
+	'edit_file',
+	'search_for_files',
+]);
+
+const isFileAccessTool = (toolName: ToolName): toolName is BuiltinToolName => FILE_ACCESS_TOOLS.has(toolName as BuiltinToolName);
+
+// Get the file URI parameter from tool params - handles tools that use 'uri' or 'searchInFolder'
+const getFileToolUri = (toolName: ToolName, toolParams: ToolCallParams<ToolName>): URI | null => {
+	switch (toolName) {
+		case 'search_for_files':
+			return (toolParams as BuiltinToolCallParams['search_for_files']).searchInFolder;
+		default:
+			return (toolParams as BuiltinToolCallParams['read_file']).uri;
+	}
+};
 
 const findStagingSelectionIndex = (currentSelections: StagingSelectionItem[] | undefined, newSelection: StagingSelectionItem): number | null => {
 	if (!currentSelections) return null
@@ -742,21 +771,61 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			// once validated, add checkpoint for edit
 			if (toolName === 'edit_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['edit_file']).uri }) }
 			if (toolName === 'rewrite_file') { this._addToolEditCheckpoint({ threadId, uri: (toolParams as BuiltinToolCallParams['rewrite_file']).uri }) }
-
-			// 2. if tool requires approval, break from the loop, awaiting approval
-
-			const approvalType = isBuiltInTool ? approvalTypeOfBuiltinToolName[toolName] : 'MCP tools'
-			if (approvalType) {
-				const autoApprove = this._settingsService.state.globalSettings.autoApprove[approvalType]
-				// add a tool_request because we use it for UI if a tool is loading (this should be improved in the future)
-				this._addMessageToThread(threadId, { role: 'tool', type: 'tool_request', content: '(Awaiting user permission...)', result: null, name: toolName, params: toolParams, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
-				if (!autoApprove) {
-					return { awaitingUserApproval: true }
-				}
-			}
 		}
 		else {
 			toolParams = opts.validatedParams
+		}
+
+		// 2. Centralized autonomy decision. Replaces the previous
+		//    workspace-containment gate and the ad-hoc autoApprove check.
+		//    Runs for every call (including pre-approved ones) so explicit
+		//    block policies are always respected. Access outside the
+		//    workspace is NOT, by itself, grounds for approval or denial;
+		//    only operation risk and mode drive the decision. Applies to
+		//    builtin tools and MCP tools alike.
+		const targetUri = isBuiltInTool && isFileAccessTool(toolName)
+			? getFileToolUri(toolName, toolParams)
+			: null;
+		const isOutside = isPathOutsideWorkspace(targetUri, this._workspaceContextService.getWorkspace().folders);
+		const mode = this._settingsService.state.globalSettings.agentAutonomyMode as AutonomyMode;
+		const evaluation = evaluateAutonomy({
+			mode,
+			autoApprove: this._settingsService.state.globalSettings.autoApprove,
+			operationPolicy: this._settingsService.state.globalSettings.autonomyOperationPolicy,
+			toolName,
+			params: toolParams,
+			isOutsideWorkspace: isOutside,
+		});
+		if (evaluation.decision === 'block') {
+			this._addMessageToThread(threadId, {
+				role: 'tool',
+				type: 'tool_error',
+				params: toolParams,
+				result: `Blocked by autonomy policy (${mode} mode): ${evaluation.reason}`,
+				name: toolName,
+				content: `Blocked by autonomy policy: ${evaluation.reason}`,
+				id: toolId,
+				rawParams: opts.unvalidatedToolParams,
+				mcpServerName,
+			});
+			return {};
+		}
+
+		if (evaluation.decision === 'requireApproval' && !opts.preapproved) {
+			// Pre-approved calls have already been user-approved; only
+			// explicit block policies can stop them at this point.
+			this._addMessageToThread(threadId, {
+				role: 'tool',
+				type: 'tool_request',
+				content: `(Awaiting user permission to ${toolName}: ${evaluation.reason})`,
+				result: null,
+				name: toolName,
+				params: toolParams,
+				id: toolId,
+				rawParams: opts.unvalidatedToolParams,
+				mcpServerName,
+			});
+			return { awaitingUserApproval: true };
 		}
 
 

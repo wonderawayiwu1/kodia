@@ -9,6 +9,7 @@ import { VoidButtonBgDarken, VoidSwitch } from '../util/inputs.js'
 import { useAccessor, useMCPServiceState, useSettingsState } from '../util/services.js'
 import { WarningBox } from './WarningBox.js'
 import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js'
+import { AutonomyMode, autonomyModes } from '../../../../common/autonomyPolicy.js'
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 
@@ -50,6 +51,55 @@ const AutoApproveSwitch = ({ approvalType }: { approvalType: ToolApprovalType })
 	const [value, setValue] = useAutoApprove(approvalType)
 	return <SettingSwitch value={value} onChange={setValue} label={labelOfApprovalType[approvalType]} />
 }
+
+// Autonomy mode selector: Assist / Agent (default) / Autonomous
+const modeInfo: { [M in AutonomyMode]: { title: string, desc: string } } = {
+	assist: { title: 'Assist', desc: 'Inspects files and asks before significant changes or terminal commands.' },
+	agent: { title: 'Agent', desc: 'Broad filesystem and terminal access; asks only for consequential actions (default).' },
+	autonomous: { title: 'Autonomous', desc: 'Long-running tasks with minimal interruptions; pauses only for high-impact actions.' },
+};
+
+const useAutonomyMode = () => {
+	const accessor = useAccessor()
+	const voidSettingsService = accessor.get('IVoidSettingsService')
+	const value = useSettingsState().globalSettings.agentAutonomyMode
+	const setValue = useCallback((newValue: AutonomyMode) => {
+		voidSettingsService.setGlobalSetting('agentAutonomyMode', newValue)
+	}, [voidSettingsService])
+	return [value, setValue] as const
+};
+
+export const AutonomyModeSelector = () => {
+	const [mode, setMode] = useAutonomyMode()
+	return (
+		<div className='flex flex-col gap-2'>
+			{autonomyModes.map(m => {
+				const info = modeInfo[m]
+				const isActive = mode === m
+				return (
+					<button
+						key={m}
+						onClick={() => setMode(m)}
+						className={`
+							flex items-center gap-2 px-3 py-2 rounded-sm border text-sm
+							${isActive
+								? 'bg-[#0e70c0] text-white border-[#0e70c0]'
+								: 'bg-void-bg-2 text-void-fg-1 border-void-border-2 hover:bg-void-bg-3 cursor-pointer'
+							}
+						`}
+					>
+						{isActive ? '●' : '○'}
+						<div className='font-medium'>{info.title}</div>
+						<span className='text-void-fg-3 text-xs'>{info.desc}</span>
+					</button>
+				)
+			})}
+			<div className='text-xs text-void-fg-4 mt-1'>
+				Mode persists in settings. Changing it takes effect immediately across file, search and terminal tools.
+			</div>
+		</div>
+	);
+};
 
 // MCP Server component
 const MCPServerComponent = ({ name, server }: { name: string, server: MCPServer }) => {
@@ -162,6 +212,11 @@ const MCPServersList = () => {
 export const AgentSection = () => {
 	const mcpService = useAccessor().get('IMCPService')
 	return <SettingsSection title='Agent' description={`What the agent can do on its own in Agent mode, and the tools it has.`}>
+		<SettingGroup title='Autonomy mode' description='How independently the agent may act. Agent is the default for new installations.'>
+			<ErrorBoundary>
+				<AutonomyModeSelector />
+			</ErrorBoundary>
+		</SettingGroup>
 		<SettingGroup title='Approvals' description='Kodia asks you before the agent does these. Turn one on to let the agent do it without asking.'>
 			<ErrorBoundary>
 				{[...toolApprovalTypes].map(approvalType => <AutoApproveSwitch key={approvalType} approvalType={approvalType} />)}

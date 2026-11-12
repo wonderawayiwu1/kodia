@@ -3,6 +3,7 @@ import { RawMCPToolCall } from './mcpServiceTypes.js';
 import { builtinTools } from './prompt/prompts.js';
 import { RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { SearchResult } from './webSearchTypes.js';
+import { TerminalInfo } from '../browser/terminalToolService.js';
 
 
 
@@ -34,6 +35,9 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'run_persistent_command': 'terminal',
 	'open_persistent_terminal': 'terminal',
 	'kill_persistent_terminal': 'terminal',
+	'send_command_to_terminal': 'terminal',
+	'interrupt_terminal': 'terminal',
+	'close_terminal': 'terminal',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
@@ -77,6 +81,12 @@ export type BuiltinToolCallParams = {
 	'open_persistent_terminal': { cwd: string | null },
 	'run_persistent_command': { command: string; persistentTerminalId: string },
 	'kill_persistent_terminal': { persistentTerminalId: string },
+	// Terminal session management (Stage 5A Day 1)
+	'list_terminals': {},
+	'read_terminal': { terminalId: string, offset?: number },
+	'send_command_to_terminal': { terminalId: string, command: string },
+	'interrupt_terminal': { terminalId: string },
+	'close_terminal': { terminalId: string },
 }
 
 // RESULT OF TOOL CALL
@@ -107,6 +117,12 @@ export type BuiltinToolResultType = {
 	'run_persistent_command': { result: string; resolveReason: TerminalResolveReason; },
 	'open_persistent_terminal': { persistentTerminalId: string },
 	'kill_persistent_terminal': {},
+	// Terminal session management (Stage 5A Day 1)
+	'list_terminals': { terminals: TerminalInfo[] },
+	'read_terminal': { output: string, isAtEnd: boolean, totalChars: number },
+	'send_command_to_terminal': { result: string },
+	'interrupt_terminal': {},
+	'close_terminal': {},
 }
 
 

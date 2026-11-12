@@ -1,4 +1,4 @@
-/*--------------------------------------------------------------------------------------
+﻿/*--------------------------------------------------------------------------------------
  *  Copyright 2025 Glass Devtools, Inc. All rights reserved.
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
@@ -15,6 +15,7 @@ import { ITerminalService, ITerminalInstance, ICreateTerminalOptions } from '../
 import { MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_CHARS, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js';
 import { TerminalResolveReason } from '../common/toolsServiceTypes.js';
 import { timeout } from '../../../../base/common/async.js';
+import { computeIncrementalRead } from '../common/terminalUtils.js';
 
 
 
@@ -22,16 +23,21 @@ export interface ITerminalToolService {
 	readonly _serviceBrand: undefined;
 
 	listPersistentTerminalIds(): string[];
+	listTerminals(): TerminalInfo[];
 	runCommand(command: string, opts:
 		| { type: 'persistent', persistentTerminalId: string }
 		| { type: 'temporary', cwd: string | null, terminalId: string }
-		// | { type: 'apply', terminalId: string }
 	): Promise<{ interrupt: () => void; resPromise: Promise<{ result: string, resolveReason: TerminalResolveReason }> }>;
 
 	focusPersistentTerminal(terminalId: string): Promise<void>
 	persistentTerminalExists(terminalId: string): boolean
 
 	readTerminal(terminalId: string): Promise<string>
+	readTerminalIncremental(terminalId: string, offset?: number): Promise<{ output: string, isAtEnd: boolean, totalChars: number }>
+	sendCommandToTerminal(terminalId: string, command: string): Promise<void>
+	interruptTerminal(terminalId: string): Promise<void>
+	closeTerminal(terminalId: string): Promise<void>
+	getTerminalStatus(terminalId: string): TerminalStatus
 
 	createPersistentTerminal(opts: { cwd: string | null }): Promise<string>
 	killPersistentTerminal(terminalId: string): Promise<void>
@@ -41,6 +47,19 @@ export interface ITerminalToolService {
 }
 export const ITerminalToolService = createDecorator<ITerminalToolService>('TerminalToolService');
 
+
+
+export type TerminalInfo = {
+	terminalId: string;
+	type: 'persistent' | 'temporary';
+	title: string;
+	cwd: string | null;
+	processId: number | undefined;
+	exitCode: number | undefined;
+	isDisposed: boolean;
+};
+
+export type TerminalStatus = 'running' | 'exited' | 'disposed' | 'unknown';
 
 
 export const persistentTerminalNameOfId = (id: string) => {
@@ -62,6 +81,13 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	private persistentTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
 	private temporaryTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
 
+	// Per-terminal read offset for incremental output retrieval
+	private terminalReadOffsets: Record<string, number> = {}
+	// Per-terminal tracked cwd
+	private terminalCwd: Record<string, string | null> = {}
+	// Per-terminal type tracking
+	private terminalType: Record<string, 'persistent' | 'temporary'> = {}
+
 	constructor(
 		@ITerminalService private readonly terminalService: ITerminalService,
 		@IWorkspaceContextService private readonly workspaceContextService: IWorkspaceContextService,
@@ -78,7 +104,6 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			})
 		}
 
-
 		// initialize any terminals that are already open
 		for (const terminal of terminalService.instances) {
 			const proposedTerminalId = idOfPersistentTerminalName(terminal.title)
@@ -90,12 +115,40 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		this._register(
 			terminalService.onDidCreateInstance(terminal => { initializeTerminal(terminal) })
 		)
-
 	}
-
 
 	listPersistentTerminalIds() {
 		return Object.keys(this.persistentTerminalInstanceOfId)
+	}
+
+	listTerminals(): TerminalInfo[] {
+		const result: TerminalInfo[] = []
+
+		for (const [terminalId, terminal] of Object.entries(this.persistentTerminalInstanceOfId)) {
+			result.push({
+				terminalId,
+				type: 'persistent',
+				title: terminal.title,
+				cwd: terminal.cwd ?? null,
+				processId: terminal.processId,
+				exitCode: terminal.exitCode,
+				isDisposed: false,
+			})
+		}
+
+		for (const [terminalId, terminal] of Object.entries(this.temporaryTerminalInstanceOfId)) {
+			result.push({
+				terminalId,
+				type: 'temporary',
+				title: terminal.title,
+				cwd: terminal.cwd ?? null,
+				processId: terminal.processId,
+				exitCode: terminal.exitCode,
+				isDisposed: false,
+			})
+		}
+
+		return result
 	}
 
 	getValidNewTerminalId(): string {
@@ -144,6 +197,9 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		const config = { name: persistentTerminalNameOfId(terminalId), title: persistentTerminalNameOfId(terminalId) }
 		const terminal = await this._createTerminal({ cwd, config, })
 		this.persistentTerminalInstanceOfId[terminalId] = terminal
+		this.terminalType[terminalId] = 'persistent'
+		this.terminalCwd[terminalId] = cwd ?? null
+		this.terminalReadOffsets[terminalId] = 0
 		return terminalId
 	}
 
@@ -152,12 +208,16 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		if (!terminal) throw new Error(`Kill Terminal: Terminal with ID ${terminalId} did not exist.`);
 		terminal.dispose()
 		delete this.persistentTerminalInstanceOfId[terminalId]
+		delete this.terminalReadOffsets[terminalId]
+		delete this.terminalCwd[terminalId]
+		delete this.terminalType[terminalId]
 		return
 	}
 
 	persistentTerminalExists(terminalId: string): boolean {
 		return terminalId in this.persistentTerminalInstanceOfId
 	}
+
 
 
 	getTemporaryTerminal(terminalId: string): ITerminalInstance | undefined {
@@ -192,7 +252,7 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			throw new Error(`Read Terminal: Terminal with ID ${terminalId} does not exist.`);
 		}
 
-		// Ensure the xterm.js instance has been created – otherwise we cannot access the buffer.
+		// Ensure the xterm.js instance has been created â€“ otherwise we cannot access the buffer.
 		if (!terminal.xterm) {
 			throw new Error('Read Terminal: The requested terminal has not yet been rendered and therefore has no scrollback buffer available.');
 		}
@@ -212,6 +272,97 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 		return result
 	};
+
+	readTerminalIncremental: ITerminalToolService['readTerminalIncremental'] = async (terminalId, offset) => {
+		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+		if (!terminal) {
+			throw new Error(`Read Terminal Incremental: Terminal with ID ${terminalId} does not exist.`);
+		}
+
+		if (!terminal.xterm) {
+			throw new Error('Read Terminal Incremental: The requested terminal has not yet been rendered and therefore has no scrollback buffer available.');
+		}
+
+		// Collect lines from the buffer iterator (oldest to newest)
+		const lines: string[] = [];
+		for (const line of terminal.xterm.getBufferReverseIterator()) {
+			lines.unshift(line);
+		}
+
+		let fullOutput = removeAnsiEscapeCodes(lines.join('\n'));
+
+		if (fullOutput.length > MAX_TERMINAL_CHARS) {
+			const half = MAX_TERMINAL_CHARS / 2;
+			fullOutput = fullOutput.slice(0, half) + '\n...\n' + fullOutput.slice(fullOutput.length - half);
+		}
+
+		const storedOffset = this.terminalReadOffsets[terminalId] ?? 0;
+		const readResult = computeIncrementalRead(fullOutput, storedOffset, offset);
+		this.terminalReadOffsets[terminalId] = readResult.nextStoredOffset;
+
+		return { output: readResult.output, isAtEnd: readResult.isAtEnd, totalChars: fullOutput.length };
+	};
+
+	sendCommandToTerminal: ITerminalToolService['sendCommandToTerminal'] = async (terminalId, command) => {
+		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+		if (!terminal) {
+			throw new Error(`Send Command To Terminal: Terminal with ID ${terminalId} does not exist.`);
+		}
+
+		await terminal.sendText(command, true);
+	};
+
+	interruptTerminal: ITerminalToolService['interruptTerminal'] = async (terminalId) => {
+		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+		if (!terminal) {
+			throw new Error(`Interrupt Terminal: Terminal with ID ${terminalId} does not exist.`);
+		}
+
+		// Send Ctrl+C (0x03) to interrupt the running process without closing the terminal
+		await terminal.sendText('\x03', false);
+	};
+
+	closeTerminal: ITerminalToolService['closeTerminal'] = async (terminalId) => {
+		const persistent = this.getPersistentTerminal(terminalId);
+		const temporary = this.getTemporaryTerminal(terminalId);
+		const terminal = persistent ?? temporary;
+		if (!terminal) {
+			throw new Error(`Close Terminal: Terminal with ID ${terminalId} does not exist.`);
+		}
+
+		terminal.dispose()
+
+		if (persistent) {
+			delete this.persistentTerminalInstanceOfId[terminalId]
+			delete this.terminalReadOffsets[terminalId]
+			delete this.terminalCwd[terminalId]
+			delete this.terminalType[terminalId]
+		} else if (temporary) {
+			delete this.temporaryTerminalInstanceOfId[terminalId]
+			delete this.terminalReadOffsets[terminalId]
+			delete this.terminalCwd[terminalId]
+			delete this.terminalType[terminalId]
+		}
+	};
+
+	getTerminalStatus: ITerminalToolService['getTerminalStatus'] = (terminalId) => {
+		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+		if (!terminal) {
+			return 'disposed';
+		}
+
+		if (terminal.exitCode !== undefined) {
+			return 'exited';
+		}
+
+		if (terminal.processId === undefined) {
+			return 'unknown';
+		}
+
+		return 'running';
+	};
+
+
 
 	private async _waitForCommandDetectionCapability(terminal: ITerminalInstance) {
 		const cmdCap = terminal.capabilities.get(TerminalCapability.CommandDetection);
@@ -252,6 +403,9 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			const { cwd } = params
 			terminal = await this._createTerminal({ cwd: cwd, config: undefined, hidden: true })
 			this.temporaryTerminalInstanceOfId[params.terminalId] = terminal
+			this.terminalType[params.terminalId] = 'temporary'
+			this.terminalCwd[params.terminalId] = cwd ?? null
+			this.terminalReadOffsets[params.terminalId] = 0
 		}
 
 		const interrupt = () => {
@@ -288,6 +442,7 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 				})
 				disposables.push(l)
 			})
+
 
 
 			// send the command now that listeners are attached
@@ -359,6 +514,9 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	}
 
 
+
 }
 
 registerSingleton(ITerminalToolService, TerminalToolService, InstantiationType.Delayed);
+
+

@@ -447,6 +447,42 @@ export const builtinTools: {
 		name: 'kill_persistent_terminal',
 		description: `Interrupts and closes a persistent terminal that you opened with open_persistent_terminal.`,
 		params: { persistent_terminal_id: { description: `The ID of the persistent terminal.` } }
+	},
+
+	list_terminals: {
+		name: 'list_terminals',
+		description: `Lists all open terminal sessions (persistent and temporary) with their IDs, types, current working directories, process IDs, exit codes, and running status. Use this to see what terminals exist before sending commands to them.`,
+		params: {},
+	},
+
+	read_terminal: {
+		name: 'read_terminal',
+		description: `Reads new output from a terminal since the last read. Returns incremental output so you can poll a running command without re-reading old output. Use this to monitor long-running commands like build processes or dev servers.`,
+		params: {
+			terminal_id: { description: 'The ID of the terminal to read from.' },
+			offset: { description: 'Optional. Character offset to start reading from. Defaults to the last read position.' },
+		},
+	},
+
+	send_command_to_terminal: {
+		name: 'send_command_to_terminal',
+		description: `Sends a command to an existing persistent terminal session (opened with open_persistent_terminal) without waiting for completion. Use this to run multiple commands in the same session (e.g. cd into a directory, then install deps, then run a dev server). The command is executed immediately; use read_terminal to poll for output. Note: terminals created by run_command are temporary and are disposed after the command finishes, so you cannot send additional commands to them. Use open_persistent_terminal for sessions you want to reuse.`,
+		params: {
+			terminal_id: { description: 'The ID of the persistent terminal to send the command to.' },
+			command: { description: 'The terminal command to run.' },
+		},
+	},
+
+	interrupt_terminal: {
+		name: 'interrupt_terminal',
+		description: `Sends Ctrl+C to a terminal to interrupt the currently running process. The terminal session itself remains open.`,
+		params: { terminal_id: { description: 'The ID of the terminal to interrupt.' } }
+	},
+
+	close_terminal: {
+		name: 'close_terminal',
+		description: `Closes and disposes of a terminal session (persistent or temporary). Use this to clean up terminals you no longer need.`,
+		params: { terminal_id: { description: 'The ID of the terminal to close.' } }
 	}
 
 

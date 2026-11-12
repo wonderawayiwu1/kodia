@@ -2,6 +2,7 @@ import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
+import { assertPathInWorkspaceWithRealpath } from './pathSecurity.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
@@ -99,6 +100,7 @@ class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 		const uri = this.memoryFileURI()
 		let contents: string | null = null
 		if (uri) {
+			await assertPathInWorkspaceWithRealpath(uri, this.workspaceContextService, this.fileService)
 			try { contents = (await this.fileService.readFile(uri)).value.toString() }
 			catch { contents = null } // no file yet
 		}
@@ -128,7 +130,10 @@ class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 		await this.whenReady
 		if (!memory.trim()) {
 			const uri = this.memoryFileURI()
-			if (uri && this._fileContents !== null) await this.fileService.del(uri)
+			if (uri && this._fileContents !== null) {
+				await assertPathInWorkspaceWithRealpath(uri, this.workspaceContextService, this.fileService)
+				await this.fileService.del(uri)
+			}
 			this.storageService.remove(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE)
 			this._fileContents = null
 			this._onDidChange.fire()
@@ -140,6 +145,7 @@ class ProjectMemoryService extends Disposable implements IProjectMemoryService {
 	private async _write(memory: string) {
 		const uri = this.memoryFileURI()
 		if (!uri) throw new Error(`Open a folder to save project memory (it's stored in ${PROJECT_MEMORY_FILE_PATH}).`)
+		await assertPathInWorkspaceWithRealpath(uri, this.workspaceContextService, this.fileService)
 		await this.fileService.writeFile(uri, VSBuffer.fromString(memory))
 		this.storageService.remove(PROJECT_MEMORY_STORAGE_KEY, StorageScope.WORKSPACE) // migrated into the file
 		this._fileContents = memory
