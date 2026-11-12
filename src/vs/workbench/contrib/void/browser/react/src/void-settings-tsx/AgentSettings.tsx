@@ -44,6 +44,7 @@ export const ToolApprovalTypeSwitch = ({ approvalType, size, desc }: { approvalT
 const labelOfApprovalType: { [T in ToolApprovalType]: string } = {
 	'edits': 'Edit files without asking',
 	'terminal': 'Run terminal commands without asking',
+	'planning': 'Plan tasks without asking',
 	'web pages': 'Fetch web pages without asking',
 	'MCP tools': 'Use MCP tools without asking',
 }
