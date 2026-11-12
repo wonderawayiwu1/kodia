@@ -29,6 +29,7 @@ import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { resolveCwdUri } from '../common/pathSecurity.js';
+import { TaskStatus, getPlanProgress, formatTaskPlanForLLM } from '../common/autonomousTask.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
 import { IKodiaWebFetchService, WebFetchResult } from '../common/webFetchTypes.js'
@@ -508,6 +509,34 @@ export class ToolsService implements IToolsService {
 				return { terminalId }
 			},
 
+			// Task plan management (Stage 5A Day 2)
+			create_task_plan: (params: RawToolParamsObj) => {
+				const { title: titleUnknown, description: descriptionUnknown } = params
+				const title = validateStr('title', titleUnknown)
+				const description = validateStr('description', descriptionUnknown)
+				const tasksUnknown = params.tasks
+				let tasks: { title: string, description: string, dependencies: string[] }[] = []
+				if (Array.isArray(tasksUnknown)) {
+					tasks = tasksUnknown.map((t: any) => ({
+						title: validateStr('title', t.title),
+						description: validateStr('description', t.description),
+						dependencies: Array.isArray(t.dependencies) ? t.dependencies.map((d: any) => String(d)) : [],
+					}))
+				}
+				return { title, description, tasks }
+			},
+			update_task_plan: (params: RawToolParamsObj) => {
+				const { task_id: taskIdUnknown, status: statusUnknown } = params
+				const taskId = validateProposedTerminalId(taskIdUnknown)
+				const status = validateStr('status', statusUnknown) as TaskStatus
+				const result = validateOptionalStr('result', params.result)
+				const error = validateOptionalStr('error', params.error)
+				return { taskId, status, result, error }
+			},
+			get_task_plan: (params: RawToolParamsObj) => {
+				return {}
+			},
+
 		}
 
 
@@ -781,6 +810,11 @@ export class ToolsService implements IToolsService {
 				await this.terminalToolService.closeTerminal(terminalId)
 				return { result: {} }
 			},
+			// Task plan tools are handled directly in chatThreadService (need thread context)
+			// These stubs exist only to satisfy the CallBuiltinTool type
+			create_task_plan: async () => { throw new Error('create_task_plan handled in chatThreadService') },
+			update_task_plan: async () => { throw new Error('update_task_plan handled in chatThreadService') },
+			get_task_plan: async () => { throw new Error('get_task_plan handled in chatThreadService') },
 		}
 
 
@@ -973,13 +1007,24 @@ export class ToolsService implements IToolsService {
 			close_terminal: (_params, _result) => {
 				return 'Terminal closed.'
 			},
+
+			// Task plan management (Stage 5A Day 2)
+			create_task_plan: (_params, result) => {
+				const { plan } = result
+				return `Created task plan ${plan.title} with ${plan.tasks.length} tasks.`;
+			},
+			update_task_plan: (_params, result) => {
+				const { plan } = result
+				const { completed, total, percent } = getPlanProgress(plan)
+				return `Updated task plan ${plan.title}. Progress: ${percent}% (${completed}/${total} tasks). Overall: ${plan.overallStatus}.`;
+			},
+			get_task_plan: (_params, result) => {
+				const { plan } = result
+				if (!plan) return 'No task plan exists yet. Use create_task_plan to create one.';
+				return formatTaskPlanForLLM(plan)
+			},
 		}
-
-
-
 	}
-
-
 	private _getLintErrors(uri: URI): { lintErrors: LintErrorItem[] | null } {
 		const lintErrors = this.markerService
 			.read({ resource: uri })

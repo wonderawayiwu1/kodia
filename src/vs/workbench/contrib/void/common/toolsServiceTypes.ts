@@ -4,6 +4,7 @@ import { builtinTools } from './prompt/prompts.js';
 import { RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { SearchResult } from './webSearchTypes.js';
 import { TerminalInfo } from '../browser/terminalToolService.js';
+import { TaskPlan, TaskStatus } from './autonomousTask.js';
 
 
 
@@ -25,7 +26,7 @@ export type ShallowDirectoryItem = {
 }
 
 
-export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' }> = {
+export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' | 'planning' }> = {
 	'create_file_or_folder': 'edits',
 	'delete_file_or_folder': 'edits',
 	'rewrite_file': 'edits',
@@ -38,18 +39,23 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'send_command_to_terminal': 'terminal',
 	'interrupt_terminal': 'terminal',
 	'close_terminal': 'terminal',
+	// task planning - read-only planning, no file/system changes
+	'create_task_plan': 'planning',
+	'update_task_plan': 'planning',
+	'get_task_plan': 'planning',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
 }
 
 
-export type ToolApprovalType = NonNullable<(typeof approvalTypeOfBuiltinToolName)[keyof typeof approvalTypeOfBuiltinToolName]>;
+export type ToolApprovalType = NonNullable<(typeof approvalTypeOfBuiltinToolName)[keyof typeof approvalTypeOfBuiltinToolName]> | 'planning';
 
 
 export const toolApprovalTypes = new Set<ToolApprovalType>([
 	...Object.values(approvalTypeOfBuiltinToolName),
 	'MCP tools',
+	'planning',
 ])
 
 
@@ -87,6 +93,10 @@ export type BuiltinToolCallParams = {
 	'send_command_to_terminal': { terminalId: string, command: string },
 	'interrupt_terminal': { terminalId: string },
 	'close_terminal': { terminalId: string },
+	// Task plan management (Stage 5A Day 2)
+	'create_task_plan': { title: string, description: string, tasks: { title: string, description: string, dependencies: string[] }[] },
+	'update_task_plan': { taskId: string, status: TaskStatus, result?: string | null, error?: string | null },
+	'get_task_plan': {},
 }
 
 // RESULT OF TOOL CALL
@@ -123,6 +133,10 @@ export type BuiltinToolResultType = {
 	'send_command_to_terminal': { result: string },
 	'interrupt_terminal': {},
 	'close_terminal': {},
+	// Task plan management (Stage 5A Day 2)
+	'create_task_plan': { plan: TaskPlan },
+	'update_task_plan': { plan: TaskPlan },
+	'get_task_plan': { plan: TaskPlan | null },
 }
 
 

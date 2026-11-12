@@ -3,13 +3,14 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { VoidButtonBgDarken, VoidSwitch } from '../util/inputs.js'
 import { useAccessor, useMCPServiceState, useSettingsState } from '../util/services.js'
 import { WarningBox } from './WarningBox.js'
 import { ToolApprovalType, toolApprovalTypes } from '../../../../common/toolsServiceTypes.js'
 import { AutonomyMode, autonomyModes } from '../../../../common/autonomyPolicy.js'
+import { TaskPlan, TaskStatus, getPlanProgress } from '../../../../common/autonomousTask.js'
 import { MCPServer } from '../../../../common/mcpServiceTypes.js';
 import { GlobalSettingSwitch, SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls.js'
 
@@ -100,6 +101,67 @@ export const AutonomyModeSelector = () => {
 		</div>
 	);
 };
+
+// Task plan display
+const TaskPlanDisplay = () => {
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
+	const [taskPlan, setTaskPlan] = useState<TaskPlan | null>(null)
+
+	useEffect(() => {
+		const thread = chatThreadService.getCurrentThread()
+		if (thread) {
+			setTaskPlan(thread.taskPlan ?? null)
+		}
+	}, [chatThreadService])
+
+	if (!taskPlan) return null
+
+	const statusColors: { [key in TaskPlan['overallStatus']]: string } = {
+		pending: 'text-void-fg-3',
+		'in_progress': 'text-[#0e70c0]',
+		completed: 'text-green-500',
+		failed: 'text-red-500',
+	}
+
+	const statusIcons: { [key in TaskStatus]: string } = {
+		pending: '○',
+		running: '●',
+		completed: '✓',
+		failed: '✗',
+		blocked: '!',
+	}
+
+	const { completed, total, percent } = getPlanProgress(taskPlan)
+
+	return (
+		<div className="border border-void-border-2 bg-void-bg-1 py-3 px-4 rounded-sm my-2">
+			<div className="flex items-center justify-between mb-2">
+				<h3 className={`text-sm font-medium text-void-fg-1 ${statusColors[taskPlan.overallStatus]}`}>
+					{taskPlan.title}
+				</h3>
+				<span className="text-xs text-void-fg-3">{percent}% ({completed}/{total})</span>
+			</div>
+			<div className="text-xs text-void-fg-3 mb-2">{taskPlan.description}</div>
+			<div className="space-y-1">
+				{taskPlan.tasks.map(t => {
+					const icon = statusIcons[t.status]
+					const color = t.status === 'completed' ? 'text-green-500' : t.status === 'failed' ? 'text-red-500' : t.status === 'running' ? 'text-[#0e70c0]' : t.status === 'blocked' ? 'text-orange-500' : 'text-void-fg-3'
+					return (
+						<div key={t.id} className="flex items-start gap-2">
+							<span className={`text-xs ${color} mt-0.5`}>{icon}</span>
+							<div className="text-xs text-void-fg-2">
+								<div className="font-medium">{t.title}</div>
+								<div className="text-void-fg-3">{t.description}</div>
+								{t.error && <div className="text-xs text-red-500 mt-0.5">{t.error}</div>}
+							</div>
+						</div>
+					)
+				})}
+			</div>
+		</div>
+	)
+}
 
 // MCP Server component
 const MCPServerComponent = ({ name, server }: { name: string, server: MCPServer }) => {
@@ -215,6 +277,11 @@ export const AgentSection = () => {
 		<SettingGroup title='Autonomy mode' description='How independently the agent may act. Agent is the default for new installations.'>
 			<ErrorBoundary>
 				<AutonomyModeSelector />
+			</ErrorBoundary>
+		</SettingGroup>
+		<SettingGroup title='Task Plan' description='Current task plan for autonomous development.'>
+			<ErrorBoundary>
+				<TaskPlanDisplay />
 			</ErrorBoundary>
 		</SettingGroup>
 		<SettingGroup title='Approvals' description='Kodia asks you before the agent does these. Turn one on to let the agent do it without asking.'>

@@ -22,6 +22,8 @@ import { approvalTypeOfBuiltinToolName, BuiltinToolCallParams, BuiltinToolName, 
 import { IToolsService } from './toolsService.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { evaluateAutonomy, isPathOutsideWorkspace, AutonomyMode } from '../common/autonomyPolicy.js';
+import { TaskPlan, formatTaskPlanForLLM } from '../common/autonomousTask.js';
+import { ITaskPlanService } from '../common/taskPlanService.js';
 import { ILanguageFeaturesService } from '../../../../editor/common/services/languageFeatures.js';
 import { ChatMessage, CheckpointEntry, CodespanLocationLink, StagingSelectionItem, ToolMessage } from '../common/chatThreadServiceTypes.js';
 import { Position } from '../../../../editor/common/core/position.js';
@@ -154,6 +156,9 @@ export type ThreadType = {
 
 	messages: ChatMessage[];
 	filesWithUserChanges: Set<string>;
+
+	// Autonomous task plan for this thread (Stage 5A Day 2)
+	taskPlan?: TaskPlan;
 
 	// this doesn't need to go in a state object, but feels right
 	state: {
@@ -357,6 +362,7 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		@IDirectoryStrService private readonly _directoryStringService: IDirectoryStrService,
 		@IFileService private readonly _fileService: IFileService,
 		@IMCPService private readonly _mcpService: IMCPService,
+		@ITaskPlanService private readonly taskPlanService: ITaskPlanService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
@@ -829,6 +835,33 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		}
 
 
+
+
+		// Task plan tools are handled directly (they need thread context for the plan service)
+		const taskPlanTools: Set<string> = new Set(['create_task_plan', 'update_task_plan', 'get_task_plan']);
+		if (isBuiltInTool && taskPlanTools.has(toolName)) {
+			const params = toolParams as any;
+			let toolResult: any;
+			if (toolName === 'create_task_plan') {
+				const plan = this.taskPlanService.createPlan(threadId, params.title, params.description, params.tasks);
+				toolResult = { plan };
+			} else if (toolName === 'update_task_plan') {
+				const plan = this.taskPlanService.updateTask(threadId, params.taskId, params.status, params.result, params.error);
+				if (!plan) throw new Error('No task plan found for thread ' + threadId);
+				toolResult = { plan };
+			} else if (toolName === 'get_task_plan') {
+				const plan = this.taskPlanService.getPlan(threadId);
+				toolResult = { plan };
+			}
+
+			const runningTool = { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(value not received yet...)', result: null, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName } as const
+			this._updateLatestTool(threadId, runningTool)
+
+			const planObj = this.taskPlanService.getPlan(threadId);
+			const toolResultStr = planObj ? formatTaskPlanForLLM(planObj) : '';
+			this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			return {};
+		}
 
 		// 3. call the tool
 		// this._setStreamState(threadId, { isRunning: 'tool' }, 'merge')

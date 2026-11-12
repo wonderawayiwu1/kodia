@@ -122,6 +122,12 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'read_terminal':
 			return 'low';
 
+		// Task planning - read-only planning, no file/system changes.
+		case 'create_task_plan':
+		case 'update_task_plan':
+		case 'get_task_plan':
+			return 'low';
+
 		// Destructive / irreversible.
 		case 'delete_file_or_folder': {
 			const p = params as { isRecursive?: boolean } | undefined;

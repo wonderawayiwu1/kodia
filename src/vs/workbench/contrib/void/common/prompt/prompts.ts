@@ -483,6 +483,34 @@ export const builtinTools: {
 		name: 'close_terminal',
 		description: `Closes and disposes of a terminal session (persistent or temporary). Use this to clean up terminals you no longer need.`,
 		params: { terminal_id: { description: 'The ID of the terminal to close.' } }
+	},
+
+	// Task plan management (Stage 5A Day 2)
+	create_task_plan: {
+		name: 'create_task_plan',
+		description: `Create a task plan for a development request. Use this when the user asks you to build, fix, or modify something substantial. Break the request into ordered tasks with dependencies.`,
+		params: {
+			title: { description: 'A short title for the overall task, e.g. "Build a todo app with React".' },
+			description: { description: 'A brief description of what the overall task entails.' },
+			tasks: { description: 'Array of initial tasks. Each task has a title, description, and optional dependencies (task IDs that must complete first).' },
+		},
+	},
+
+	update_task_plan: {
+		name: 'update_task_plan',
+		description: `Update the status of a task in the current plan. Call this when you start working on a task (status: 'running'), when you finish it (status: 'completed'), or when you encounter an error (status: 'failed' with an error message).`,
+		params: {
+			task_id: { description: 'The ID of the task to update.' },
+			status: { description: 'New status: "pending", "running", "completed", "failed", or "blocked".' },
+			result: { description: 'Optional. A summary of what was accomplished, for completed tasks.' },
+			error: { description: 'Optional. An error message, for failed tasks.' },
+		},
+	},
+
+	get_task_plan: {
+		name: 'get_task_plan',
+		description: `Read the current task plan. Use this to see what tasks remain, what has been completed, and what the current task is.`,
+		params: {},
 	}
 
 
