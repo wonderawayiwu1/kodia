@@ -61,3 +61,48 @@ export function computeIncrementalRead(
 
 
 export const isPowerShellPlatform = isWindows;
+
+/**
+ * Wraps a command for safe execution in an interactive PowerShell session.
+ * Uses the call operator (&) to invoke external commands, which prevents
+ * PowerShell keyword conflicts (e.g., 'new' being interpreted as a keyword).
+ */
+export function wrapCommandForInteractiveShell(command: string): string {
+	if (isWindows) {
+		// Trim and check if already wrapped
+		const trimmed = command.trim();
+		if (trimmed.startsWith('& ') || trimmed.startsWith('cmd /c')) {
+			return trimmed;
+		}
+		// Use PowerShell call operator to invoke the command
+		return `& ${command}`;
+	}
+	return command;
+}
+
+/**
+ * Wraps a command for safe execution on Windows PowerShell.
+ * PowerShell interprets certain words as keywords (e.g., 'new', 'foreach', 'where')
+ * which can conflict with command names. Wrapping with cmd /c bypasses PowerShell
+ * parsing entirely and is the safest approach for running external commands.
+ */
+export function wrapCommandForShell(command: string): string {
+	if (isWindows) {
+		// On Windows, wrap with cmd /c to bypass PowerShell keyword parsing
+		// This prevents issues like 'new' being interpreted as a PowerShell keyword
+		const escaped = command.replace(/"/g, '\\"');
+		return `cmd /c "${escaped}"`;
+	}
+	return command;
+}
+
+/**
+ * Detects if a command contains keywords that might conflict with PowerShell parsing.
+ * These are words that PowerShell treats as language keywords rather than command names.
+ */
+export function containsPowerShellKeyword(command: string): boolean {
+	if (!isWindows) return false;
+	const keywords = ['new', 'foreach', 'where', 'switch', 'try', 'catch', 'finally', 'throw', 'return', 'break', 'continue', 'param', 'begin', 'process', 'end', 'dynamicparam', 'trap', 'using'];
+	const firstWord = command.trim().split(/\s+/)[0].toLowerCase();
+	return keywords.includes(firstWord);
+}

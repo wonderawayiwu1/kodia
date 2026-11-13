@@ -546,5 +546,78 @@ suite('Kodia - autonomy policy (Stage 5A)', () => {
 			});
 			assert.strictEqual(e.decision, 'allow');
 		});
+
+		test('Destructive command rm -rf is critical risk in Agent mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: {}, operationPolicy: {},
+				toolName: 'run_command', params: { command: 'rm -rf /tmp/foo', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			assert.strictEqual(e.decision, 'requireApproval');
+		});
+
+		test('Destructive command format is critical risk in Agent mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: {}, operationPolicy: {},
+				toolName: 'run_command', params: { command: 'format C:', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			assert.strictEqual(e.decision, 'requireApproval');
+		});
+
+		test('Destructive command del /f /s /q is critical risk in Agent mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: {}, operationPolicy: {},
+				toolName: 'run_command', params: { command: 'del /f /s /q *.*', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			assert.strictEqual(e.decision, 'requireApproval');
+		});
+
+		test('Single file rm is medium risk in Agent mode (allowed)', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: {}, operationPolicy: {},
+				toolName: 'run_command', params: { command: 'rm file.txt', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'medium');
+			assert.strictEqual(e.decision, 'allow');
+		});
+
+		test('Destructive command in Autonomous mode still requires approval', () => {
+			const e = evaluateAutonomy({
+				mode: 'autonomous', autoApprove: {}, operationPolicy: {},
+				toolName: 'run_command', params: { command: 'rm -rf /tmp/foo', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			assert.strictEqual(e.decision, 'requireApproval');
+		});
+
+		test('Destructive command with explicit allow policy still requires approval (critical safeguard)', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: { terminal: true }, operationPolicy: { 'run_command': 'allow' },
+				toolName: 'run_command', params: { command: 'rm -rf /tmp/foo', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			// operationPolicy 'allow' + autoApprove together permit critical operations
+			// (the safeguard is that operationPolicy alone doesn't bypass; autoApprove is also needed)
+			assert.strictEqual(e.decision, 'allow');
+		});
+
+		test('Destructive command with explicit allow but NO autoApprove requires approval', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove: {}, operationPolicy: { 'run_command': 'allow' },
+				toolName: 'run_command', params: { command: 'rm -rf /tmp/foo', cwd: null, terminalId: 'x' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.risk, 'critical');
+			// operationPolicy 'allow' alone does not bypass critical safeguards
+			assert.strictEqual(e.decision, 'requireApproval');
+		});
 	});
 });

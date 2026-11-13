@@ -16,6 +16,8 @@ import { QueryBuilder } from '../../../services/search/common/queryBuilder.js'
 import { ISearchService } from '../../../services/search/common/search.js'
 import { IEditCodeService } from './editCodeServiceInterface.js'
 import { ITerminalToolService } from './terminalToolService.js'
+import { IGitToolService } from './gitToolService.js'
+import { ITestToolService } from './testToolService.js'
 import { LintErrorItem, BuiltinToolCallParams, BuiltinToolResultType, BuiltinToolName, CodeLocation } from '../common/toolsServiceTypes.js'
 import { IVoidModelService } from '../common/voidModelService.js'
 import { EndOfLinePreference } from '../../../../editor/common/model.js'
@@ -29,6 +31,7 @@ import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { resolveCwdUri } from '../common/pathSecurity.js';
+import { wrapCommandForShell, wrapCommandForInteractiveShell } from '../common/terminalUtils.js';
 import { TaskStatus, getPlanProgress, formatTaskPlanForLLM } from '../common/autonomousTask.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
@@ -238,6 +241,8 @@ export class ToolsService implements IToolsService {
 		@IVoidModelService voidModelService: IVoidModelService,
 		@IEditCodeService editCodeService: IEditCodeService,
 		@ITerminalToolService private readonly terminalToolService: ITerminalToolService,
+		@IGitToolService private readonly gitToolService: IGitToolService,
+		@ITestToolService private readonly testToolService: ITestToolService,
 		@IVoidCommandBarService private readonly commandBarService: IVoidCommandBarService,
 		@IDirectoryStrService private readonly directoryStrService: IDirectoryStrService,
 		@IMarkerService private readonly markerService: IMarkerService,
@@ -537,6 +542,118 @@ export class ToolsService implements IToolsService {
 				return {}
 			},
 
+			// Git operations (Stage 2)
+			git_status: () => {
+				return {}
+			},
+			git_diff: (params: RawToolParamsObj) => {
+				const { ref: refUnknown, path: pathUnknown, staged: stagedUnknown } = params
+				const ref = validateOptionalStr('ref', refUnknown)
+				const path = validateOptionalStr('path', pathUnknown)
+				const staged = validateBoolean(stagedUnknown, { default: false })
+				return { ref, path, staged }
+			},
+			git_log: (params: RawToolParamsObj) => {
+				const { max_count: maxCountUnknown, path: pathUnknown } = params
+				const maxCount = maxCountUnknown === undefined || maxCountUnknown === null ? null : Number(maxCountUnknown)
+				const path = validateOptionalStr('path', pathUnknown)
+				return { max_count: maxCount, path }
+			},
+			git_branch_list: () => {
+				return {}
+			},
+			git_branch_create: (params: RawToolParamsObj) => {
+				const { branch_name: branchNameUnknown, start_point: startPointUnknown } = params
+				const branchName = validateStr('branch_name', branchNameUnknown)
+				const startPoint = validateOptionalStr('start_point', startPointUnknown)
+				return { branch_name: branchName, start_point: startPoint }
+			},
+			git_branch_switch: (params: RawToolParamsObj) => {
+				const { branch_name: branchNameUnknown } = params
+				const branchName = validateStr('branch_name', branchNameUnknown)
+				return { branch_name: branchName }
+			},
+			git_stage: (params: RawToolParamsObj) => {
+				const { paths: pathsUnknown } = params
+				const paths = Array.isArray(pathsUnknown) ? pathsUnknown.map(String) : []
+				return { paths }
+			},
+			git_unstage: (params: RawToolParamsObj) => {
+				const { paths: pathsUnknown } = params
+				const paths = Array.isArray(pathsUnknown) ? pathsUnknown.map(String) : []
+				return { paths }
+			},
+			git_commit: (params: RawToolParamsObj) => {
+				const { message: messageUnknown, amend: amendUnknown } = params
+				const message = validateStr('message', messageUnknown)
+				const amend = validateBoolean(amendUnknown, { default: false })
+				return { message, amend }
+			},
+			git_fetch: (params: RawToolParamsObj) => {
+				const { remote: remoteUnknown } = params
+				const remote = validateOptionalStr('remote', remoteUnknown)
+				return { remote }
+			},
+			git_pull: (params: RawToolParamsObj) => {
+				const { remote: remoteUnknown, branch: branchUnknown } = params
+				const remote = validateOptionalStr('remote', remoteUnknown)
+				const branch = validateOptionalStr('branch', branchUnknown)
+				return { remote, branch }
+			},
+			git_push: (params: RawToolParamsObj) => {
+				const { remote: remoteUnknown, branch: branchUnknown, force: forceUnknown } = params
+				const remote = validateOptionalStr('remote', remoteUnknown)
+				const branch = validateOptionalStr('branch', branchUnknown)
+				const force = validateBoolean(forceUnknown, { default: false })
+				return { remote, branch, force }
+			},
+			git_merge: (params: RawToolParamsObj) => {
+				const { branch: branchUnknown } = params
+				const branch = validateStr('branch', branchUnknown)
+				return { branch }
+			},
+			git_stash: (params: RawToolParamsObj) => {
+				const { message: messageUnknown } = params
+				const message = validateOptionalStr('message', messageUnknown)
+				return { message }
+			},
+			git_stash_pop: () => {
+				return {}
+			},
+			git_show: (params: RawToolParamsObj) => {
+				const { commit: commitUnknown, path: pathUnknown } = params
+				const commit = validateStr('commit', commitUnknown)
+				const path = validateOptionalStr('path', pathUnknown)
+				return { commit, path }
+			},
+
+			// Test discovery and execution (Stage 3)
+			test_discover: () => {
+				return {}
+			},
+			test_list: () => {
+				return {}
+			},
+			test_run: (params: RawToolParamsObj) => {
+				const { test_files: testFilesUnknown, test_names: testNamesUnknown } = params
+				const testFiles = Array.isArray(testFilesUnknown) ? testFilesUnknown.map(String) : undefined
+				const testNames = Array.isArray(testNamesUnknown) ? testNamesUnknown.map(String) : undefined
+				return { test_files: testFiles, test_names: testNames }
+			},
+			test_run_targeted: (params: RawToolParamsObj) => {
+				const { changed_files: changedFilesUnknown } = params
+				const changedFiles = Array.isArray(changedFilesUnknown) ? changedFilesUnknown.map(String) : []
+				return { changed_files: changedFiles }
+			},
+			test_rerun_failed: () => {
+				return {}
+			},
+			test_cancel: (params: RawToolParamsObj) => {
+				const { run_id: runIdUnknown } = params
+				const runId = validateOptionalStr('run_id', runIdUnknown)
+				return { run_id: runId ?? undefined }
+			},
+
 		}
 
 
@@ -771,11 +888,15 @@ export class ToolsService implements IToolsService {
 			// ---
 			run_command: async ({ command, cwd, terminalId }) => {
 				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
-				const { resPromise, interrupt } = await this.terminalToolService.runCommand(command, { type: 'temporary', cwd: resolvedCwd?.fsPath ?? cwd, terminalId })
+				// Wrap command for safe execution on Windows PowerShell
+				const wrappedCommand = wrapCommandForShell(command)
+				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, { type: 'temporary', cwd: resolvedCwd?.fsPath ?? cwd, terminalId })
 				return { result: resPromise, interruptTool: interrupt }
 			},
 			run_persistent_command: async ({ command, persistentTerminalId }) => {
-				const { resPromise, interrupt } = await this.terminalToolService.runCommand(command, { type: 'persistent', persistentTerminalId })
+				// Wrap command for safe execution on Windows PowerShell
+				const wrappedCommand = wrapCommandForShell(command)
+				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, { type: 'persistent', persistentTerminalId })
 				return { result: resPromise, interruptTool: interrupt }
 			},
 			open_persistent_terminal: async ({ cwd }) => {
@@ -799,7 +920,10 @@ export class ToolsService implements IToolsService {
 				return { result }
 			},
 			send_command_to_terminal: async ({ terminalId, command }) => {
-				await this.terminalToolService.sendCommandToTerminal(terminalId, command)
+				// Wrap command for safe execution on Windows PowerShell
+				// Use the call operator (&) to avoid PowerShell keyword conflicts
+				const wrappedCommand = wrapCommandForInteractiveShell(command)
+				await this.terminalToolService.sendCommandToTerminal(terminalId, wrappedCommand)
 				return { result: { result: `Command sent to terminal "${terminalId}": ${command}` } }
 			},
 			interrupt_terminal: async ({ terminalId }) => {
@@ -815,6 +939,221 @@ export class ToolsService implements IToolsService {
 			create_task_plan: async () => { throw new Error('create_task_plan handled in chatThreadService') },
 			update_task_plan: async () => { throw new Error('update_task_plan handled in chatThreadService') },
 			get_task_plan: async () => { throw new Error('get_task_plan handled in chatThreadService') },
+
+			// Git operations (Stage 2)
+			git_status: async () => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					return { result: { status: { rootUri: '', branch: null, upstream: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [], conflicted: [], mergeInProgress: false } } }
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					return { result: { status: { rootUri: workspace.folders[0].uri.fsPath, branch: null, upstream: null, ahead: null, behind: null, staged: [], unstaged: [], untracked: [], conflicted: [], mergeInProgress: false } } }
+				}
+				const status = await this.gitToolService.getRepositoryStatus(repo)
+				return { result: { status } }
+			},
+			git_diff: async ({ ref, path, staged }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const diff = await this.gitToolService.getRepositoryDiff(repo, ref ?? undefined, path ?? undefined, staged ?? false)
+				return { result: { diff } }
+			},
+			git_log: async ({ max_count: maxCount, path }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const log = await this.gitToolService.getRepositoryLog(repo, maxCount ?? undefined, path ?? null)
+				return { result: { commits: log.commits, total: log.total } }
+			},
+			git_branch_list: async () => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					return { result: { branches: [], current: null } }
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					return { result: { branches: [], current: null } }
+				}
+				const branches = await this.gitToolService.getRepositoryBranches(repo)
+				return { result: branches }
+			},
+			git_branch_create: async ({ branch_name: branchName, start_point: startPoint }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitBranchCreate(branchName, startPoint ?? undefined)
+				return { result: { branch_name: result.branchName } }
+			},
+			git_branch_switch: async ({ branch_name: branchName }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitBranchSwitch(branchName)
+				return { result: { branch_name: result.branchName } }
+			},
+			git_stage: async ({ paths }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitStage(repo.rootUri, paths)
+				return { result: { staged: result.staged } }
+			},
+			git_unstage: async ({ paths }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitUnstage(repo.rootUri, paths)
+				return { result: { unstaged: result.unstaged } }
+			},
+			git_commit: async ({ message, amend }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitCommit(repo.rootUri, message, amend ?? undefined)
+				return { result: { commit_hash: result.commitHash, message: result.message } }
+			},
+			git_fetch: async ({ remote }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitFetch(repo.rootUri, remote ?? undefined)
+				return { result: { result: result.result } }
+			},
+			git_pull: async ({ remote, branch }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitPull(repo.rootUri, remote ?? undefined, branch ?? undefined)
+				return { result: { result: result.result } }
+			},
+			git_push: async ({ remote, branch, force }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitPush(repo.rootUri, remote ?? undefined, branch ?? undefined, force ?? undefined)
+				return { result: { result: result.result } }
+			},
+			git_merge: async ({ branch }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitMerge(repo.rootUri, branch)
+				return { result: { result: result.result, merge_in_progress: result.mergeInProgress } }
+			},
+			git_stash: async ({ message }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitStash(repo.rootUri, message ?? undefined)
+				return { result: { result: result.result } }
+			},
+			git_stash_pop: async () => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitStashPop(repo.rootUri)
+				return { result: { result: result.result } }
+			},
+			git_show: async ({ commit, path }) => {
+				const workspace = workspaceContextService.getWorkspace()
+				if (workspace.folders.length === 0) {
+					throw new Error('No workspace folder is open.')
+				}
+				const repo = await this.gitToolService.getRepository(workspace.folders[0].uri)
+				if (!repo) {
+					throw new Error('No Git repository found in the workspace.')
+				}
+				const result = await this.gitToolService.gitShow(repo.rootUri, commit, path ?? undefined)
+				return { result: { commit: result.commit, message: result.message, diff: result.diff } }
+			},
+
+			// Test discovery and execution (Stage 3)
+			test_discover: async () => {
+				return { result: await this.testToolService.discoverFrameworks() }
+			},
+			test_list: async () => {
+				return { result: await this.testToolService.listTests() }
+			},
+			test_run: async ({ test_files: testFiles, test_names: testNames }) => {
+				return { result: await this.testToolService.runTests({ test_files: testFiles, test_names: testNames }) }
+			},
+			test_run_targeted: async ({ changed_files: changedFiles }) => {
+				return { result: await this.testToolService.runTargetedTests({ changed_files: changedFiles }) }
+			},
+			test_rerun_failed: async () => {
+				return { result: await this.testToolService.rerunFailedTests({}) }
+			},
+			test_cancel: async ({ run_id: runId }) => {
+				return { result: await this.testToolService.cancelTestRun({ run_id: runId }) }
+			},
+
 		}
 
 
@@ -825,6 +1164,35 @@ export class ToolsService implements IToolsService {
 				.map((e, i) => `Error ${i + 1}:\nLines Affected: ${e.startLineNumber}-${e.endLineNumber}\nError message:${e.message}`)
 				.join('\n\n')
 				.substring(0, MAX_FILE_CHARS_PAGE)
+		}
+
+		const formatTestResult = (r: { state: string; label: string; message?: string; stackTrace?: string; uri?: string; line?: number; duration?: number }): string => {
+			const lines: string[] = []
+			const stateIcon = r.state === 'passed' ? '✅' : r.state === 'failed' || r.state === 'errored' ? '❌' : '⏭️'
+			lines.push(`${stateIcon} ${r.label}`)
+			if (r.message) lines.push(`   Message: ${r.message}`)
+			if (r.stackTrace) lines.push(`   Stack: ${r.stackTrace.split('\n').slice(0, 3).join('\n   ')}`)
+			if (r.uri) lines.push(`   File: ${r.uri}${r.line !== undefined ? `:${r.line}` : ''}`)
+			if (r.duration !== undefined) lines.push(`   Duration: ${r.duration}ms`)
+			return lines.join('\n')
+		}
+
+		const _formatTestResults = (results: { passed: number; failed: number; skipped: number; errored: number; total: number; duration?: number; completed: boolean; testResults: Array<{ state: string; label: string; message?: string; stackTrace?: string; uri?: string; line?: number; duration?: number }> }): string => {
+			const { passed, failed, skipped, errored, total, duration, completed, testResults } = results
+			const lines: string[] = []
+			lines.push(`Test run ${completed ? 'completed' : 'running'}`)
+			lines.push(`Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${errored} errored (${total} total)`)
+			if (duration !== undefined) lines.push(`Duration: ${duration}ms`)
+			if (testResults.length > 0) {
+				lines.push('\nTest details:')
+				for (const r of testResults.slice(0, 20)) {
+					lines.push(formatTestResult(r))
+				}
+				if (testResults.length > 20) {
+					lines.push(`\n... and ${testResults.length - 20} more tests`)
+				}
+			}
+			return lines.join('\n')
 		}
 
 		// given to the LLM after the call for successful tool calls
@@ -1023,6 +1391,139 @@ export class ToolsService implements IToolsService {
 				if (!plan) return 'No task plan exists yet. Use create_task_plan to create one.';
 				return formatTaskPlanForLLM(plan)
 			},
+
+			// Git operations (Stage 2)
+			git_status: (_params, result) => {
+				const { status } = result
+				const lines: string[] = []
+				lines.push(`Repository: ${status.rootUri}`)
+				lines.push(`Branch: ${status.branch ?? '(none)'}`)
+				if (status.upstream) lines.push(`Upstream: ${status.upstream} (ahead ${status.ahead ?? 0}, behind ${status.behind ?? 0})`)
+				lines.push(`Staged: ${status.staged.length}, Unstaged: ${status.unstaged.length}, Untracked: ${status.untracked.length}`)
+				if (status.conflicted.length > 0) lines.push(`Conflicted: ${status.conflicted.length}`)
+				if (status.mergeInProgress) lines.push('Merge in progress')
+				if (status.staged.length > 0) {
+					lines.push('\nStaged:')
+					for (const f of status.staged) lines.push(`  [${f.status}] ${f.uri}`)
+				}
+				if (status.unstaged.length > 0) {
+					lines.push('\nUnstaged:')
+					for (const f of status.unstaged) lines.push(`  [${f.status}] ${f.uri}`)
+				}
+				if (status.untracked.length > 0) {
+					lines.push('\nUntracked:')
+					for (const f of status.untracked) lines.push(`  ?? ${f.uri}`)
+				}
+				if (status.conflicted.length > 0) {
+					lines.push('\nConflicted:')
+					for (const f of status.conflicted) lines.push(`  !! ${f.uri}`)
+				}
+				return lines.join('\n')
+			},
+			git_diff: (_params, result) => {
+				const { diff } = result
+				const lines: string[] = []
+				lines.push(`Files changed: ${diff.files.length} (insertions: ${diff.totalInsertions}, deletions: ${diff.totalDeletions})`)
+				for (const f of diff.files) {
+					lines.push(`\n${f.status.toUpperCase()}: ${f.uri} (+${f.insertions}/-${f.deletions})`)
+					for (const hunk of f.hunks) {
+						lines.push(hunk.body)
+					}
+				}
+				return lines.join('\n')
+			},
+			git_log: (_params, result) => {
+				const { commits, total } = result
+				const lines: string[] = []
+				lines.push(`Commits: ${total} total, showing ${commits.length}`)
+				for (const c of commits) {
+					lines.push(`${c.shortHash} ${c.authorName} <${c.authorEmail}> ${c.authorDate}`)
+					lines.push(`    ${c.message}`)
+					if (c.parents.length > 0) lines.push(`    Parents: ${c.parents.map(p => p.substring(0, 7)).join(', ')}`)
+				}
+				return lines.join('\n')
+			},
+			git_branch_list: (_params, result) => {
+				const { branches, current } = result
+				const lines: string[] = []
+				lines.push(`Current branch: ${current ?? '(none)'}`)
+				for (const b of branches) {
+					const marker = b.isCurrent ? '*' : ' '
+					const remote = b.isRemote ? ' (remote)' : ''
+					const upstream = b.upstream ? ` -> ${b.upstream}` : ''
+					const aheadBehind = b.ahead !== null || b.behind !== null ? ` (ahead ${b.ahead ?? 0}, behind ${b.behind ?? 0})` : ''
+					lines.push(`${marker} ${b.name}${remote}${upstream}${aheadBehind}`)
+				}
+				return lines.join('\n')
+			},
+			git_branch_create: (_params, result) => {
+				return `Created branch "${result.branch_name}".`
+			},
+			git_branch_switch: (_params, result) => {
+				return `Switched to branch "${result.branch_name}".`
+			},
+			git_stage: (_params, result) => {
+				return `Staged ${result.staged.length} file(s): ${result.staged.join(', ')}`
+			},
+			git_unstage: (_params, result) => {
+				return `Unstaged ${result.unstaged.length} file(s): ${result.unstaged.join(', ')}`
+			},
+			git_commit: (_params, result) => {
+				return `Committed: ${result.commit_hash} - ${result.message}`
+			},
+			git_fetch: (_params, result) => {
+				return result.result
+			},
+			git_pull: (_params, result) => {
+				return result.result
+			},
+			git_push: (_params, result) => {
+				return result.result
+			},
+			git_merge: (_params, result) => {
+				let msg = result.result
+				if (result.merge_in_progress) msg += '\nMerge in progress - resolve conflicts and commit.'
+				return msg
+			},
+			git_stash: (_params, result) => {
+				return result.result
+			},
+			git_stash_pop: (_params, result) => {
+				return result.result
+			},
+			git_show: (_params, result) => {
+				return `Commit ${result.commit}\n${result.message}\n\n${result.diff}`
+			},
+
+			// Test discovery and execution (Stage 3)
+			test_discover: (_params, result) => {
+				const { frameworks } = result
+				if (frameworks.length === 0) return 'No test frameworks detected.'
+				const lines = frameworks.map(f => `${f.name} (${f.type})${f.configFile ? ` - config: ${f.configFile}` : ''}`)
+				return `Test frameworks detected:\n${lines.join('\n')}`
+			},
+			test_list: (_params, result) => {
+				const { testFiles } = result
+				if (testFiles.length === 0) return 'No test files found.'
+				const lines = testFiles.map(f => `${f.label} (${f.testCount} test${f.testCount !== 1 ? 's' : ''})${f.framework ? ` - ${f.framework}` : ''}\n  ${f.uri}`)
+				return `Test files:\n${lines.join('\n')}`
+			},
+			test_run: (_params, result) => {
+				const { results } = result
+				return _formatTestResults(results)
+			},
+			test_run_targeted: (_params, result) => {
+				const { results } = result
+				return _formatTestResults(results)
+			},
+			test_rerun_failed: (_params, result) => {
+				const { results } = result
+				return _formatTestResults(results)
+			},
+			test_cancel: (_params, result) => {
+				return result.cancelled ? 'Test run cancelled.' : 'No test run to cancel.'
+			},
+
 		}
 	}
 	private _getLintErrors(uri: URI): { lintErrors: LintErrorItem[] | null } {

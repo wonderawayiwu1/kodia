@@ -6,6 +6,7 @@
 import { URI } from '../../../../base/common/uri.js';
 import { extUriBiasedIgnorePathCase } from '../../../../base/common/resources.js';
 import { ToolApprovalType, approvalTypeOfBuiltinToolName, type BuiltinToolName } from './toolsServiceTypes.js';
+import { isDestructiveCommand } from './terminalSafety.js';
 
 // Complete set of builtin tool names (keys of BuiltinToolCallParams / BuiltinToolResultType).
 // Kept here to avoid importing from prompt/prompts.ts (which has a large dependency chain).
@@ -38,6 +39,30 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'send_command_to_terminal',
 	'interrupt_terminal',
 	'close_terminal',
+	// Git operations (Stage 2)
+	'git_status',
+	'git_diff',
+	'git_log',
+	'git_branch_list',
+	'git_branch_create',
+	'git_branch_switch',
+	'git_stage',
+	'git_unstage',
+	'git_commit',
+	'git_fetch',
+	'git_pull',
+	'git_push',
+	'git_merge',
+	'git_stash',
+	'git_stash_pop',
+	'git_show',
+	// Test discovery and execution (Stage 3)
+	'test_discover',
+	'test_list',
+	'test_run',
+	'test_run_targeted',
+	'test_rerun_failed',
+	'test_cancel',
 ]);
 
 /**
@@ -114,8 +139,17 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'kill_persistent_terminal':
 		case 'send_command_to_terminal':
 		case 'interrupt_terminal':
-		case 'close_terminal':
+		case 'close_terminal': {
+			// Terminal commands that are destructive (rm -rf, format, etc.)
+			// are elevated to critical risk regardless of mode.
+			const p = params as { command?: string } | undefined;
+			if (p && p.command && typeof p.command === 'string') {
+				if (isDestructiveCommand(p.command)) {
+					return 'critical';
+				}
+			}
 			return 'medium';
+		}
 
 		// Read-only terminal inspection - never consequential.
 		case 'list_terminals':
@@ -127,6 +161,51 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'update_task_plan':
 		case 'get_task_plan':
 			return 'low';
+
+		// Git read-only operations - inspection only.
+		case 'git_status':
+		case 'git_diff':
+		case 'git_log':
+		case 'git_branch_list':
+		case 'git_show':
+			return 'low';
+
+		// Git operations that modify the local repository.
+		case 'git_branch_create':
+		case 'git_branch_switch':
+		case 'git_stage':
+		case 'git_unstage':
+		case 'git_commit':
+		case 'git_stash':
+		case 'git_stash_pop':
+			return 'medium';
+
+		// Git operations that interact with remotes or can be destructive.
+		case 'git_fetch':
+		case 'git_pull':
+			return 'medium';
+
+		case 'git_push': {
+			const p = params as { force?: boolean } | undefined;
+			if (p && p.force) return 'critical';
+			return 'high';
+		}
+
+		case 'git_merge':
+			// Merging can create conflicts; classify as medium (user should review)
+			return 'medium';
+
+		// Test operations - read-only
+		case 'test_discover':
+		case 'test_list':
+		case 'test_cancel':
+			return 'low';
+
+		// Test operations - execute code (may have side effects via test setup/teardown)
+		case 'test_run':
+		case 'test_run_targeted':
+		case 'test_rerun_failed':
+			return 'medium';
 
 		// Destructive / irreversible.
 		case 'delete_file_or_folder': {
@@ -199,13 +278,19 @@ export function evaluateAutonomy({
 		: 'MCP tools';
 
 	// 1. Explicit per-operation policy override takes precedence.
-	//    Explicit `allow` does not bypass critical safeguards (irreversible
-	//    operations still require approval unless auto-approved).
+	//    Explicit `allow` does not bypass critical safeguards unless
+	//    auto-approved as well (both together indicate explicit user intent).
 	const override = operationPolicy[toolName] ?? (approvalType ? operationPolicy[approvalType] : undefined);
 	if (override) {
 		if (override === 'allow' && risk === 'critical') {
-			// Explicit allow does not override critical safeguards — fall through
-			// to mode-based evaluation so critical ops still require approval.
+			if (approvalType && autoApprove[approvalType as ToolApprovalType]) {
+				return {
+					decision: 'allow',
+					risk,
+					reason: `Per-operation autonomy policy: allow (auto-approved).`,
+				};
+			}
+			// Explicit allow alone does not bypass critical safeguards — fall through
 		} else {
 			const decision: ApprovalDecision = override;
 			return {
@@ -229,12 +314,16 @@ export function evaluateAutonomy({
 	}
 
 	// 3. Above the threshold: require approval unless this approval type is auto-approved.
+	//    Auto-approve alone does not bypass critical safeguards.
 	if (approvalType && autoApprove[approvalType as ToolApprovalType]) {
-		return {
-			decision: 'allow',
-			risk,
-			reason: `Approval type '${approvalType}' is auto-approved.`,
-		};
+		if (risk !== 'critical') {
+			return {
+				decision: 'allow',
+				risk,
+				reason: `Approval type '${approvalType}' is auto-approved.`,
+			};
+		}
+		// Critical risk + auto-approved alone → requireApproval below
 	}
 
 	return {

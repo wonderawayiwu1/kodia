@@ -3,6 +3,8 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import { URI } from '../../../../base/common/uri.js';
+
 export type TaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'blocked';
 
 export type TaskPlanTask = {
@@ -104,6 +106,49 @@ export const getPlanProgress = (plan: TaskPlan): { completed: number, total: num
 	return { completed, total, percent };
 };
 
+export const isValidStateTransition = (from: TaskStatus, to: TaskStatus): boolean => {
+	// Define valid state transitions
+	const validTransitions: Record<TaskStatus, TaskStatus[]> = {
+		pending: ['running', 'completed', 'blocked', 'failed'],
+		running: ['completed', 'failed', 'blocked'],
+		completed: [], // Terminal state — no transitions out
+		failed: [], // Terminal state — no transitions out
+		blocked: ['pending', 'running', 'failed'], // Can be unblocked
+	};
+	return validTransitions[from]?.includes(to) ?? false;
+};
+
+/**
+ * Detect circular dependencies in a task plan.
+ * Uses DFS to find cycles in the dependency graph.
+ */
+export const hasCircularDependencies = (plan: TaskPlan): boolean => {
+	const taskMap = new Map(plan.tasks.map(t => [t.id, t]));
+	const visiting = new Set<string>();
+	const visited = new Set<string>();
+
+	const dfs = (taskId: string): boolean => {
+		if (visited.has(taskId)) return false;
+		if (visiting.has(taskId)) return true; // Back edge = cycle
+
+		visiting.add(taskId);
+		const task = taskMap.get(taskId);
+		if (task) {
+			for (const depId of task.dependencies) {
+				if (dfs(depId)) return true;
+			}
+		}
+		visiting.delete(taskId);
+		visited.add(taskId);
+		return false;
+	};
+
+	for (const task of plan.tasks) {
+		if (dfs(task.id)) return true;
+	}
+	return false;
+};
+
 export const formatTaskPlanForLLM = (plan: TaskPlan): string => {
 	const lines: string[] = [];
 	lines.push(`Task Plan: ${plan.title}`);
@@ -120,4 +165,101 @@ export const formatTaskPlanForLLM = (plan: TaskPlan): string => {
 		if (task.error) lines.push(`  Error: ${task.error}`);
 	}
 	return lines.join('\n');
+};
+
+// Verification result for a task step
+export type VerificationResult = {
+	passed: boolean;
+	evidence: string; // human-readable description of what was checked
+	details?: string; // additional details (output, error messages, etc.)
+};
+
+// Verify that a file exists at the given URI path
+export const verifyFileExists = async (fileService: any, uri: string): Promise<VerificationResult> => {
+	try {
+		const stat = await fileService.stat(URI.file(uri));
+		if (stat) {
+			return {
+				passed: true,
+				evidence: `File exists at ${uri}`,
+				details: `File stat: isFile=${stat.isFile}, isDirectory=${stat.isDirectory}`,
+			};
+		}
+		return {
+			passed: false,
+			evidence: `File does not exist at ${uri}`,
+			details: 'File service stat returned no result',
+		};
+	} catch (err: any) {
+		return {
+			passed: false,
+			evidence: `File does not exist at ${uri}`,
+			details: err?.message || String(err),
+		};
+	}
+};
+
+// Verify that terminal command output contains expected text
+export const verifyTerminalOutput = (terminalOutput: string, expectedPattern: string | RegExp): VerificationResult => {
+	const pattern = typeof expectedPattern === 'string' ? new RegExp(expectedPattern, 'i') : expectedPattern;
+	const matched = pattern.test(terminalOutput);
+	if (matched) {
+		return {
+			passed: true,
+			evidence: `Output matches pattern: ${expectedPattern}`,
+			details: terminalOutput,
+		};
+	}
+	return {
+		passed: false,
+		evidence: `Output does not match pattern: ${expectedPattern}`,
+		details: terminalOutput,
+	};
+};
+
+// Verify that a terminal command exited successfully (exit code 0)
+export const verifyCommandSuccess = (exitCode: number | undefined): VerificationResult => {
+	if (exitCode === 0) {
+		return {
+			passed: true,
+			evidence: `Command exited with code 0`,
+		};
+	}
+	return {
+		passed: false,
+		evidence: `Command exited with code ${exitCode ?? 'unknown'}`,
+	};
+};
+
+// Verify that a file contains expected text
+export const verifyFileContains = async (fileService: any, uri: string, expectedText: string): Promise<VerificationResult> => {
+	try {
+		const stat = await fileService.stat(URI.file(uri));
+		if (!stat || !stat.isFile) {
+			return {
+				passed: false,
+				evidence: `File does not exist at ${uri}`,
+			};
+		}
+		const contents = await fileService.readFile(URI.file(uri));
+		const text = contents.value.toString();
+		if (text.includes(expectedText)) {
+			return {
+				passed: true,
+				evidence: `File contains expected text at ${uri}`,
+				details: `Found: "${expectedText}"`,
+			};
+		}
+		return {
+			passed: false,
+			evidence: `File does not contain expected text at ${uri}`,
+			details: `Expected: "${expectedText}"`,
+		};
+	} catch (err: any) {
+		return {
+			passed: false,
+			evidence: `Could not read file at ${uri}`,
+			details: err?.message || String(err),
+		};
+	}
 };

@@ -5,6 +5,8 @@ import { RawToolParamsObj } from './sendLLMMessageTypes.js';
 import { SearchResult } from './webSearchTypes.js';
 import { TerminalInfo } from '../browser/terminalToolService.js';
 import { TaskPlan, TaskStatus } from './autonomousTask.js';
+import { GitRepositoryStatus, GitDiffResult, GitCommitLogEntry, GitBranchInfo } from './gitService.js';
+import { TestFramework, TestFileInfo, TestRunResultData } from './testServiceTypes.js';
 
 
 
@@ -26,7 +28,7 @@ export type ShallowDirectoryItem = {
 }
 
 
-export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' | 'planning' }> = {
+export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: 'edits' | 'terminal' | 'web pages' | 'MCP tools' | 'planning' | 'git' | 'test' }> = {
 	'create_file_or_folder': 'edits',
 	'delete_file_or_folder': 'edits',
 	'rewrite_file': 'edits',
@@ -43,6 +45,32 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'create_task_plan': 'planning',
 	'update_task_plan': 'planning',
 	'get_task_plan': 'planning',
+	// git operations - read-only
+	'git_status': 'git',
+	'git_diff': 'git',
+	'git_log': 'git',
+	'git_branch_list': 'git',
+	'git_show': 'git',
+	// git operations - local modifications
+	'git_branch_create': 'git',
+	'git_branch_switch': 'git',
+	'git_stage': 'git',
+	'git_unstage': 'git',
+	'git_commit': 'git',
+	'git_stash': 'git',
+	'git_stash_pop': 'git',
+	// git operations - network/destructive
+	'git_fetch': 'git',
+	'git_pull': 'git',
+	'git_push': 'git',
+	'git_merge': 'git',
+	// test operations - read-only
+	'test_discover': 'test',
+	'test_list': 'test',
+	'test_run': 'test',
+	'test_run_targeted': 'test',
+	'test_rerun_failed': 'test',
+	'test_cancel': 'test',
 	// a fetched URL can carry data out of the workspace, so the user sees it first
 	'fetch_url': 'web pages',
 	'web_search': 'web pages',
@@ -97,6 +125,30 @@ export type BuiltinToolCallParams = {
 	'create_task_plan': { title: string, description: string, tasks: { title: string, description: string, dependencies: string[] }[] },
 	'update_task_plan': { taskId: string, status: TaskStatus, result?: string | null, error?: string | null },
 	'get_task_plan': {},
+	// Test discovery and execution (Stage 3)
+	'test_discover': {},
+	'test_list': {},
+	'test_run': { test_files?: string[], test_names?: string[] },
+	'test_run_targeted': { changed_files: string[] },
+	'test_rerun_failed': {},
+	'test_cancel': { run_id?: string },
+	// Git operations (Stage 2)
+	'git_status': {},
+	'git_diff': { ref: string | null, path: string | null, staged: boolean | null },
+	'git_log': { max_count: number | null, path: string | null },
+	'git_branch_list': {},
+	'git_branch_create': { branch_name: string, start_point: string | null },
+	'git_branch_switch': { branch_name: string },
+	'git_stage': { paths: string[] },
+	'git_unstage': { paths: string[] },
+	'git_commit': { message: string, amend: boolean | null },
+	'git_fetch': { remote: string | null },
+	'git_pull': { remote: string | null, branch: string | null },
+	'git_push': { remote: string | null, branch: string | null, force: boolean | null },
+	'git_merge': { branch: string },
+	'git_stash': { message: string | null },
+	'git_stash_pop': {},
+	'git_show': { commit: string, path: string | null },
 }
 
 // RESULT OF TOOL CALL
@@ -137,6 +189,30 @@ export type BuiltinToolResultType = {
 	'create_task_plan': { plan: TaskPlan },
 	'update_task_plan': { plan: TaskPlan },
 	'get_task_plan': { plan: TaskPlan | null },
+	// Git operations (Stage 2)
+	'git_status': { status: GitRepositoryStatus },
+	'git_diff': { diff: GitDiffResult },
+	'git_log': { commits: GitCommitLogEntry[], total: number },
+	'git_branch_list': { branches: GitBranchInfo[], current: string | null },
+	'git_branch_create': { branch_name: string },
+	'git_branch_switch': { branch_name: string },
+	'git_stage': { staged: string[] },
+	'git_unstage': { unstaged: string[] },
+	'git_commit': { commit_hash: string, message: string },
+	'git_fetch': { result: string },
+	'git_pull': { result: string },
+	'git_push': { result: string },
+	'git_merge': { result: string, merge_in_progress: boolean },
+	'git_stash': { result: string },
+	'git_stash_pop': { result: string },
+	'git_show': { commit: string, message: string, diff: string },
+	// Test discovery and execution (Stage 3)
+	'test_discover': { frameworks: TestFramework[] },
+	'test_list': { testFiles: TestFileInfo[] },
+	'test_run': { results: TestRunResultData },
+	'test_run_targeted': { results: TestRunResultData },
+	'test_rerun_failed': { results: TestRunResultData },
+	'test_cancel': { cancelled: boolean },
 }
 
 

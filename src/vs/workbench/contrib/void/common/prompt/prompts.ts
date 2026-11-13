@@ -511,8 +511,163 @@ export const builtinTools: {
 		name: 'get_task_plan',
 		description: `Read the current task plan. Use this to see what tasks remain, what has been completed, and what the current task is.`,
 		params: {},
-	}
+	},
 
+	// Git operations (Stage 2)
+	git_status: {
+		name: 'git_status',
+		description: `Show the working tree status of the Git repository: current branch, staged/unstaged/untracked files, and merge state. Read-only.`,
+		params: {},
+	},
+	git_diff: {
+		name: 'git_diff',
+		description: `Show the diff of changes in the Git repository. Without arguments, shows unstaged changes. Use ref to diff against a specific commit/branch. Use path to limit to a specific file. Set staged to true to show staged changes.`,
+		params: {
+			ref: { description: 'Optional. The commit or branch to diff against.' },
+			path: { description: 'Optional. Limit diff to this file path.' },
+			staged: { description: 'Optional. Show staged changes instead of unstaged.' },
+		},
+	},
+	git_log: {
+		name: 'git_log',
+		description: `Show commit history. Use max_count to limit the number of commits. Use path to limit to a specific file.`,
+		params: {
+			max_count: { description: 'Optional. Maximum number of commits to show.' },
+			path: { description: 'Optional. Limit log to this file path.' },
+		},
+	},
+	git_branch_list: {
+		name: 'git_branch_list',
+		description: `List all local and remote branches with their tracking status.`,
+		params: {},
+	},
+	git_branch_create: {
+		name: 'git_branch_create',
+		description: `Create a new branch. Optionally specify a start point (commit or branch).`,
+		params: {
+			branch_name: { description: 'The name of the new branch.' },
+			start_point: { description: 'Optional. The commit or branch to start from.' },
+		},
+	},
+	git_branch_switch: {
+		name: 'git_branch_switch',
+		description: `Switch to an existing branch.`,
+		params: {
+			branch_name: { description: 'The name of the branch to switch to.' },
+		},
+	},
+	git_stage: {
+		name: 'git_stage',
+		description: `Stage files for commit (git add). Provide an array of file paths.`,
+		params: {
+			paths: { description: 'Array of file paths to stage.' },
+		},
+	},
+	git_unstage: {
+		name: 'git_unstage',
+		description: `Unstage files (git reset HEAD). Provide an array of file paths.`,
+		params: {
+			paths: { description: 'Array of file paths to unstage.' },
+		},
+	},
+	git_commit: {
+		name: 'git_commit',
+		description: `Commit staged changes with a message. Use amend to amend the previous commit.`,
+		params: {
+			message: { description: 'The commit message.' },
+			amend: { description: 'Optional. Amend the previous commit instead of creating a new one.' },
+		},
+	},
+	git_fetch: {
+		name: 'git_fetch',
+		description: `Fetch from a remote. Optionally specify which remote.`,
+		params: {
+			remote: { description: 'Optional. The remote name (e.g., origin).' },
+		},
+	},
+	git_pull: {
+		name: 'git_pull',
+		description: `Pull from a remote. Optionally specify remote and branch.`,
+		params: {
+			remote: { description: 'Optional. The remote name.' },
+			branch: { description: 'Optional. The branch to pull.' },
+		},
+	},
+	git_push: {
+		name: 'git_push',
+		description: `Push to a remote. Optionally specify remote, branch, and force. Force push is a high-risk operation.`,
+		params: {
+			remote: { description: 'Optional. The remote name.' },
+			branch: { description: 'Optional. The branch to push.' },
+			force: { description: 'Optional. Force push (high risk - can overwrite remote history).' },
+		},
+	},
+	git_merge: {
+		name: 'git_merge',
+		description: `Merge a branch into the current branch. May result in conflicts that need manual resolution.`,
+		params: {
+			branch: { description: 'The branch to merge into the current branch.' },
+		},
+	},
+	git_stash: {
+		name: 'git_stash',
+		description: `Stash local changes. Optionally provide a message.`,
+		params: {
+			message: { description: 'Optional. A message for the stash.' },
+		},
+	},
+	git_stash_pop: {
+		name: 'git_stash_pop',
+		description: `Pop the most recent stash, restoring stashed changes.`,
+		params: {},
+	},
+	git_show: {
+		name: 'git_show',
+		description: `Show details of a specific commit, including its diff. Optionally limit to a specific file path.`,
+		params: {
+			commit: { description: 'The commit hash or reference.' },
+			path: { description: 'Optional. Limit to this file path.' },
+		},
+	},
+
+	// Test discovery and execution (Stage 3)
+	test_discover: {
+		name: 'test_discover',
+		description: `Discover available test frameworks and runners in the project. Returns a list of detected test frameworks with their configuration files.`,
+		params: {},
+	},
+	test_list: {
+		name: 'test_list',
+		description: `List all test files and suites discovered in the project. Returns test file paths with test counts and associated frameworks.`,
+		params: {},
+	},
+	test_run: {
+		name: 'test_run',
+		description: `Run tests. Optionally specify test files and/or test names to run a subset. Without arguments, runs all discovered tests.`,
+		params: {
+			test_files: { description: 'Optional. Absolute paths to test files to run.' },
+			test_names: { description: 'Optional. Specific test names to run.' },
+		},
+	},
+	test_run_targeted: {
+		name: 'test_run_targeted',
+		description: `Run tests related to specific changed files. Uses VS Code's test controller to find tests related to the given files.`,
+		params: {
+			changed_files: { description: 'Array of absolute file paths that were changed. Tests related to these files will be run.' },
+		},
+	},
+	test_rerun_failed: {
+		name: 'test_rerun_failed',
+		description: `Re-run tests that failed in the most recent test run. If no previous run exists or no tests failed, returns an empty result.`,
+		params: {},
+	},
+	test_cancel: {
+		name: 'test_cancel',
+		description: `Cancel a running test operation. Optionally specify a run ID; if not given, cancels the most recent run.`,
+		params: {
+			run_id: { description: 'Optional. The ID of the test run to cancel.' },
+		},
+	},
 
 	// go_to_definition
 	// go_to_usages

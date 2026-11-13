@@ -319,6 +319,10 @@ export interface IChatThreadService {
 
 	// call to add a message
 	addUserMessageAndStreamResponse({ userMessage, threadId }: { userMessage: string, threadId: string }): Promise<void>;
+	addUserMessage({ userMessage, threadId }: { userMessage: string, threadId: string }): void;
+
+	// Run one autonomous turn: send current thread to LLM, execute any tool calls returned
+	runAutonomousTurn(threadId: string): Promise<void>;
 
 	// approve/reject
 	approveLatestToolRequest(threadId: string): void;
@@ -1506,6 +1510,34 @@ We only need to do it for files that were edited since `from`, ie files between 
 		// Now call the original method to add the user message and stream the response
 		await this._addUserMessageAndStreamResponse({ userMessage, _chatSelections, threadId });
 
+	}
+
+	// Add a user message to the thread without triggering the LLM stream.
+	// Used by the autonomous executor to inject task instructions.
+	addUserMessage: IChatThreadService['addUserMessage'] = async ({ userMessage, threadId }: { userMessage: string, threadId: string }) => {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return
+
+		const instructions = userMessage
+		const currSelns: StagingSelectionItem[] = thread.state.stagingSelections
+
+		const userMessageContent = await chat_userMessageContent(instructions, currSelns, { directoryStrService: this._directoryStringService, fileService: this._fileService })
+		const workspaceContext = this._convertToLLMMessagesService.getWorkspaceContext(this._settingsService.state.globalSettings.chatMode)
+		const content = workspaceContext ? userMessageContent + "\n\n" + workspaceContext : userMessageContent
+		const userHistoryElt: ChatMessage = { role: 'user', content, displayContent: instructions, selections: currSelns, state: defaultMessageState }
+		this._addMessageToThread(threadId, userHistoryElt)
+	}
+
+	// Run one autonomous turn: prepare LLM messages from thread history, send to LLM,
+	// and execute any tool calls returned. Used by the autonomous executor.
+	runAutonomousTurn: IChatThreadService['runAutonomousTurn'] = async (threadId: string) => {
+		const thread = this.state.allThreads[threadId]
+		if (!thread) return
+
+		const modelSelection = this._settingsService.state.modelSelectionOfFeature['Chat']
+		const modelSelectionOptions = modelSelection ? this._settingsService.state.optionsOfModelSelection['Chat'][modelSelection.providerName]?.[modelSelection.modelName] : undefined
+
+		await this._runChatAgent({ threadId, modelSelection, modelSelectionOptions })
 	}
 
 	editUserMessageAndStreamResponse: IChatThreadService['editUserMessageAndStreamResponse'] = async ({ userMessage, messageIdx, threadId }) => {
