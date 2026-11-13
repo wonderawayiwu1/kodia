@@ -12,6 +12,7 @@ import { TerminalLocation } from '../../../../platform/terminal/common/terminal.
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ITerminalService } from '../../../../workbench/contrib/terminal/browser/terminal.js';
 import type { ITerminalInstance, ICreateTerminalOptions } from '../../../../workbench/contrib/terminal/browser/terminal.js';
+import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_CHARS, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js';
 import { TerminalResolveReason } from '../common/toolsServiceTypes.js';
 import { timeout } from '../../../../base/common/async.js';
@@ -618,3 +619,5 @@ function terminalId(terminal: ITerminalInstance): string {
 	if (id) return id
 	return terminal.title // fallback
 }
+
+registerSingleton(ITerminalToolService, TerminalToolService, InstantiationType.Delayed);
