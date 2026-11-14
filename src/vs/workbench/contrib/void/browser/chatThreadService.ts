@@ -959,8 +959,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 			if (isBuiltInTool) {
 				const toolCallPromise = this._toolsService.callTool[toolName](toolParams as any)
+				// Terminal commands (composer, npm, migrations, seeders, etc.) can run for many
+				// minutes. Give them a generous timeout so they finish and return output instead
+				// of being killed mid-run. The terminal service itself has its own inactivity
+				// guard (MAX_TERMINAL_INACTIVE_TIME) so runaway commands are still bounded.
+				const TOOL_TIMEOUT_MS = 10 * 60_000 // 10 minutes
 				const toolTimeout = new Promise<never>((_, reject) => {
-					setTimeout(() => reject(new Error(`Tool call '${toolName}' timed out after 60 seconds`)), 60000)
+					setTimeout(() => reject(new Error(`Tool call '${toolName}' timed out after ${TOOL_TIMEOUT_MS / 1000} seconds`)), TOOL_TIMEOUT_MS)
 				})
 				const toolResultObj = await Promise.race([toolCallPromise, toolTimeout])
 				const interruptor = () => { interrupted = true; toolResultObj.interruptTool?.() }
