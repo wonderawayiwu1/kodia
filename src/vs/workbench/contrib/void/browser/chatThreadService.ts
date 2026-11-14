@@ -873,20 +873,37 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		if (isBuiltInTool && taskPlanTools.has(toolName)) {
 			const params = toolParams as any;
 			let toolResult: any;
-			if (toolName === 'create_task_plan') {
-				const plan = this.taskPlanService.createPlan(threadId, params.title, params.description, params.tasks);
-				toolResult = { plan };
-			} else if (toolName === 'update_task_plan') {
-				const plan = this.taskPlanService.updateTask(threadId, params.taskId, params.status, params.result, params.error);
-				if (!plan) throw new Error('No task plan found for thread ' + threadId);
-				toolResult = { plan };
-			} else if (toolName === 'get_task_plan') {
-				const plan = this.taskPlanService.getPlan(threadId);
-				toolResult = { plan };
+			let toolError: string | null = null;
+			try {
+				if (toolName === 'create_task_plan') {
+					const plan = this.taskPlanService.createPlan(threadId, params.title, params.description, params.tasks);
+					toolResult = { plan };
+				} else if (toolName === 'update_task_plan') {
+					const plan = this.taskPlanService.updateTask(threadId, params.taskId, params.status, params.result, params.error);
+					if (!plan) {
+						toolError = 'No task plan found for thread ' + threadId + '. Create one first with create_task_plan.';
+					} else {
+						toolResult = { plan };
+					}
+				} else if (toolName === 'get_task_plan') {
+					const plan = this.taskPlanService.getPlan(threadId);
+					if (!plan) {
+						toolError = 'No task plan found for thread ' + threadId + '. Create one first with create_task_plan.';
+					} else {
+						toolResult = { plan };
+					}
+				}
+			} catch (error) {
+				toolError = getErrorMessage(error);
 			}
 
 			const runningTool = { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(value not received yet...)', result: null, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName } as const
 			this._updateLatestTool(threadId, runningTool)
+
+			if (toolError) {
+				this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: toolError, name: toolName, content: toolError, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+				return {};
+			}
 
 			const planObj = this.taskPlanService.getPlan(threadId);
 			const toolResultStr = planObj ? formatTaskPlanForLLM(planObj) : '';
