@@ -113,6 +113,46 @@ suite('Kodia - autonomy policy (Stage 5A)', () => {
 			});
 			assert.strictEqual(e.decision, 'allow');
 		});
+
+		test('todo is low risk and allowed without approval in Agent mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove, operationPolicy: {},
+				toolName: 'todo', params: { todos: [{ id: 'setup', content: 'set up project', status: 'in_progress' }] },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.decision, 'allow');
+			assert.strictEqual(e.risk, 'low');
+		});
+
+		test('todo is low risk and allowed without approval in Assist mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'assist', autoApprove, operationPolicy: {},
+				toolName: 'todo', params: { todos: [{ id: 'setup', content: 'set up project', status: 'pending' }] },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.decision, 'allow');
+			assert.strictEqual(e.risk, 'low');
+		});
+
+		test('subagent is low risk and allowed without approval in Agent mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'agent', autoApprove, operationPolicy: {},
+				toolName: 'subagent', params: { agent: 'build', description: 'write tests', prompt: 'Write unit tests for the API layer' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.decision, 'allow');
+			assert.strictEqual(e.risk, 'low');
+		});
+
+		test('subagent is low risk and allowed without approval in Assist mode', () => {
+			const e = evaluateAutonomy({
+				mode: 'assist', autoApprove, operationPolicy: {},
+				toolName: 'subagent', params: { agent: 'build', description: 'write tests', prompt: 'Write unit tests for the API layer' },
+				isOutsideWorkspace: false,
+			});
+			assert.strictEqual(e.decision, 'allow');
+			assert.strictEqual(e.risk, 'low');
+		});
 	});
 
 	suite('Assist mode decisions', () => {

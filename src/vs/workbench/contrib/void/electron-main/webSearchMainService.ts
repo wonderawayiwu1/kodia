@@ -120,7 +120,7 @@ export class WebSearchMainService implements IWebSearchService {
 			exa: { enabled: false, priority: 2, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
 			you: { enabled: false, priority: 3, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
 			nvidia: { enabled: false, priority: 4, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
-			duckduckgo: { enabled: false, priority: 5, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
+			duckduckgo: { enabled: true, priority: 5, maxResults: 10, timeoutMs: DEFAULT_TIMEOUT_MS },
 		};
 	}
 

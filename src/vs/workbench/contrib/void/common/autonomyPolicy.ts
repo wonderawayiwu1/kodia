@@ -131,6 +131,7 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		// Ordinary development writes and terminal use.
 		case 'create_file_or_folder':
 		case 'rewrite_file':
+		case 'write_file':
 		case 'edit_file':
 		case 'write_project_memory':
 		case 'run_command':
@@ -160,6 +161,8 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'create_task_plan':
 		case 'update_task_plan':
 		case 'get_task_plan':
+		case 'todo':
+		case 'subagent':
 			return 'low';
 
 		// Git read-only operations - inspection only.

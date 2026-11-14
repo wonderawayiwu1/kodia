@@ -444,6 +444,14 @@ export class ToolsService implements IToolsService {
 				return { uri, newContent }
 			},
 
+			// write_file: alias for rewrite_file
+			write_file: (params: RawToolParamsObj) => {
+				const { uri: uriStr, new_content: newContentUnknown } = params
+				const uri = validateURI(uriStr, workspaceContextService)
+				const newContent = validateStr('newContent', newContentUnknown)
+				return { uri, newContent }
+			},
+
 			edit_file: (params: RawToolParamsObj) => {
 				const { uri: uriStr, search_replace_blocks: searchReplaceBlocksUnknown } = params
 				const uri = validateURI(uriStr, workspaceContextService)
@@ -654,6 +662,37 @@ export class ToolsService implements IToolsService {
 				return { run_id: runId ?? undefined }
 			},
 
+			// Todo list (task tracking within a turn - OpenCode parity)
+			todo: (params: RawToolParamsObj) => {
+				const { todos: todosUnknown } = params
+				if (!Array.isArray(todosUnknown)) throw new Error(`Invalid LLM output: todos must be an array.`)
+				const todos = todosUnknown.map((t, i) => {
+					if (!t || typeof t !== 'object') throw new Error(`Invalid LLM output: todos[${i}] must be an object.`)
+					const id = validateStr('id', (t as any).id)
+					const content = validateStr('content', (t as any).content)
+					const status = (t as any).status
+					if (status !== 'pending' && status !== 'in_progress' && status !== 'completed') {
+						throw new Error(`Invalid LLM output: todos[${i}].status must be 'pending', 'in_progress' or 'completed'.`)
+					}
+					return { id, content, status }
+				})
+				return { todos }
+			},
+
+			// Subagent delegation (OpenCode parity - roadmap Stage 6)
+			subagent: (params: RawToolParamsObj) => {
+				const { agent: agentUnknown, description: descriptionUnknown, prompt: promptUnknown, model: modelUnknown, session_i_d: sessionIDUnknown } = params
+				const agent = validateStr('agent', agentUnknown)
+				const description = validateStr('description', descriptionUnknown)
+				const prompt = validateStr('prompt', promptUnknown)
+				const model = validateOptionalStr('model', modelUnknown)
+				const sessionID = validateOptionalStr('sessionID', sessionIDUnknown)
+				if (!agent) throw new Error(`Invalid LLM output: agent must not be empty.`)
+				if (!description) throw new Error(`Invalid LLM output: description must not be empty.`)
+				if (!prompt) throw new Error(`Invalid LLM output: prompt must not be empty.`)
+				return { agent, description, prompt, model: model ?? undefined, sessionID: sessionID ?? undefined }
+			},
+
 		}
 
 
@@ -834,11 +873,24 @@ export class ToolsService implements IToolsService {
 			// ---
 
 			create_file_or_folder: async ({ uri, isFolder }) => {
-				if (isFolder)
-					await fileService.createFolder(uri)
-				else {
-					await fileService.createFile(uri)
+				// Determine if this is a folder by checking disk, falling back to validation hint
+				let actualIsFolder = isFolder
+				try {
+					const stat = await fileService.stat(uri)
+					actualIsFolder = stat.isDirectory
+				} catch {
+					// Path doesn't exist yet: if validation said file but it has no extension,
+					// treat it as a folder (models often omit trailing slash for folders)
+					if (!isFolder) {
+						const lastSegment = uri.fsPath.split(/[/\\]/).pop() || ''
+						actualIsFolder = !lastSegment.includes('.')
+					}
 				}
+
+				if (actualIsFolder)
+					await fileService.createFolder(uri)
+				else
+					await fileService.createFile(uri)
 				return { result: {} }
 			},
 
@@ -853,14 +905,25 @@ export class ToolsService implements IToolsService {
 					throw new Error(`Another LLM is currently making changes to this file. Please stop streaming for now and ask the user to resume later.`)
 				}
 				await editCodeService.callBeforeApplyOrEdit(uri)
-				editCodeService.instantlyRewriteFile({ uri, newContent })
+				await editCodeService.instantlyRewriteFile({ uri, newContent })
 				// at end, get lint errors
-				const lintErrorsPromise = Promise.resolve().then(async () => {
-					await timeout(2000)
-					const { lintErrors } = this._getLintErrors(uri)
-					return { lintErrors }
-				})
-				return { result: lintErrorsPromise }
+				await timeout(2000)
+				const { lintErrors } = this._getLintErrors(uri)
+				return { result: { lintErrors } }
+			},
+
+			// write_file: alias for rewrite_file
+			write_file: async ({ uri, newContent }) => {
+				await voidModelService.initializeModel(uri)
+				if (this.commandBarService.getStreamState(uri) === 'streaming') {
+					throw new Error(`Another LLM is currently making changes to this file. Please stop streaming for now and ask the user to resume later.`)
+				}
+				await editCodeService.callBeforeApplyOrEdit(uri)
+				await editCodeService.instantlyRewriteFile({ uri, newContent })
+				// at end, get lint errors
+				await timeout(2000)
+				const { lintErrors } = this._getLintErrors(uri)
+				return { result: { lintErrors } }
 			},
 
 			edit_file: async ({ uri, searchReplaceBlocks }) => {
@@ -869,16 +932,12 @@ export class ToolsService implements IToolsService {
 					throw new Error(`Another LLM is currently making changes to this file. Please stop streaming for now and ask the user to resume later.`)
 				}
 				await editCodeService.callBeforeApplyOrEdit(uri)
-				editCodeService.instantlyApplySearchReplaceBlocks({ uri, searchReplaceBlocks })
+				await editCodeService.instantlyApplySearchReplaceBlocks({ uri, searchReplaceBlocks })
 
 				// at end, get lint errors
-				const lintErrorsPromise = Promise.resolve().then(async () => {
-					await timeout(2000)
-					const { lintErrors } = this._getLintErrors(uri)
-					return { lintErrors }
-				})
-
-				return { result: lintErrorsPromise }
+				await timeout(2000)
+				const { lintErrors } = this._getLintErrors(uri)
+				return { result: { lintErrors } }
 			},
 
 			write_project_memory: async ({ section, content }) => {
@@ -1154,6 +1213,20 @@ export class ToolsService implements IToolsService {
 				return { result: await this.testToolService.cancelTestRun({ run_id: runId }) }
 			},
 
+			// Todo list (task tracking within a turn - OpenCode parity)
+			todo: async ({ todos }) => {
+				const done = todos.filter(t => t.status === 'completed').length
+				const inProgress = todos.filter(t => t.status === 'in_progress').length
+				const pending = todos.filter(t => t.status === 'pending').length
+				return { result: { done, inProgress, pending, todos } }
+			},
+
+			// Subagent delegation (OpenCode parity - roadmap Stage 6).
+			// Handled in chatThreadService._runToolCall (needs thread creation + autonomous executor).
+			subagent: async () => {
+				throw new Error('subagent tool is handled by chatThreadService, not toolsService.callTool')
+			},
+
 		}
 
 
@@ -1302,6 +1375,15 @@ export class ToolsService implements IToolsService {
 				return `Change successfully made to ${params.uri.fsPath}.${lintErrsString}`
 			},
 			rewrite_file: (params, result) => {
+				const lintErrsString = (
+					this.voidSettingsService.state.globalSettings.includeToolLintErrors ?
+						(result.lintErrors ? ` Lint errors found after change:\n${stringifyLintErrors(result.lintErrors)}.\nIf this is related to a change made while calling this tool, you might want to fix the error.`
+							: ` No lint errors found.`)
+						: '')
+
+				return `Change successfully made to ${params.uri.fsPath}.${lintErrsString}`
+			},
+			write_file: (params, result) => {
 				const lintErrsString = (
 					this.voidSettingsService.state.globalSettings.includeToolLintErrors ?
 						(result.lintErrors ? ` Lint errors found after change:\n${stringifyLintErrors(result.lintErrors)}.\nIf this is related to a change made while calling this tool, you might want to fix the error.`
@@ -1522,6 +1604,25 @@ export class ToolsService implements IToolsService {
 			},
 			test_cancel: (_params, result) => {
 				return result.cancelled ? 'Test run cancelled.' : 'No test run to cancel.'
+			},
+
+			// Todo list (task tracking within a turn - OpenCode parity)
+			todo: (_params, result) => {
+				const { todos } = result
+				const done = todos.filter(t => t.status === 'completed').length
+				const inProgress = todos.filter(t => t.status === 'in_progress').length
+				const pending = todos.filter(t => t.status === 'pending').length
+				const lines = todos.map(t => {
+					const icon = t.status === 'completed' ? '✅' : t.status === 'in_progress' ? '🔄' : '⬜'
+					return `${icon} ${t.content}`
+				})
+				return `Todo list: ${done}/${todos.length} done${inProgress ? `, ${inProgress} in progress` : ''}${pending ? `, ${pending} pending` : ''}.\n${lines.join('\n')}`
+			},
+
+			// Subagent delegation (OpenCode parity - roadmap Stage 6)
+			subagent: (_params, result) => {
+				const { sessionID, status, output } = result
+				return `Subagent started in session ${sessionID} (${status}). ${output}`
 			},
 
 		}

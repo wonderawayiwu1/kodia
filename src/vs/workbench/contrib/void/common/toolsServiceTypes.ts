@@ -32,6 +32,7 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'create_file_or_folder': 'edits',
 	'delete_file_or_folder': 'edits',
 	'rewrite_file': 'edits',
+	'write_file': 'edits',
 	'edit_file': 'edits',
 	'write_project_memory': 'edits',
 	'run_command': 'terminal',
@@ -106,7 +107,9 @@ export type BuiltinToolCallParams = {
 	'web_search': { query: string, maxResults?: number },
 	// ---
 	'rewrite_file': { uri: URI, newContent: string },
-	'write_project_memory': { section: string, content: string },
+		// write_file: alias for rewrite_file
+		'write_file': { uri: URI, newContent: string },
+		'write_project_memory': { section: string, content: string },
 	'edit_file': { uri: URI, searchReplaceBlocks: string },
 	'create_file_or_folder': { uri: URI, isFolder: boolean },
 	'delete_file_or_folder': { uri: URI, isRecursive: boolean, isFolder: boolean },
@@ -132,6 +135,10 @@ export type BuiltinToolCallParams = {
 	'test_run_targeted': { changed_files: string[] },
 	'test_rerun_failed': {},
 	'test_cancel': { run_id?: string },
+	// Todo list (task tracking within a turn - OpenCode parity)
+	'todo': { todos: { id: string, content: string, status: 'pending' | 'in_progress' | 'completed' }[] },
+	// Subagent delegation (OpenCode parity - roadmap Stage 6)
+	'subagent': { agent: string, description: string, prompt: string, model?: string, sessionID?: string },
 	// Git operations (Stage 2)
 	'git_status': {},
 	'git_diff': { ref: string | null, path: string | null, staged: boolean | null },
@@ -169,8 +176,10 @@ export type BuiltinToolResultType = {
 	'fetch_url': { url: string, title: string | null, content: string, totalLen: number, hasNextPage: boolean },
 	'web_search': { results: SearchResult[] },
 	// ---
-	'rewrite_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
-	'edit_file': Promise<{ lintErrors: LintErrorItem[] | null }>,
+	'rewrite_file': { lintErrors: LintErrorItem[] | null },
+		// write_file: alias for rewrite_file
+		'write_file': { lintErrors: LintErrorItem[] | null },
+		'edit_file': { lintErrors: LintErrorItem[] | null },
 	'write_project_memory': { content: string, tokenCount: number },
 	'create_file_or_folder': {},
 	'delete_file_or_folder': {},
@@ -213,6 +222,10 @@ export type BuiltinToolResultType = {
 	'test_run_targeted': { results: TestRunResultData },
 	'test_rerun_failed': { results: TestRunResultData },
 	'test_cancel': { cancelled: boolean },
+		// Todo list (task tracking within a turn - OpenCode parity)
+		'todo': { done: number, inProgress: number, pending: number, todos: { id: string, content: string, status: string }[] },
+		// Subagent delegation (OpenCode parity - roadmap Stage 6)
+		'subagent': { sessionID: string, status: string, output: string },
 }
 
 

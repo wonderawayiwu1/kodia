@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { CancellationToken } from '../../../../base/common/cancellation.js';
+import { DeferredPromise } from '../../../../base/common/async.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
@@ -39,6 +40,20 @@ export interface ITestToolService {
 	rerunFailedTests(params: TestRerunFailedParams): Promise<TestRerunFailedResult>;
 	cancelTestRun(params: TestCancelParams): Promise<TestCancelResult>;
 
+	// Status
+	getTestRunStatus(runId: string): TestRunResultData | null;
+	isTestRunRunning(): boolean;
+
+	// Autonomous workflow integration
+	runAndAnalyzeTests(params: TestRunParams): Promise<{
+		results: TestRunResultData;
+		analysis: {
+			hasFailures: boolean;
+			failureSummary: string;
+			recommendations: string[];
+		};
+	}>;
+
 	// Events
 	readonly onTestRunStart: Event<{ runId: string }>;
 	readonly onTestRunComplete: Event<{ runId: string; results: TestRunResultData }>;
@@ -55,6 +70,7 @@ export class TestToolService extends Disposable implements ITestToolService {
 
 	private lastResults: TestRunResultData | null = null;
 	private currentRunId: string | null = null;
+	private runningRuns: Map<string, DeferredPromise<TestRunResultData>> = new Map();
 
 	private readonly _onTestRunStart = new Emitter<{ runId: string }>();
 	readonly onTestRunStart: Event<{ runId: string }> = this._onTestRunStart.event;
@@ -80,8 +96,26 @@ export class TestToolService extends Disposable implements ITestToolService {
 				result.onComplete(() => {
 					const data = this.resultToData(result, Date.now());
 					this.lastResults = data;
+					// Resolve any waiting deferred promise for this run
+					const waiter = this.runningRuns.get(result.id);
+					if (waiter) {
+						waiter.complete(data);
+						this.runningRuns.delete(result.id);
+					}
 					this._onTestRunComplete.fire({ runId: result.id, results: data });
 				});
+			}
+			if ('completed' in ev) {
+				const result = ev.completed;
+				const data = this.resultToData(result, Date.now());
+				this.lastResults = data;
+				// Resolve any waiting deferred promise for this run
+				const waiter = this.runningRuns.get(result.id);
+				if (waiter) {
+					waiter.complete(data);
+					this.runningRuns.delete(result.id);
+				}
+				this._onTestRunComplete.fire({ runId: result.id, results: data });
 			}
 		}));
 	}
@@ -245,6 +279,91 @@ export class TestToolService extends Disposable implements ITestToolService {
 		return this.lastResults;
 	}
 
+	getTestRunStatus(runId: string): TestRunResultData | null {
+		// Check last results first (most common case)
+		if (this.lastResults && this.lastResults.runId === runId) {
+			return this.lastResults;
+		}
+		// Check the result service for historical results
+		const result = this.testResultService.getResult(runId);
+		if (result) {
+			return this.resultToData(result, Date.now());
+		}
+		return null;
+	}
+
+	isTestRunRunning(): boolean {
+		return this.runningRuns.size > 0 || this.currentRunId !== null;
+	}
+
+	async runAndAnalyzeTests(params: TestRunParams): Promise<{
+		results: TestRunResultData;
+		analysis: {
+			hasFailures: boolean;
+			failureSummary: string;
+			recommendations: string[];
+		};
+	}> {
+		const result = await this.runTests(params);
+		const analysis = this.analyzeTestResults(result.results);
+		return { results: result.results, analysis };
+	}
+
+	private analyzeTestResults(results: TestRunResultData): {
+		hasFailures: boolean;
+		failureSummary: string;
+		recommendations: string[];
+	} {
+		const failures = results.testResults.filter(r => r.state === 'failed' || r.state === 'errored');
+		const hasFailures = failures.length > 0;
+
+		let failureSummary: string;
+		const recommendations: string[] = [];
+
+		if (!hasFailures) {
+			failureSummary = `All ${results.passed} tests passed.`;
+			if (results.skipped > 0) {
+				failureSummary += ` ${results.skipped} test(s) were skipped.`;
+				recommendations.push('Review skipped tests to ensure they are intentionally skipped.');
+			}
+			return { hasFailures: false, failureSummary, recommendations };
+		}
+
+		const failedCount = failures.length;
+		failureSummary = `${failedCount} test(s) failed or errored out of ${results.total} total.`;
+
+		// Group failures by file for better summary
+		const failuresByFile = new Map<string, { count: number; examples: string[] }>();
+		for (const f of failures) {
+			const key = f.uri ?? 'unknown file';
+			if (!failuresByFile.has(key)) {
+				failuresByFile.set(key, { count: 0, examples: [] });
+			}
+			const entry = failuresByFile.get(key)!;
+			entry.count++;
+			if (entry.examples.length < 3) {
+				entry.examples.push(f.label);
+			}
+		}
+
+		failureSummary += '\n\nFailures by file:';
+		for (const [file, entry] of failuresByFile) {
+			failureSummary += `\n  ${file}: ${entry.count} failure(s)`;
+			for (const ex of entry.examples) {
+				failureSummary += `\n    - ${ex}`;
+			}
+		}
+
+		recommendations.push('Review the failing tests and their error messages.');
+		recommendations.push('Fix the code causing test failures.');
+		recommendations.push('Rerun the affected tests after making changes.');
+		if (failedCount > 5) {
+			recommendations.push('Consider running tests in smaller batches to isolate issues.');
+		}
+
+		return { hasFailures: true, failureSummary, recommendations };
+	}
+
 	// -----------------------------------------------------------------------
 	// Private helpers
 	// -----------------------------------------------------------------------
@@ -286,6 +405,7 @@ export class TestToolService extends Disposable implements ITestToolService {
 	}
 
 	private async *_testsInFile(uri: URI): AsyncGenerator<IncrementalTestCollectionItem[]> {
+		// Kept for backward compatibility; testsInFile from testService is preferred
 		for (const item of this.testService.collection.all) {
 			if (item.item.uri && item.item.uri.fsPath === uri.fsPath) {
 				yield [item];
@@ -335,34 +455,34 @@ export class TestToolService extends Disposable implements ITestToolService {
 			CancellationToken.None
 		);
 
-		const data = await this._waitForCompletion(result.id, startTime);
-		return data;
-	}
+		// Register a deferred promise to wait for completion via events
+		const waiter = new DeferredPromise<TestRunResultData>();
+		this.runningRuns.set(result.id, waiter);
 
-	private async _waitForCompletion(runId: string, startTime: number): Promise<TestRunResultData> {
-		const maxWait = 120_000;
-		const pollInterval = 500;
-		let waited = 0;
-
-		while (waited < maxWait) {
-			await new Promise(resolve => setTimeout(resolve, pollInterval));
-			waited += pollInterval;
-
-			if (this.lastResults && this.lastResults.runId === runId && this.lastResults.completed) {
-				return this.lastResults;
-			}
-
-			const results = this.testResultService.results;
-			for (const r of results) {
-				if (r.id === runId && r.completedAt !== undefined) {
-					const data = this.resultToData(r, startTime);
-					this.lastResults = data;
-					return data;
-				}
-			}
+		// If already completed (synchronous), complete immediately
+		const existing = this.testResultService.getResult(result.id);
+		if (existing && existing.completedAt !== undefined) {
+			const data = this.resultToData(existing, startTime);
+			waiter.complete(data);
+			this.runningRuns.delete(result.id);
+			return data;
 		}
 
-		return this.lastResults ?? this._emptyResult('timeout');
+		// Wait for event-based completion with a timeout
+		const timeoutMs = 120_000;
+		const timeoutPromise = new Promise<TestRunResultData>((resolve) => {
+			setTimeout(() => {
+				if (!waiter.isSettled) {
+					// Fallback: check last results
+					const fallback = this.lastResults ?? this._emptyResult('timeout');
+					waiter.complete(fallback);
+					this.runningRuns.delete(result.id);
+					resolve(fallback);
+				}
+			}, timeoutMs);
+		});
+
+		return Promise.race([waiter.p, timeoutPromise]);
 	}
 
 	private resultToData(result: ITestResult, startTime: number): TestRunResultData {

@@ -534,7 +534,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	includeToolLintErrors: true,
 	isOnboardingComplete: false,
 	disableSystemMessage: false,
-	autoAcceptLLMChanges: false,
+	autoAcceptLLMChanges: true,
 	oneHourPromptCache: false,
 	// Web Search settings (Phase 1)
 	webSearchProviders: {
@@ -543,7 +543,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 		exa: { apiKey: undefined, enabled: false, priority: 2, maxResults: 10, timeoutMs: 15000 },
 		you: { apiKey: undefined, enabled: false, priority: 3, maxResults: 10, timeoutMs: 15000 },
 		nvidia: { apiKey: undefined, enabled: false, priority: 4, maxResults: 10, timeoutMs: 15000 },
-		duckduckgo: { apiKey: undefined, enabled: false, priority: 5, maxResults: 10, timeoutMs: 15000 },
+		duckduckgo: { apiKey: undefined, enabled: true, priority: 5, maxResults: 10, timeoutMs: 15000 },
 	},
 	webSearchFreeOnly: true, // zero-spend preference (enforcement in later phases)
 	// NVIDIA Reranker settings (Phase 2)

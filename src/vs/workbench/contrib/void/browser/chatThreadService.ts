@@ -44,11 +44,24 @@ import { IDirectoryStrService } from '../common/directoryStrService.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IMCPService } from '../common/mcpService.js';
 import { RawMCPToolCall } from '../common/mcpServiceTypes.js';
+import { IToolOutputService } from '../common/toolOutputService.js';
+import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
 
 
 // related to retrying when LLM message has error
-const CHAT_RETRIES = 3
-const RETRY_DELAY = 2500
+// Retry is now handled by RetryPolicy (exponential backoff with jitter, retry-after support)
+// in retryPolicy.ts, integrated via _retryPolicy in _runChatAgent.
+
+// Maximum number of LLM -> tool steps in one autonomous turn. Keeps long-running
+// Maximum number of LLM -> tool steps in one autonomous turn.
+// Set to unlimited - agent runs until work is finished and verified.
+const MAX_AGENT_STEPS_PER_TURN = 999999
+
+// Stuck detection disabled - agent runs until work is complete.
+const MAX_STUCK_STEPS = 999999
+
+// Track progress across steps: files modified/created, terminal commands run,
+// test results obtained. Used by stuck detection and for resumable checkpoints.
 
 
 // File tools that access the filesystem and require workspace containment approval
@@ -63,6 +76,7 @@ const FILE_ACCESS_TOOLS: Set<BuiltinToolName> = new Set([
 	'create_file_or_folder',
 	'delete_file_or_folder',
 	'rewrite_file',
+	'write_file',
 	'edit_file',
 	'search_for_files',
 ]);
@@ -349,6 +363,12 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 	readonly streamState: ThreadStreamState = {}
 	state: ThreadsState // allThreads is persisted, currentThread is not
 
+	private readonly _retryPolicy: RetryPolicy
+	// Progress tracking for stuck detection (reset per agent turn)
+	private _progressFilesTouched: Set<string>
+	private _progressTerminalCommands: Set<string>
+	private _progressTestResults: Map<string, { passed: number; failed: number }>
+	private _progressStepsSinceLastProgress: number
 
 
 	constructor(
@@ -365,11 +385,18 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		@IWorkspaceContextService private readonly _workspaceContextService: IWorkspaceContextService,
 		@IDirectoryStrService private readonly _directoryStringService: IDirectoryStrService,
 		@IFileService private readonly _fileService: IFileService,
+		@IToolOutputService private readonly _toolOutputService: IToolOutputService,
 		@IMCPService private readonly _mcpService: IMCPService,
 		@ITaskPlanService private readonly taskPlanService: ITaskPlanService,
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
+		this._retryPolicy = new RetryPolicy()
+		// Progress tracking for stuck detection (reset per agent turn)
+		this._progressFilesTouched = new Set<string>()
+		this._progressTerminalCommands = new Set<string>()
+		this._progressTestResults = new Map<string, { passed: number; failed: number }>()
+		this._progressStepsSinceLastProgress = 0
 
 		const readThreads = this._readAllThreads() || {}
 
@@ -867,6 +894,37 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			return {};
 		}
 
+		// Subagent delegation (OpenCode parity - roadmap Stage 6).
+		// Spawns a subagent in a child thread that runs autonomously in the background.
+		const subagentTools: Set<string> = new Set(['subagent']);
+		if (isBuiltInTool && subagentTools.has(toolName)) {
+			const params = toolParams as any;
+			const childThreadId = generateUuid();
+			// Create the child thread: open a new one, then switch back to the current thread.
+			const currentThreadId = threadId;
+			this.openNewThread();
+			const createdId = this.getCurrentThread()!.id;
+			this.switchToThread(currentThreadId);
+			// Use the created thread's actual ID (openNewThread may reuse an empty one)
+			const subagentThreadId = createdId === currentThreadId ? childThreadId : createdId;
+			// Ensure the thread exists (if openNewThread reused an empty thread, it already exists)
+			if (!this.state.allThreads[subagentThreadId]) {
+				const newThread = newThreadObject();
+				newThread.id = subagentThreadId;
+				const newThreads: ChatThreads = { ...this.state.allThreads, [subagentThreadId]: newThread };
+				this._setState({ allThreads: newThreads, currentThreadId: currentThreadId });
+			}
+			// Add the task as a user message to the child thread
+			this.addUserMessage({ userMessage: params.prompt, threadId: subagentThreadId });
+			// Start autonomous execution in the background (fire and forget)
+			this.runAutonomousTurn(subagentThreadId).catch(err => {
+				console.error(`[subagent] execution failed for thread ${subagentThreadId}:`, err);
+			});
+			const output = `The subagent is working in the background (sessionID: ${subagentThreadId}). You will receive updates as it works. Do not poll for its progress—continue with other tasks and check back later.`;
+			this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: { sessionID: subagentThreadId, status: 'running', output }, name: toolName, content: output, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+			return {};
+		}
+
 		// 3. call the tool
 		// this._setStreamState(threadId, { isRunning: 'tool' }, 'merge')
 		const runningTool = { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(value not received yet...)', result: null, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName } as const
@@ -883,11 +941,15 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			if (!parallel) this._setStreamState(threadId, { isRunning: 'tool', interrupt: interruptorPromise, toolInfo: { toolName, toolParams, id: toolId, content: 'interrupted...', rawParams: opts.unvalidatedToolParams, mcpServerName } })
 
 			if (isBuiltInTool) {
-				const { result, interruptTool } = await this._toolsService.callTool[toolName](toolParams as any)
-				const interruptor = () => { interrupted = true; interruptTool?.() }
+				const toolCallPromise = this._toolsService.callTool[toolName](toolParams as any)
+				const toolTimeout = new Promise<never>((_, reject) => {
+					setTimeout(() => reject(new Error(`Tool call '${toolName}' timed out after 60 seconds`)), 60000)
+				})
+				const toolResultObj = await Promise.race([toolCallPromise, toolTimeout])
+				const interruptor = () => { interrupted = true; toolResultObj.interruptTool?.() }
 				resolveInterruptor(interruptor)
 
-				toolResult = await result
+				toolResult = await toolResultObj.result
 			}
 			else {
 				const mcpTools = this._mcpService.getMCPTools()
@@ -898,11 +960,16 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				// overwrites its 'rejected' message nor lets the agent loop continue when it returns
 				resolveInterruptor(() => { interrupted = true })
 
-				toolResult = (await this._mcpService.callMCPTool({
-					serverName: mcpTool.mcpServerName ?? 'unknown_mcp_server',
-					toolName: toolName,
-					params: toolParams
-				})).result
+				toolResult = (await Promise.race([
+					this._mcpService.callMCPTool({
+						serverName: mcpTool.mcpServerName ?? 'unknown_mcp_server',
+						toolName: toolName,
+						params: toolParams
+					}),
+					new Promise<never>((_, reject) => {
+						setTimeout(() => reject(new Error(`MCP tool '${toolName}' timed out after 60 seconds`)), 60000)
+					})
+				])).result
 			}
 
 			if (interrupted) { return { interrupted: true } } // the tool result is added where we interrupt, not here
@@ -925,6 +992,14 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			else {
 				toolResultStr = this._mcpService.stringifyResult(toolResult as RawMCPToolCall)
 			}
+
+			// OpenCode tool-output adaptation: truncate very large results so they don't
+			// fill the context window, saving the full output to a retained file.
+			const truncated = await this._toolOutputService.truncateAsync(toolResultStr)
+			toolResultStr = truncated.text
+			if (truncated.outputPath) {
+				toolResultStr += `\n\n[Full output (${truncated.text.length} chars shown) saved to: ${truncated.outputPath}]`
+			}
 		} catch (error) {
 			const errorMessage = this.toolErrMsgs.errWhenStringifying(error)
 			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: errorMessage, name: toolName, content: errorMessage, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
@@ -933,8 +1008,41 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 		// 5. add to history and keep going
 		this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result: toolResult, name: toolName, content: toolResultStr, id: toolId, rawParams: opts.unvalidatedToolParams, mcpServerName })
+
+		// Update progress tracking for stuck detection
+		this._updateProgressTracking(toolName, toolParams, toolResult as any)
+
 		return {}
 	};
+
+	/** Update progress tracking based on tool result, used by stuck detection. */
+	private _updateProgressTracking(toolName: ToolName, toolParams: ToolCallParams<ToolName>, toolResult: any): void {
+		this._progressStepsSinceLastProgress = 0 // reset stuck counter on any progress
+
+		// Track file touches
+		if (isFileAccessTool(toolName)) {
+			const uri = getFileToolUri(toolName, toolParams)
+			if (uri) {
+				this._progressFilesTouched.add(uri.fsPath)
+			}
+		}
+		// Track terminal commands
+		if (toolName === 'run_command' || toolName === 'run_persistent_command' || toolName === 'send_command_to_terminal') {
+			const cmd = (toolParams as any).command || (toolParams as any).persistent_terminal_id
+			if (cmd) this._progressTerminalCommands.add(String(cmd))
+		}
+		// Track test results
+		if (toolName.startsWith('test_') && toolResult) {
+			const results = (toolResult as any)?.results
+			if (results) {
+				this._progressTestResults.set(String(Date.now()), {
+					passed: results.passed || 0,
+					failed: results.failed || 0,
+				})
+			}
+		}
+	}
+
 
 
 
@@ -965,6 +1073,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 		let shouldSendAnotherMessage = true
 		let isRunningWhenEnd: IsRunningType = undefined
 
+		// Stuck detection: track progress across steps. If no file/terminal/test
+		// progress for MAX_STUCK_STEPS steps, pause and alert the user.
+		this._progressFilesTouched = new Set()
+		this._progressTerminalCommands = new Set()
+		this._progressTestResults = new Map()
+		this._progressStepsSinceLastProgress = 0
+
 		// before enter loop, call tool
 		if (callThisToolFirst) {
 			const { interrupted } = await this._runToolCall(threadId, callThisToolFirst.name, callThisToolFirst.id, callThisToolFirst.mcpServerName, { preapproved: true, unvalidatedToolParams: callThisToolFirst.rawParams, validatedParams: callThisToolFirst.params })
@@ -979,6 +1094,39 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 
 		// tool use loop
 		while (shouldSendAnotherMessage) {
+			// OpenCode-style max-steps: stop cleanly once the turn has used its
+			// step budget, leaving a checkpoint so the user can resume.
+			if (nMessagesSent >= MAX_AGENT_STEPS_PER_TURN) {
+				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' })
+				this._addMessageToThread(threadId, {
+					role: 'assistant',
+					displayContent: `Agent turn reached its step limit (${MAX_AGENT_STEPS_PER_TURN} LLM → tool steps). The work is paused at a checkpoint: send another message to resume, or break the request into smaller steps.`,
+					reasoning: '',
+					anthropicReasoning: null,
+				})
+				isRunningWhenEnd = undefined
+				break
+			}
+
+			// Stuck detection: if no file/terminal/test progress for too many steps,
+			// pause and report so the user can intervene or break the task down.
+			if (this._progressStepsSinceLastProgress >= MAX_STUCK_STEPS) {
+				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' })
+				const filesList = Array.from(this._progressFilesTouched).slice(0, 10).join(', ')
+				const cmdsList = Array.from(this._progressTerminalCommands).slice(0, 5).join(', ')
+				const msg = `Agent appears stuck: no file changes, terminal commands, or test results for ${MAX_STUCK_STEPS} consecutive steps. ` +
+					`Progress so far: files touched [${filesList || 'none'}], commands run [${cmdsList || 'none'}]. ` +
+					`Send another message to resume, or break the request into smaller steps.`
+				this._addMessageToThread(threadId, {
+					role: 'assistant',
+					displayContent: msg,
+					reasoning: '',
+					anthropicReasoning: null,
+				})
+				isRunningWhenEnd = undefined
+				break
+			}
+
 			// false by default each iteration
 			shouldSendAnotherMessage = false
 			isRunningWhenEnd = undefined
@@ -1009,13 +1157,9 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 			}
 
 			let shouldRetryLLM = true
-			let nAttempts = 0
 			while (shouldRetryLLM) {
-				shouldRetryLLM = false
-				nAttempts += 1
-
 				type ResTypes =
-					| { type: 'llmDone', toolCalls?: RawToolCallObj[], info: { fullText: string, fullReasoning: string, anthropicReasoning: AnthropicReasoning[] | null, usage?: LLMUsage } }
+					| { type: 'llmDone', toolCalls?: RawToolCallObj[], info: { fullText: string, fullReasoning: string, anthropicReasoning: AnthropicReasoning[] | null, usage?: LLMUsage, finishReason?: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null } }
 					| { type: 'llmError', error?: { message: string; fullError: Error | null; } }
 					| { type: 'llmAborted' }
 
@@ -1057,7 +1201,13 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				}
 
 				this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: '', reasoningSoFar: '', toolCallSoFar: null }, interrupt: Promise.resolve(() => this._llmMessageService.abort(llmCancelToken)) })
-				const llmRes = await messageIsDonePromise // wait for message to complete
+				// Add a timeout so the agent doesn't hang forever if the model doesn't respond
+				const llmTimeout = new Promise((resolve, reject) => {
+					setTimeout(() => {
+						resolve({ type: 'llmError', error: { message: 'LLM request timed out after 120 seconds. The model may be overloaded. Try again or break your request into smaller steps.', fullError: null } })
+					}, 120000)
+				})
+				const llmRes = await Promise.race([messageIsDonePromise, llmTimeout]) as ResTypes
 
 				// if something else started running in the meantime
 				if (this.streamState[threadId]?.isRunning !== 'LLM') {
@@ -1072,35 +1222,64 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 				}
 				// llm res error
 				else if (llmRes.type === 'llmError') {
-					// error, should retry
-					if (nAttempts < CHAT_RETRIES) {
-						shouldRetryLLM = true
+					const { error } = llmRes
+					if (!error) {
+						const { displayContentSoFar, reasoningSoFar } = this.streamState[threadId].llmInfo
+						this._addMessageToThread(threadId, { role: 'assistant', displayContent: displayContentSoFar, reasoning: reasoningSoFar, anthropicReasoning: null })
+						this._setStreamState(threadId, { isRunning: undefined, error: { message: 'LLM error', fullError: null } })
+						this._addUserCheckpoint({ threadId })
+						return
+					}
+					const fullError = error.fullError
+					const errInfo = createRetryErrorInfo({
+						name: fullError?.name,
+						message: fullError?.message,
+						code: (fullError as any)?.code ?? null,
+						status: (fullError as any)?.status ?? null,
+						headers: (fullError as any)?.headers ?? null,
+					})
+					const decision = this._retryPolicy.decide(errInfo, true)
+					if (decision.retry) {
 						this._setStreamState(threadId, { isRunning: 'idle', interrupt: idleInterruptor })
-						await timeout(RETRY_DELAY)
+						await timeout(decision.delayMs)
 						if (interruptedWhenIdle) {
 							this._setStreamState(threadId, undefined)
 							return
 						}
-						else
-							continue // retry
+						continue // retry with exponential backoff
 					}
-					// error, but too many attempts
-					else {
-						const { error } = llmRes
-						const { displayContentSoFar, reasoningSoFar, toolCallSoFar } = this.streamState[threadId].llmInfo
-						this._addMessageToThread(threadId, { role: 'assistant', displayContent: displayContentSoFar, reasoning: reasoningSoFar, anthropicReasoning: null })
-						if (toolCallSoFar) this._addMessageToThread(threadId, { role: 'interrupted_streaming_tool', name: toolCallSoFar.name, mcpServerName: this._computeMCPServerOfToolName(toolCallSoFar.name) })
+					// retry policy says stop
+					const { displayContentSoFar, reasoningSoFar, toolCallSoFar } = this.streamState[threadId].llmInfo
+					this._addMessageToThread(threadId, { role: 'assistant', displayContent: displayContentSoFar, reasoning: reasoningSoFar, anthropicReasoning: null })
+					if (toolCallSoFar) this._addMessageToThread(threadId, { role: 'interrupted_streaming_tool', name: toolCallSoFar.name, mcpServerName: this._computeMCPServerOfToolName(toolCallSoFar.name) })
 
-						this._setStreamState(threadId, { isRunning: undefined, error })
-						this._addUserCheckpoint({ threadId })
-						return
-					}
+					this._setStreamState(threadId, { isRunning: undefined, error })
+					this._addUserCheckpoint({ threadId })
+					return
 				}
 
-				// llm res success
+				// llm res success - reset retry policy for the next turn
+				this._retryPolicy.reset()
+				shouldRetryLLM = false
 				const { toolCalls, info } = llmRes
 
 				this._addMessageToThread(threadId, { role: 'assistant', displayContent: info.fullText, reasoning: info.fullReasoning, anthropicReasoning: info.anthropicReasoning, modelSelection: modelSelection ?? undefined, usage: info.usage })
+
+				// OpenCode-style output-limit continuation: when the model hit its output token limit
+				// mid-response (finishReason === 'length') and made no tool calls, inject a synthetic
+				// "continue" user message so the agent can finish its work instead of abandoning it.
+				if (info.finishReason === 'length' && (!toolCalls || toolCalls.length === 0)) {
+					this._addMessageToThread(threadId, {
+						role: 'user',
+						displayContent: `Your previous reply was cut off by the output token limit. Continuing...`,
+						content: `Your previous reply was cut off by the output token limit. Continue from where you left off. Do not apologize, recap, or repeat yourself—just complete the remaining work.`,
+						selections: null,
+						state: { stagingSelections: [], isBeingEdited: false },
+					})
+					shouldSendAnotherMessage = true
+					this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' })
+					continue
+				}
 
 				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative for clarity
 
@@ -1112,7 +1291,11 @@ class ChatThreadService extends Disposable implements IChatThreadService {
 						return
 					}
 					if (awaitingUserApproval) { isRunningWhenEnd = 'awaiting_user' }
-					else { shouldSendAnotherMessage = true }
+					else { 
+						shouldSendAnotherMessage = true 
+						// Increment stuck counter - _updateProgressTracking resets to 0 when progress is made
+						this._progressStepsSinceLastProgress++
+					}
 
 					this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative, for clarity
 				}

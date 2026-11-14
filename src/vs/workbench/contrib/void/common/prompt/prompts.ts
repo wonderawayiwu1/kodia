@@ -19,21 +19,20 @@ export const tripleTick = ['```', '```']
 export const MAX_DIRSTR_CHARS_TOTAL_BEGINNING = 20_000
 export const MAX_DIRSTR_CHARS_TOTAL_TOOL = 20_000
 
-// tool info
-export const MAX_FILE_CHARS_PAGE = 100_000 // ~25k tokens: each result stays in the thread for good
-export const MAX_CHILDREN_URIs_PAGE = 500
+export const MAX_FILE_CHARS_PAGE = Infinity // No limit - read entire files
+export const MAX_CHILDREN_URIs_PAGE = Infinity // No limit - return all search results
 
 // terminal tool info
-export const MAX_TERMINAL_CHARS = 100_000
-export const MAX_TERMINAL_INACTIVE_TIME = 8 // seconds
-export const MAX_TERMINAL_BG_COMMAND_TIME = 5
+export const MAX_TERMINAL_CHARS = Infinity // No limit - return all terminal output
+export const MAX_TERMINAL_INACTIVE_TIME = Infinity // seconds - no timeout
+export const MAX_TERMINAL_BG_COMMAND_TIME = Infinity // no timeout
 
 // project memory tool info
-export const MAX_PROJECT_MEMORY_TOKENS = 2_000
+export const MAX_PROJECT_MEMORY_TOKENS = Infinity // No limit
 
 
 // Maximum character limits for prefix and suffix context
-export const MAX_PREFIX_SUFFIX_CHARS = 20_000
+export const MAX_PREFIX_SUFFIX_CHARS = Infinity // No limit
 
 
 // --- summarizing a thread that outgrew the context window (ContextSummaryEntry) ---
@@ -405,6 +404,16 @@ export const builtinTools: {
 		},
 	},
 
+	// write_file: alias for rewrite_file
+	write_file: {
+		name: 'write_file',
+		description: `Write content to a file, deleting all the old contents and replacing them with your new contents. Use this tool if you want to edit a file you just created or overwrite an existing file.`,
+		params: {
+			...uriParam('file'),
+			new_content: { description: `The new contents of the file. Must be a string.` }
+		},
+	},
+
 	write_project_memory: {
 		name: 'write_project_memory',
 		description: `Saves durable notes about this project for future sessions, in the project memory (\`.kodia/memory.md\` in the repo, shown to you in PROJECT MEMORY at the start of every conversation). The memory is organized in "## " sections; this rewrites one whole section, so merge what's already there into the new content rather than repeating it. Save things worth knowing in every session: architecture, conventions, commands, decisions and their reasons, pitfalls. Keep it short and current: replace outdated notes, and delete a section by passing empty content. Never save secrets, credentials, or other sensitive information. The whole memory is capped at ~${MAX_PROJECT_MEMORY_TOKENS} tokens; a write that would exceed it is rejected, so condense other sections first.`,
@@ -668,6 +677,29 @@ export const builtinTools: {
 			run_id: { description: 'Optional. The ID of the test run to cancel.' },
 		},
 	},
+	// Todo list (task tracking within a turn - OpenCode parity). The agent tracks what it
+	// plans to do, what it is doing now and what is done, so long multi-step work stays
+	// organized instead of being lost across LLM calls.
+	todo: {
+		name: 'todo',
+		description: `Manage a todo list for the current turn. Use it to break a multi-step request into concrete items, mark each item in_progress when you start it and completed when it's done. This is how you remember your plan across tool calls — always create or update the todo list before and during substantial work.`,
+		params: {
+			todos: { description: 'The full todo list. Each todo has an id (a short stable key like "setup", "implement", "tests"), content (a one-line description) and status ("pending", "in_progress" or "completed").' },
+		},
+	},
+	// Subagent delegation (OpenCode parity - roadmap Stage 6). Spawns a subagent in a child
+	// thread to work on a task independently while the current turn continues.
+	subagent: {
+		name: 'subagent',
+		description: `Spawn a subagent in a child thread to work on a task independently. The subagent runs in the background and you will be notified when it completes. Use this for tasks that can be done in parallel with your current work, or for specialized work that benefits from a dedicated agent (e.g. "write tests for the API layer" while you implement the API). Provide a clear description and full prompt.`,
+		params: {
+			agent: { description: 'The type of subagent to use (e.g. "build", "review", "test").' },
+			description: { description: 'A short 3-5 word label for the task, displayed to the user.' },
+			prompt: { description: 'The full task for the subagent to perform. Include all context it needs.' },
+			model: { description: 'Optional. The model to use for the subagent (providerID/modelID).' },
+			session_i_d: { description: 'Optional. Send a follow-up to an existing subagent session.' },
+		},
+	},
 
 	// go_to_definition
 	// go_to_usages
@@ -812,6 +844,7 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 
 	if (mode === 'agent') {
 		details.push(`Make changes with the tools (edit files, run commands) rather than showing code for the user to apply.`)
+		details.push(`To create a new file with content, use write_file (or create_file_or_folder then write_file). Do not just show code blocks — actually write the file.`)
 		details.push(`Before changing code, look at what it touches and what depends on it, so the change is right the first time.`)
 		details.push(`Don't modify files outside the user's workspace without asking: the user hasn't opened them for this work.`)
 	}

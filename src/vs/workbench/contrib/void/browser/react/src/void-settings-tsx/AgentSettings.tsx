@@ -47,6 +47,8 @@ const labelOfApprovalType: { [T in ToolApprovalType]: string } = {
 	'planning': 'Plan tasks without asking',
 	'web pages': 'Fetch web pages without asking',
 	'MCP tools': 'Use MCP tools without asking',
+	'git': 'Git operations without asking',
+	'test': 'Test operations without asking',
 }
 
 const AutoApproveSwitch = ({ approvalType }: { approvalType: ToolApprovalType }) => {

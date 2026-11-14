@@ -698,6 +698,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 	const streamedToolCalls: StreamedToolCall[] = []
 
 	let usage: LLMUsage | undefined
+	let finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | null = null
 
 	// xAI reads PDFs only through its Responses API
 	if (providerName === 'xAI' && messagesCarryPdf(preparedMessages)) {
@@ -714,6 +715,9 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 			for await (const chunk of response) {
 				// usually only on the last chunk (Groq nests it under x_groq)
 				usage = openAICompatibleUsage(chunk.usage ?? (chunk as { x_groq?: { usage?: unknown } }).x_groq?.usage) ?? usage
+				if (chunk.choices[0]?.finish_reason === 'stop' || chunk.choices[0]?.finish_reason === 'length' || chunk.choices[0]?.finish_reason === 'tool_calls' || chunk.choices[0]?.finish_reason === 'content_filter') {
+					finishReason = chunk.choices[0]?.finish_reason
+				}
 
 				// message (delta.content is usually a string, but Mistral magistral returns an array of content chunks)
 				const { text: newText, reasoning: newReasoningFromContent } = parseOpenAICompatibleDeltaContent(chunk.choices[0]?.delta?.content)
@@ -753,7 +757,7 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			}
 			else {
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage });
+				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage, finishReason });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)

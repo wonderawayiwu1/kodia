@@ -3,7 +3,9 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import { VSBuffer } from '../../../../base/common/buffer.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
 import { ICodeEditor, IOverlayWidget, IViewZone } from '../../../../editor/browser/editorBrowser.js';
@@ -163,6 +165,9 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	diffAreaOfId: Record<string, DiffArea> = {}; // diffareaId -> diffArea
 	diffOfId: Record<string, Diff> = {}; // diffid -> diff (redundant with diffArea._diffOfId)
 
+	// Write-in-progress flag to prevent re-entrancy
+	private weAreWriting = false;
+
 	// events
 
 	// uri: diffZones  // listen on change diffZones
@@ -193,7 +198,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		@INotificationService private readonly _notificationService: INotificationService,
 		// @ICommandService private readonly _commandService: ICommandService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
-		// @IFileService private readonly _fileService: IFileService,
+		@IFileService private readonly _fileService: IFileService,
 		@IVoidModelService private readonly _voidModelService: IVoidModelService,
 		@IConvertToLLMMessageService private readonly _convertToLLMMessageService: IConvertToLLMMessageService,
 	) {
@@ -603,12 +608,19 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		return uri
 	}
 
-	weAreWriting = false
-	private _writeURIText(uri: URI, text: string, range_: IRange | 'wholeFileRange', { shouldRealignDiffAreas, }: { shouldRealignDiffAreas: boolean, }) {
-		const { model } = this._voidModelService.getModel(uri)
+	private async _writeURIText(uri: URI, text: string, range_: IRange | 'wholeFileRange', { shouldRealignDiffAreas, }: { shouldRealignDiffAreas: boolean, }): Promise<void> {
+		let { model } = this._voidModelService.getModel(uri)
 		if (!model) {
-			this._refreshStylesAndDiffsInURI(uri) // at the end of a write, we still expect to refresh all styles. e.g. sometimes we expect to restore all the decorations even if no edits were made when _writeText is used
-			return
+			// File has no text model yet (e.g. brand-new file created via write_file/rewrite_file).
+			// Create it on disk first, then initialize the model so diff tracking works.
+			await this._fileService.writeFile(uri, VSBuffer.fromString(text))
+			await this._voidModelService.initializeModel(uri)
+			const m = this._voidModelService.getModel(uri)
+			model = m.model
+			if (!model) {
+				this._refreshStylesAndDiffsInURI(uri)
+				return
+			}
 		}
 
 		const range: IRange = range_ === 'wholeFileRange' ?
@@ -634,6 +646,10 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		this.weAreWriting = true
 		model.applyEdits([{ range, text }])
 		this.weAreWriting = false
+
+		// CRITICAL: Persist to disk so files are actually saved.
+		// Await the write and propagate errors so callers know whether the file was really written.
+		await this._fileService.writeFile(uri, VSBuffer.fromString(text))
 
 		this._refreshStylesAndDiffsInURI(uri)
 	}
@@ -1134,7 +1150,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	public instantlyApplySearchReplaceBlocks({ uri, searchReplaceBlocks }: { uri: URI, searchReplaceBlocks: string }) {
+	public async instantlyApplySearchReplaceBlocks({ uri, searchReplaceBlocks }: { uri: URI, searchReplaceBlocks: string }): Promise<void> {
 		// start diffzone
 		const res = this._startStreamingDiffZone({
 			uri,
@@ -1168,7 +1184,8 @@ class EditCodeService extends Disposable implements IEditCodeService {
 		}
 
 		try {
-			this._instantlyApplySRBlocks(uri, searchReplaceBlocks)
+			// Await the full write (model edit + persist to disk) before finishing.
+			await this._instantlyApplySRBlocks(uri, searchReplaceBlocks)
 		}
 		catch (e) {
 			onError({ message: e + '', fullError: null })
@@ -1178,16 +1195,34 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	public instantlyRewriteFile({ uri, newContent }: { uri: URI, newContent: string }) {
+	public async instantlyRewriteFile({ uri, newContent }: { uri: URI, newContent: string }): Promise<void> {
 		// start diffzone
-		const res = this._startStreamingDiffZone({
+		let res = this._startStreamingDiffZone({
 			uri,
 			streamRequestIdRef: { current: null },
 			startBehavior: 'keep-conflicts',
 			linkedCtrlKZone: null,
 			onWillUndo: () => { },
 		})
-		if (!res) return
+		// _startStreamingDiffZone returns null when the file has no text model yet
+		// (brand-new file via write_file/rewrite_file). Create it on disk, init the
+		// model, then retry so diff tracking works.
+		if (!res) {
+			await this._fileService.writeFile(uri, VSBuffer.fromString(newContent))
+			await this._voidModelService.initializeModel(uri)
+			res = this._startStreamingDiffZone({
+				uri,
+				streamRequestIdRef: { current: null },
+				startBehavior: 'keep-conflicts',
+				linkedCtrlKZone: null,
+				onWillUndo: () => { },
+			})
+			// If it still returns null, fall back to a direct write without diff tracking.
+			if (!res) {
+				await this._writeURIText(uri, newContent, 'wholeFileRange', { shouldRealignDiffAreas: true })
+				return
+			}
+		}
 		const { diffZone, onFinishEdit } = res
 
 
@@ -1203,7 +1238,10 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			}
 		}
 
-		this._writeURIText(uri, newContent, 'wholeFileRange', { shouldRealignDiffAreas: true })
+		// Await the full write (model edit + persist to disk) before finishing.
+		// Previously this was fire-and-forget: write_file/rewrite_file reported success
+		// even when the file had not actually been written to disk.
+		await this._writeURIText(uri, newContent, 'wholeFileRange', { shouldRealignDiffAreas: true })
 		onDone()
 	}
 
@@ -1586,7 +1624,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 	}
 
 
-	private _instantlyApplySRBlocks(uri: URI, blocksStr: string) {
+	private async _instantlyApplySRBlocks(uri: URI, blocksStr: string): Promise<void> {
 		const blocks = extractSearchReplaceBlocks(blocksStr)
 		if (blocks.length === 0) throw new Error(`No Search/Replace blocks were received!`)
 
@@ -1634,7 +1672,7 @@ class EditCodeService extends Disposable implements IEditCodeService {
 			newCode = newCode.slice(0, origStart) + block.final + newCode.slice(origEnd + 1, Infinity)
 		}
 
-		this._writeURIText(uri, newCode,
+		await this._writeURIText(uri, newCode,
 			'wholeFileRange',
 			{ shouldRealignDiffAreas: true }
 		)
