@@ -43,6 +43,7 @@ import {
 	ApiMockRoute,
 	ApiMockServerStatus,
 	ApiMonitorConfig,
+	ApiRequestBody,
 	ApiRequestSpec,
 	ApiResponseResult,
 	ApiSecurityFinding,
@@ -493,7 +494,7 @@ export class KodiaApiStudioMainService extends Disposable implements IKodiaApiSt
 		if (req.preRequestScript?.trim()) {
 			const pre = this._runSandboxedScript(req.preRequestScript, {
 				vars,
-				request: { method: req.method, url: resolveApiVariables(req.url, vars), headers, body: req.body.raw },
+				request: { method: req.method, url: resolveApiVariables(req.url, vars), headers, body: req.body?.raw },
 			});
 			scriptLogs.push(...pre.logs);
 			scriptErrors.push(...pre.errors);
@@ -553,7 +554,7 @@ export class KodiaApiStudioMainService extends Disposable implements IKodiaApiSt
 			headers[auth.headerName] = hv;
 		}
 
-		// Build Request Body Buffer
+		// Build Request Body Buffer (defensively handle plain objects / missing mode as JSON)
 		let bodyBuffer: Buffer | undefined;
 		const setHeaderIfMissing = (name: string, value: string) => {
 			if (!Object.keys(headers).some(k => k.toLowerCase() === name.toLowerCase())) {
@@ -561,38 +562,55 @@ export class KodiaApiStudioMainService extends Disposable implements IKodiaApiSt
 			}
 		};
 
-		if (req.body.mode === 'json') {
+		const rawBodyObj = req.body as ApiRequestBody | Record<string, unknown> | undefined;
+		const bodyMode = rawBodyObj && typeof (rawBodyObj as { mode?: unknown }).mode === 'string'
+			? (rawBodyObj as ApiRequestBody).mode
+			: (rawBodyObj && typeof rawBodyObj === 'object' && Object.keys(rawBodyObj).length > 0 ? 'json' : 'none');
+
+		if (bodyMode === 'json') {
 			setHeaderIfMissing('Content-Type', 'application/json');
-			bodyBuffer = Buffer.from(resolveApiVariables(req.body.raw ?? '', vars), 'utf8');
-		} else if (req.body.mode === 'xml') {
+			const rawStr = typeof (rawBodyObj as ApiRequestBody).raw === 'string'
+				? (rawBodyObj as ApiRequestBody).raw!
+				: (rawBodyObj && typeof (rawBodyObj as { mode?: unknown }).mode === 'string'
+					? JSON.stringify((rawBodyObj as ApiRequestBody).raw ?? {})
+					: JSON.stringify(rawBodyObj));
+			bodyBuffer = Buffer.from(resolveApiVariables(rawStr, vars), 'utf8');
+		} else if (bodyMode === 'xml') {
 			setHeaderIfMissing('Content-Type', 'application/xml');
-			bodyBuffer = Buffer.from(resolveApiVariables(req.body.raw ?? '', vars), 'utf8');
-		} else if (req.body.mode === 'soap') {
+			bodyBuffer = Buffer.from(resolveApiVariables((rawBodyObj as ApiRequestBody).raw ?? '', vars), 'utf8');
+		} else if (bodyMode === 'soap') {
 			setHeaderIfMissing('Content-Type', 'text/xml; charset=utf-8');
-			if (req.body.soapAction) { setHeaderIfMissing('SOAPAction', req.body.soapAction); }
-			bodyBuffer = Buffer.from(resolveApiVariables(req.body.raw ?? '', vars), 'utf8');
-		} else if (req.body.mode === 'graphql') {
+			if ((rawBodyObj as ApiRequestBody).soapAction) { setHeaderIfMissing('SOAPAction', (rawBodyObj as ApiRequestBody).soapAction!); }
+			bodyBuffer = Buffer.from(resolveApiVariables((rawBodyObj as ApiRequestBody).raw ?? '', vars), 'utf8');
+		} else if (bodyMode === 'graphql') {
 			setHeaderIfMissing('Content-Type', 'application/json');
 			let gqlVars: unknown = {};
-			if (req.body.graphqlVariables?.trim()) {
-				try { gqlVars = JSON.parse(resolveApiVariables(req.body.graphqlVariables, vars)); } catch { gqlVars = {}; }
+			const b = rawBodyObj as ApiRequestBody;
+			if (b.graphqlVariables?.trim()) {
+				try { gqlVars = JSON.parse(resolveApiVariables(b.graphqlVariables, vars)); } catch { gqlVars = {}; }
 			}
 			bodyBuffer = Buffer.from(JSON.stringify({
-				query: resolveApiVariables(req.body.graphqlQuery ?? '', vars),
+				query: resolveApiVariables(b.graphqlQuery ?? '', vars),
 				variables: gqlVars,
-				...(req.body.graphqlOperationName ? { operationName: req.body.graphqlOperationName } : {}),
+				...(b.graphqlOperationName ? { operationName: b.graphqlOperationName } : {}),
 			}), 'utf8');
-		} else if (req.body.mode === 'text' || req.body.mode === 'html') {
-			setHeaderIfMissing('Content-Type', req.body.mode === 'html' ? 'text/html' : 'text/plain');
-			bodyBuffer = Buffer.from(resolveApiVariables(req.body.raw ?? '', vars), 'utf8');
-		} else if (req.body.mode === 'form-urlencoded') {
+		} else if (bodyMode === 'text' || bodyMode === 'html') {
+			setHeaderIfMissing('Content-Type', bodyMode === 'html' ? 'text/html' : 'text/plain');
+			bodyBuffer = Buffer.from(resolveApiVariables((rawBodyObj as ApiRequestBody).raw ?? '', vars), 'utf8');
+		} else if (bodyMode === 'form-urlencoded') {
 			setHeaderIfMissing('Content-Type', 'application/x-www-form-urlencoded');
-			const sp = new URLSearchParams();
-			for (const f of req.body.formFields ?? []) {
-				if (f.enabled && f.key.trim()) { sp.append(f.key.trim(), resolveApiVariables(f.value, vars)); }
+			const b = rawBodyObj as ApiRequestBody;
+			const enabledFields = (b.formFields ?? []).filter(f => f.enabled && f.key.trim());
+			if (enabledFields.length > 0) {
+				const sp = new URLSearchParams();
+				for (const f of enabledFields) {
+					sp.append(f.key.trim(), resolveApiVariables(f.value, vars));
+				}
+				bodyBuffer = Buffer.from(sp.toString(), 'utf8');
+			} else if (b.raw) {
+				bodyBuffer = Buffer.from(resolveApiVariables(b.raw, vars), 'utf8');
 			}
-			bodyBuffer = Buffer.from(sp.toString(), 'utf8');
-		} else if (req.body.mode === 'multipart') {
+		} else if (bodyMode === 'multipart') {
 			const boundary = `----KodiaApiBoundary${Date.now().toString(16)}`;
 			setHeaderIfMissing('Content-Type', `multipart/form-data; boundary=${boundary}`);
 			const chunks: Buffer[] = [];

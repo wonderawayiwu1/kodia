@@ -28,16 +28,16 @@
 	--void-border-3: var(--vscode-editorGroup-border, var(--vscode-commandCenter-inactiveBorder));
 	--void-border-4: var(--vscode-editorGroup-border);
 
-	--void-ring-color: var(--vscode-focusBorder, #3B6FF5);
-	--void-link-color: var(--vscode-textLink-foreground, #3B6FF5);
+	--void-ring-color: var(--vscode-focusBorder, #3B82F6);
+	--void-link-color: var(--vscode-textLink-foreground, #60A5FA);
 
-	/* Kodia Design System semantic tokens */
-	--kodia-accent: var(--vscode-button-background, #3B6FF5);
-	--kodia-accent-hover: var(--vscode-button-hoverBackground, #4D7DF7);
+	/* Kodia Antigravity Design System semantic tokens */
+	--kodia-accent: var(--vscode-button-background, #2563EB);
+	--kodia-accent-hover: var(--vscode-button-hoverBackground, #3B82F6);
 	--kodia-accent-fg: var(--vscode-button-foreground, #FFFFFF);
-	--kodia-accent-soft: color-mix(in srgb, var(--kodia-accent) 16%, transparent);
-	--kodia-card-bg: color-mix(in srgb, var(--vscode-editor-background) 70%, var(--vscode-sideBar-background) 30%);
-	--kodia-card-border: color-mix(in srgb, var(--vscode-editor-foreground) 12%, transparent);
+	--kodia-accent-soft: color-mix(in srgb, var(--kodia-accent) 18%, transparent);
+	--kodia-card-bg: color-mix(in srgb, var(--vscode-editor-background) 80%, var(--vscode-sideBar-background) 20%);
+	--kodia-card-border: color-mix(in srgb, var(--vscode-editor-foreground) 10%, transparent);
 }
 
 .select-child-restyle select {

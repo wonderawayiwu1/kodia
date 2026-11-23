@@ -81,6 +81,21 @@ export interface DbQueryReport {
 	readonly error?: string;
 }
 
+export interface FastCommandRequest {
+	readonly execId: string;
+	readonly command: string;
+	readonly cwd?: string;
+	readonly inactiveTimeoutMs?: number;
+	readonly maxChars?: number;
+}
+
+export interface FastCommandResult {
+	readonly output: string;
+	readonly exitCode: number;
+	readonly timedOut: boolean;
+	readonly durationMs: number;
+}
+
 export const IKodiaOpsMainService = createDecorator<IKodiaOpsMainService>('kodiaOpsMainService');
 
 export interface IKodiaOpsMainService {
@@ -90,6 +105,8 @@ export interface IKodiaOpsMainService {
 	getDockerLogs(container: string, tail?: number): Promise<DockerLogsReport>;
 	inspectDatabase(workspaceRoot: string, dbPath?: string): Promise<DbInspectReport>;
 	queryDatabase(workspaceRoot: string, sql: string, dbPath?: string, allowWrite?: boolean): Promise<DbQueryReport>;
+	execFastCommand(req: FastCommandRequest): Promise<FastCommandResult>;
+	cancelFastCommand(execId: string): Promise<void>;
 }
 
 /**

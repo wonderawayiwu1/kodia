@@ -1,4 +1,4 @@
-﻿/*--------------------------------------------------------------------------------------
+/*--------------------------------------------------------------------------------------
  *  Copyright 2025 Glass Devtools, Inc. All rights reserved.
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
@@ -16,7 +16,13 @@ import { registerSingleton, InstantiationType } from '../../../../platform/insta
 import { MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_CHARS, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js';
 import { TerminalResolveReason } from '../common/toolsServiceTypes.js';
 import { timeout } from '../../../../base/common/async.js';
-import { computeIncrementalRead } from '../common/terminalUtils.js';
+import {
+	buildSentinelWrappedCommand,
+	computeIncrementalRead,
+	extractSentinelCompletion,
+	safeSetTimeoutMs,
+	unwrapCmdForShellType,
+} from '../common/terminalUtils.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
 
 export interface ITerminalToolService {
@@ -72,12 +78,13 @@ export const idOfPersistentTerminalName = (name: string) => {
 
 	const match = name.match(/Kodia Agent \((\d+)\)/)
 	if (!match) return null
-	if (Number.isInteger(match[1]) && Number(match[1]) >= 1) return match[1]
+	const parsed = Number(match[1])
+	if (Number.isInteger(parsed) && parsed >= 1) return match[1]
 	return null
 }
 
 /**
- * Track terminal execution state for real-time output streaming
+ * Track terminal execution state for real-time output streaming and headless fallback reads.
  */
 interface TerminalExecution {
 	terminalId: string;
@@ -88,11 +95,17 @@ interface TerminalExecution {
 	offset: number;
 }
 
+const MAX_BUFFERED_RAW_CHARS = 250_000;
+const PROCESS_READY_TIMEOUT_MS = 15_000;
+const COMMAND_DETECTION_WAIT_MS = 2_500;
+
 export class TerminalToolService extends Disposable implements ITerminalToolService {
 	readonly _serviceBrand: undefined;
 
 	private persistentTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
 	private temporaryTerminalInstanceOfId: Record<string, ITerminalInstance> = {}
+	// Stable object-identity map so tracking never breaks when shells dynamically change terminal.title
+	private readonly terminalInstanceToId = new WeakMap<ITerminalInstance, string>()
 
 	// Per-terminal read offset for incremental output retrieval
 	private terminalReadOffsets: Record<string, number> = {}
@@ -111,31 +124,35 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	) {
 		super();
 
-		// runs on ALL terminals for simplicity
+		// runs on ALL terminals so output & exit state are always tracked reliably
 		const initializeTerminal = (terminal: ITerminalInstance) => {
 			// when exit, remove
 			const d = terminal.onExit(() => {
-				const terminalId = idOfPersistentTerminalName(terminal.title)
-				if (terminalId !== null && (terminalId in this.persistentTerminalInstanceOfId)) {
-					delete this.persistentTerminalInstanceOfId[terminalId]
+				const tid = this._resolveTerminalId(terminal)
+				if (tid !== null && (tid in this.persistentTerminalInstanceOfId)) {
+					delete this.persistentTerminalInstanceOfId[tid]
 				}
-				if (terminalId !== null && (terminalId in this.temporaryTerminalInstanceOfId)) {
-					delete this.temporaryTerminalInstanceOfId[terminalId]
+				if (tid !== null && (tid in this.temporaryTerminalInstanceOfId)) {
+					delete this.temporaryTerminalInstanceOfId[tid]
 				}
 				// Mark execution as complete
-				if (terminalId && this.terminalExecutions[terminalId]) {
-					this.terminalExecutions[terminalId].isRunning = false
-					this.terminalExecutions[terminalId].exitCode = terminal.exitCode ?? null
+				if (tid && this.terminalExecutions[tid]) {
+					this.terminalExecutions[tid].isRunning = false
+					this.terminalExecutions[tid].exitCode = terminal.exitCode ?? null
 				}
 				d.dispose()
 			})
 
-			// Track terminal data output for real-time streaming
+			// Track terminal data output for real-time streaming & headless fallback reads
 			const dataDisposable = terminal.onData((data: string) => {
-				const terminalId = idOfPersistentTerminalName(terminal.title)
-				if (terminalId && this.terminalExecutions[terminalId]) {
-					this.terminalExecutions[terminalId].lastOutput += data
-					this.terminalExecutions[terminalId].outputEmitter.fire(data)
+				const tid = this._resolveTerminalId(terminal)
+				if (tid && this.terminalExecutions[tid]) {
+					const exec = this.terminalExecutions[tid]
+					exec.lastOutput += data
+					if (exec.lastOutput.length > MAX_BUFFERED_RAW_CHARS) {
+						exec.lastOutput = exec.lastOutput.slice(exec.lastOutput.length - MAX_BUFFERED_RAW_CHARS)
+					}
+					exec.outputEmitter.fire(data)
 				}
 			})
 
@@ -146,7 +163,20 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		// initialize any terminals that are already open
 		for (const terminal of terminalService.instances) {
 			const proposedTerminalId = idOfPersistentTerminalName(terminal.title)
-			if (proposedTerminalId) this.persistentTerminalInstanceOfId[proposedTerminalId] = terminal
+			if (proposedTerminalId) {
+				this.persistentTerminalInstanceOfId[proposedTerminalId] = terminal
+				this.terminalInstanceToId.set(terminal, proposedTerminalId)
+				if (!this.terminalExecutions[proposedTerminalId]) {
+					this.terminalExecutions[proposedTerminalId] = {
+						terminalId: proposedTerminalId,
+						outputEmitter: new Emitter<string>(),
+						isRunning: false,
+						exitCode: null,
+						lastOutput: '',
+						offset: 0,
+					}
+				}
+			}
 
 			initializeTerminal(terminal)
 		}
@@ -156,6 +186,24 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		)
 	}
 
+	private _resolveTerminalId(terminal: ITerminalInstance): string | null {
+		return this.terminalInstanceToId.get(terminal) ?? idOfPersistentTerminalName(terminal.title)
+	}
+
+	private _ensureExecutionRecord(tid: string): TerminalExecution {
+		if (!this.terminalExecutions[tid]) {
+			this.terminalExecutions[tid] = {
+				terminalId: tid,
+				outputEmitter: new Emitter<string>(),
+				isRunning: false,
+				exitCode: null,
+				lastOutput: '',
+				offset: 0,
+			}
+		}
+		return this.terminalExecutions[tid]
+	}
+
 	listPersistentTerminalIds() {
 		return Object.keys(this.persistentTerminalInstanceOfId)
 	}
@@ -163,13 +211,13 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 	listTerminals(): TerminalInfo[] {
 		const result: TerminalInfo[] = []
 
-		for (const [terminalId, terminal] of Object.entries(this.persistentTerminalInstanceOfId)) {
-			const exec = this.terminalExecutions[terminalId]
+		for (const [tid, terminal] of Object.entries(this.persistentTerminalInstanceOfId)) {
+			const exec = this.terminalExecutions[tid]
 			result.push({
-				terminalId,
+				terminalId: tid,
 				type: 'persistent',
 				title: terminal.title,
-				cwd: terminal.cwd ?? null,
+				cwd: terminal.cwd ?? this.terminalCwd[tid] ?? null,
 				processId: terminal.processId,
 				exitCode: terminal.exitCode,
 				isDisposed: false,
@@ -177,13 +225,13 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			})
 		}
 
-		for (const [terminalId, terminal] of Object.entries(this.temporaryTerminalInstanceOfId)) {
-			const exec = this.terminalExecutions[terminalId]
+		for (const [tid, terminal] of Object.entries(this.temporaryTerminalInstanceOfId)) {
+			const exec = this.terminalExecutions[tid]
 			result.push({
-				terminalId,
+				terminalId: tid,
 				type: 'temporary',
 				title: terminal.title,
-				cwd: terminal.cwd ?? null,
+				cwd: terminal.cwd ?? this.terminalCwd[tid] ?? null,
 				processId: terminal.processId,
 				exitCode: terminal.exitCode,
 				isDisposed: false,
@@ -229,183 +277,160 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		};
 
 		const terminal = await this.terminalService.createTerminal(options)
-
-
 		return terminal
-
 	}
 
 	createPersistentTerminal: ITerminalToolService['createPersistentTerminal'] = async ({ cwd }) => {
-		const terminalId = this.getValidNewTerminalId();
-		const config = { name: persistentTerminalNameOfId(terminalId), title: persistentTerminalNameOfId(terminalId) }
+		const tid = this.getValidNewTerminalId();
+		const config = { name: persistentTerminalNameOfId(tid), title: persistentTerminalNameOfId(tid) }
 		const terminal = await this._createTerminal({ cwd, config, })
-		this.persistentTerminalInstanceOfId[terminalId] = terminal
-		this.terminalType[terminalId] = 'persistent'
-		this.terminalCwd[terminalId] = cwd ?? null
-		this.terminalReadOffsets[terminalId] = 0
-		// Initialize execution tracking
-		this.terminalExecutions[terminalId] = {
-			terminalId,
-			outputEmitter: new Emitter<string>(),
-			isRunning: false,
-			exitCode: null,
-			lastOutput: '',
-			offset: 0,
-		}
-		return terminalId
+		this.persistentTerminalInstanceOfId[tid] = terminal
+		this.terminalInstanceToId.set(terminal, tid)
+		this.terminalType[tid] = 'persistent'
+		this.terminalCwd[tid] = cwd ?? null
+		this.terminalReadOffsets[tid] = 0
+		this._ensureExecutionRecord(tid)
+		return tid
 	}
 
-	async killPersistentTerminal(terminalId: string) {
-		const terminal = this.persistentTerminalInstanceOfId[terminalId]
-		if (!terminal) throw new Error(`Kill Terminal: Terminal with ID ${terminalId} did not exist.`);
+	async killPersistentTerminal(tid: string) {
+		const terminal = this.persistentTerminalInstanceOfId[tid]
+		if (!terminal) throw new Error(`Kill Terminal: Terminal with ID ${tid} did not exist.`);
 		terminal.dispose()
-		delete this.persistentTerminalInstanceOfId[terminalId]
-		delete this.terminalReadOffsets[terminalId]
-		delete this.terminalCwd[terminalId]
-		delete this.terminalType[terminalId]
-		delete this.terminalExecutions[terminalId]
-		delete this.terminalRunningCommands[terminalId]
+		this._cleanupTerminalState(tid, 'persistent')
 		return
 	}
 
-	persistentTerminalExists(terminalId: string): boolean {
-		return terminalId in this.persistentTerminalInstanceOfId
+	private _cleanupTerminalState(tid: string, kind: 'persistent' | 'temporary') {
+		if (kind === 'persistent') {
+			delete this.persistentTerminalInstanceOfId[tid]
+		} else {
+			delete this.temporaryTerminalInstanceOfId[tid]
+		}
+		this.terminalExecutions[tid]?.outputEmitter.dispose()
+		delete this.terminalReadOffsets[tid]
+		delete this.terminalCwd[tid]
+		delete this.terminalType[tid]
+		delete this.terminalExecutions[tid]
+		delete this.terminalRunningCommands[tid]
 	}
 
+	persistentTerminalExists(tid: string): boolean {
+		return tid in this.persistentTerminalInstanceOfId
+	}
 
-
-	getTemporaryTerminal(terminalId: string): ITerminalInstance | undefined {
-		if (!terminalId) return
-		const terminal = this.temporaryTerminalInstanceOfId[terminalId]
-		if (!terminal) return // should never happen
+	getTemporaryTerminal(tid: string): ITerminalInstance | undefined {
+		if (!tid) return
+		const terminal = this.temporaryTerminalInstanceOfId[tid]
+		if (!terminal) return
 		return terminal
 	}
 
-	getPersistentTerminal(terminalId: string): ITerminalInstance | undefined {
-		if (!terminalId) return
-		const terminal = this.persistentTerminalInstanceOfId[terminalId]
-		if (!terminal) return // should never happen
+	getPersistentTerminal(tid: string): ITerminalInstance | undefined {
+		if (!tid) return
+		const terminal = this.persistentTerminalInstanceOfId[tid]
+		if (!terminal) return
 		return terminal
 	}
 
-
-
-	focusPersistentTerminal: ITerminalToolService['focusPersistentTerminal'] = async (terminalId) => {
-		if (!terminalId) return
-		const terminal = this.persistentTerminalInstanceOfId[terminalId]
-		if (!terminal) return // should never happen
+	focusPersistentTerminal: ITerminalToolService['focusPersistentTerminal'] = async (tid) => {
+		if (!tid) return
+		const terminal = this.persistentTerminalInstanceOfId[tid]
+		if (!terminal) return
 		this.terminalService.setActiveInstance(terminal)
 		await this.terminalService.focusActiveInstance()
 	}
 
-
-
-	readTerminal: ITerminalToolService['readTerminal'] = async (terminalId) => {
-		// Try persistent first, then temporary
-		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
-		if (!terminal) {
-			throw new Error(`Read Terminal: Terminal with ID ${terminalId} does not exist.`);
+	private _readTerminalBufferOrStream(tid: string, terminal: ITerminalInstance): string {
+		let result = '';
+		if (terminal.xterm) {
+			const lines: string[] = [];
+			for (const line of terminal.xterm.getBufferReverseIterator()) {
+				lines.unshift(line);
+			}
+			result = removeAnsiEscapeCodes(lines.join('\n'));
 		}
 
-		// Ensure the xterm.js instance has been created â€“ otherwise we cannot access the buffer.
-		if (!terminal.xterm) {
-			throw new Error('Read Terminal: The requested terminal has not yet been rendered and therefore has no scrollback buffer available.');
+		// Fall back to captured onData stream when xterm is not mounted (e.g. hidden terminals) or empty
+		if (!result.trim() && this.terminalExecutions[tid]?.lastOutput) {
+			result = removeAnsiEscapeCodes(this.terminalExecutions[tid].lastOutput);
 		}
 
-		// Collect lines from the buffer iterator (oldest to newest)
-		const lines: string[] = [];
-		for (const line of terminal.xterm.getBufferReverseIterator()) {
-			lines.unshift(line);
-		}
-
-		let result = removeAnsiEscapeCodes(lines.join('\n'));
-
-		if (result.length > MAX_TERMINAL_CHARS) {
-			const half = MAX_TERMINAL_CHARS / 2;
+		if (Number.isFinite(MAX_TERMINAL_CHARS) && result.length > MAX_TERMINAL_CHARS) {
+			const half = Math.floor(MAX_TERMINAL_CHARS / 2);
 			result = result.slice(0, half) + '\n...\n' + result.slice(result.length - half);
 		}
+		return result;
+	}
 
-		return result
+	readTerminal: ITerminalToolService['readTerminal'] = async (tid) => {
+		const terminal = this.getPersistentTerminal(tid) ?? this.getTemporaryTerminal(tid);
+		if (!terminal) {
+			// If a temporary terminal already finished & disposed, return its last captured output if available
+			if (this.terminalExecutions[tid]?.lastOutput) {
+				return removeAnsiEscapeCodes(this.terminalExecutions[tid].lastOutput);
+			}
+			throw new Error(`Read Terminal: Terminal with ID ${tid} does not exist.`);
+		}
+
+		return this._readTerminalBufferOrStream(tid, terminal);
 	};
 
-	readTerminalIncremental: ITerminalToolService['readTerminalIncremental'] = async (terminalId, offset) => {
-		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+	readTerminalIncremental: ITerminalToolService['readTerminalIncremental'] = async (tid, offset) => {
+		const terminal = this.getPersistentTerminal(tid) ?? this.getTemporaryTerminal(tid);
 		if (!terminal) {
-			throw new Error(`Read Terminal Incremental: Terminal with ID ${terminalId} does not exist.`);
+			throw new Error(`Read Terminal Incremental: Terminal with ID ${tid} does not exist.`);
 		}
 
-		if (!terminal.xterm) {
-			throw new Error('Read Terminal Incremental: The requested terminal has not yet been rendered and therefore has no scrollback buffer available.');
-		}
+		const fullOutput = this._readTerminalBufferOrStream(tid, terminal);
 
-		// Collect lines from the buffer iterator (oldest to newest)
-		const lines: string[] = [];
-		for (const line of terminal.xterm.getBufferReverseIterator()) {
-			lines.unshift(line);
-		}
-
-		let fullOutput = removeAnsiEscapeCodes(lines.join('\n'));
-
-		if (fullOutput.length > MAX_TERMINAL_CHARS) {
-			const half = MAX_TERMINAL_CHARS / 2;
-			fullOutput = fullOutput.slice(0, half) + '\n...\n' + fullOutput.slice(fullOutput.length - half);
-		}
-
-		const storedOffset = this.terminalReadOffsets[terminalId] ?? 0;
+		const storedOffset = this.terminalReadOffsets[tid] ?? 0;
 		const readResult = computeIncrementalRead(fullOutput, storedOffset, offset);
-		this.terminalReadOffsets[terminalId] = readResult.nextStoredOffset;
+		this.terminalReadOffsets[tid] = readResult.nextStoredOffset;
 
 		return { output: readResult.output, isAtEnd: readResult.isAtEnd, totalChars: fullOutput.length };
 	};
 
-	sendCommandToTerminal: ITerminalToolService['sendCommandToTerminal'] = async (terminalId, command) => {
-		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+	sendCommandToTerminal: ITerminalToolService['sendCommandToTerminal'] = async (tid, command) => {
+		const terminal = this.getPersistentTerminal(tid) ?? this.getTemporaryTerminal(tid);
 		if (!terminal) {
-			throw new Error(`Send Command To Terminal: Terminal with ID ${terminalId} does not exist.`);
+			throw new Error(`Send Command To Terminal: Terminal with ID ${tid} does not exist.`);
 		}
 
-		await terminal.sendText(command, true);
+		await this._waitForProcessReady(terminal);
+		const normalized = unwrapCmdForShellType(command, terminal.shellType);
+		await terminal.sendText(normalized, true);
 	};
 
-	interruptTerminal: ITerminalToolService['interruptTerminal'] = async (terminalId) => {
-		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+	interruptTerminal: ITerminalToolService['interruptTerminal'] = async (tid) => {
+		const terminal = this.getPersistentTerminal(tid) ?? this.getTemporaryTerminal(tid);
 		if (!terminal) {
-			throw new Error(`Interrupt Terminal: Terminal with ID ${terminalId} does not exist.`);
+			throw new Error(`Interrupt Terminal: Terminal with ID ${tid} does not exist.`);
 		}
 
 		// Send Ctrl+C (0x03) to interrupt the running process without closing the terminal
 		await terminal.sendText('\x03', false);
 	};
 
-	closeTerminal: ITerminalToolService['closeTerminal'] = async (terminalId) => {
-		const persistent = this.getPersistentTerminal(terminalId);
-		const temporary = this.getTemporaryTerminal(terminalId);
+	closeTerminal: ITerminalToolService['closeTerminal'] = async (tid) => {
+		const persistent = this.getPersistentTerminal(tid);
+		const temporary = this.getTemporaryTerminal(tid);
 		const terminal = persistent ?? temporary;
 		if (!terminal) {
-			throw new Error(`Close Terminal: Terminal with ID ${terminalId} does not exist.`);
+			throw new Error(`Close Terminal: Terminal with ID ${tid} does not exist.`);
 		}
 
 		terminal.dispose()
 
 		if (persistent) {
-			delete this.persistentTerminalInstanceOfId[terminalId]
-			delete this.terminalReadOffsets[terminalId]
-			delete this.terminalCwd[terminalId]
-			delete this.terminalType[terminalId]
-			delete this.terminalExecutions[terminalId]
-			delete this.terminalRunningCommands[terminalId]
+			this._cleanupTerminalState(tid, 'persistent')
 		} else if (temporary) {
-			delete this.temporaryTerminalInstanceOfId[terminalId]
-			delete this.terminalReadOffsets[terminalId]
-			delete this.terminalCwd[terminalId]
-			delete this.terminalType[terminalId]
-			delete this.terminalExecutions[terminalId]
-			delete this.terminalRunningCommands[terminalId]
+			this._cleanupTerminalState(tid, 'temporary')
 		}
 	};
 
-	getTerminalStatus: ITerminalToolService['getTerminalStatus'] = (terminalId) => {
-		const terminal = this.getPersistentTerminal(terminalId) ?? this.getTemporaryTerminal(terminalId);
+	getTerminalStatus: ITerminalToolService['getTerminalStatus'] = (tid) => {
+		const terminal = this.getPersistentTerminal(tid) ?? this.getTemporaryTerminal(tid);
 		if (!terminal) {
 			return 'disposed';
 		}
@@ -421,14 +446,25 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 		return 'running';
 	};
 
-	getTerminalOutputStream(terminalId: string): Event<string> | undefined {
-		const exec = this.terminalExecutions[terminalId]
+	getTerminalOutputStream(tid: string): Event<string> | undefined {
+		const exec = this.terminalExecutions[tid]
 		return exec ? exec.outputEmitter.event : undefined
 	}
 
-	isTerminalRunning(terminalId: string): boolean {
-		const exec = this.terminalExecutions[terminalId]
+	isTerminalRunning(tid: string): boolean {
+		const exec = this.terminalExecutions[tid]
 		return exec ? exec.isRunning : false
+	}
+
+	private async _waitForProcessReady(terminal: ITerminalInstance): Promise<void> {
+		try {
+			await Promise.race([
+				terminal.processReady,
+				timeout(PROCESS_READY_TIMEOUT_MS),
+			]);
+		} catch {
+			// proceed so callers still get a clean error or fallback behavior
+		}
 	}
 
 	private async _waitForCommandDetectionCapability(terminal: ITerminalInstance) {
@@ -437,7 +473,7 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 		const disposables: IDisposable[] = []
 
-		const waitTimeout = timeout(10_000)
+		const waitTimeout = timeout(COMMAND_DETECTION_WAIT_MS)
 		const waitForCapability = new Promise<ITerminalCapabilityImplMap[TerminalCapability.CommandDetection]>((res) => {
 			disposables.push(
 				terminal.capabilities.onDidAddCapability((e) => {
@@ -457,149 +493,220 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 
 		const { type } = params
 		const isPersistent = type === 'persistent'
+		const tid = isPersistent ? params.persistentTerminalId : params.terminalId
 
 		let terminal: ITerminalInstance
 		const disposables: IDisposable[] = []
 
-		if (isPersistent) { // BG process
-			const { persistentTerminalId } = params
-			terminal = this.persistentTerminalInstanceOfId[persistentTerminalId];
-			if (!terminal) throw new Error(`Unexpected internal error: Terminal with ID ${persistentTerminalId} did not exist.`);
+		if (isPersistent) { // BG / interactive persistent terminal
+			terminal = this.persistentTerminalInstanceOfId[tid];
+			if (!terminal) throw new Error(`Unexpected internal error: Terminal with ID ${tid} did not exist.`);
+			this.terminalInstanceToId.set(terminal, tid)
 		}
 		else {
 			const { cwd } = params
 			terminal = await this._createTerminal({ cwd: cwd, config: undefined, hidden: true })
-			this.temporaryTerminalInstanceOfId[params.terminalId] = terminal
-			this.terminalType[params.terminalId] = 'temporary'
-			this.terminalCwd[params.terminalId] = cwd ?? null
-			this.terminalReadOffsets[params.terminalId] = 0
-			// Initialize execution tracking for temporary terminal
-			this.terminalExecutions[params.terminalId] = {
-				terminalId: params.terminalId,
-				outputEmitter: new Emitter<string>(),
-				isRunning: false,
-				exitCode: null,
-				lastOutput: '',
-				offset: 0,
-			}
+			this.temporaryTerminalInstanceOfId[tid] = terminal
+			this.terminalInstanceToId.set(terminal, tid)
+			this.terminalType[tid] = 'temporary'
+			this.terminalCwd[tid] = cwd ?? null
+			this.terminalReadOffsets[tid] = 0
 		}
 
 		// Mark terminal as running
-		if (this.terminalExecutions[terminalId(terminal)]) {
-			this.terminalExecutions[terminalId(terminal)].isRunning = true
-			this.terminalExecutions[terminalId(terminal)].exitCode = null
-			this.terminalExecutions[terminalId(terminal)].lastOutput = ''
-			this.terminalExecutions[terminalId(terminal)].offset = 0
+		const exec = this._ensureExecutionRecord(tid)
+		exec.isRunning = true
+		exec.exitCode = null
+		if (!isPersistent) {
+			exec.lastOutput = ''
+			exec.offset = 0
 		}
 
+		let disposedByInterrupt = false;
 		const interrupt = () => {
-			terminal.dispose()
-			if (!isPersistent)
-				delete this.temporaryTerminalInstanceOfId[params.terminalId]
-			else
-				delete this.persistentTerminalInstanceOfId[params.persistentTerminalId]
-			// Mark as not running
-			const tid = terminalId(terminal)
-			if (this.terminalExecutions[tid]) {
-				this.terminalExecutions[tid].isRunning = false
+			if (disposedByInterrupt) return;
+			disposedByInterrupt = true;
+			disposables.forEach(d => d.dispose());
+			if (!isPersistent) {
+				terminal.dispose()
+				this._cleanupTerminalState(tid, 'temporary')
+			} else {
+				terminal.dispose()
+				this._cleanupTerminalState(tid, 'persistent')
 			}
 		}
 
 		const waitForResult = async () => {
-			if (isPersistent) {
-				// focus the terminal about to run
-				this.terminalService.setActiveInstance(terminal)
-				await this.terminalService.focusActiveInstance()
-			}
-			let result: string = ''
-			let resolveReason: TerminalResolveReason | undefined
+			try {
+				if (isPersistent) {
+					// focus the terminal about to run
+					this.terminalService.setActiveInstance(terminal)
+					await this.terminalService.focusActiveInstance()
+				}
 
+				await this._waitForProcessReady(terminal)
 
-			const cmdCap = await this._waitForCommandDetectionCapability(terminal)
-			// if (!cmdCap) throw new Error(`There was an error using the terminal: CommandDetection capability did not mount yet. Please try again in a few seconds or report this to the Kodia team.`)
+				let result: string = ''
+				let resolveReason: TerminalResolveReason | undefined
 
-			// Prefer the structured command-detection capability when available
+				// Hidden temporary terminals often never attach xterm/OSC 633 CommandDetection, so don't waste 2.5s waiting when xterm isn't mounted.
+				const cmdCap = (!isPersistent && !terminal.xterm)
+					? terminal.capabilities.get(TerminalCapability.CommandDetection)
+					: await this._waitForCommandDetectionCapability(terminal)
+				const shellType = terminal.shellType
+				const normalizedCommand = unwrapCmdForShellType(command, shellType)
 
-			const waitUntilDone = new Promise<void>(resolve => {
-				if (!cmdCap) return
-				const l = cmdCap.onCommandFinished(cmd => {
-					if (resolveReason) return // already resolved
-					resolveReason = { type: 'done', exitCode: cmd.exitCode ?? 0 };
-					result = cmd.getOutput() ?? ''
-					l.dispose()
-					resolve()
-				})
-				disposables.push(l)
-			})
+				// Use deterministic sentinel completion whenever CommandDetection isn't active OR on hidden temporary terminals
+				// (where OSC 633 sequences may never be parsed by xterm).
+				const useSentinelFallback = !cmdCap || !isPersistent
+				const sentinelToken = useSentinelFallback
+					? `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+					: ''
+				const commandToSend = useSentinelFallback
+					? buildSentinelWrappedCommand(normalizedCommand, sentinelToken, shellType)
+					: normalizedCommand
 
+				let capturedSinceSend = ''
 
-
-			// send the command now that listeners are attached
-			await terminal.sendText(command, true)
-
-			const waitUntilInterrupt = isPersistent ?
-				// timeout after X seconds
-				new Promise<void>((res) => {
-					setTimeout(() => {
-						resolveReason = { type: 'timeout' };
-						res()
-					}, MAX_TERMINAL_BG_COMMAND_TIME * 1000)
-				})
-				// inactivity-based timeout for temporary terminals
-				: new Promise<void>(res => {
-					let globalTimeoutId: ReturnType<typeof setTimeout>;
-					const resetTimer = () => {
-						clearTimeout(globalTimeoutId);
-						globalTimeoutId = setTimeout(() => {
+				const waitUntilDone = new Promise<void>(resolve => {
+					// Primary: VS Code shell integration CommandDetection
+					if (cmdCap) {
+						const l = cmdCap.onCommandFinished(cmd => {
 							if (resolveReason) return
+							const rawOut = cmd.getOutput() ?? ''
+							if (useSentinelFallback) {
+								const check = extractSentinelCompletion(rawOut, sentinelToken)
+								resolveReason = { type: 'done', exitCode: check.done ? check.exitCode : (cmd.exitCode ?? 0) }
+								result = check.cleanOutput
+							} else {
+								resolveReason = { type: 'done', exitCode: cmd.exitCode ?? 0 }
+								result = rawOut
+							}
+							l.dispose()
+							resolve()
+						})
+						disposables.push(l)
+					}
 
-							resolveReason = { type: 'timeout' };
-							res();
-						}, MAX_TERMINAL_INACTIVE_TIME * 1000);
-					};
+					// Secondary: stream capture + deterministic sentinel fallback when CommandDetection isn't available
+					const dataListener = terminal.onData((chunk: string) => {
+						if (resolveReason) return
+						capturedSinceSend += chunk
+						if (capturedSinceSend.length > MAX_BUFFERED_RAW_CHARS) {
+							capturedSinceSend = capturedSinceSend.slice(capturedSinceSend.length - MAX_BUFFERED_RAW_CHARS)
+						}
+						if (useSentinelFallback) {
+							const check = extractSentinelCompletion(capturedSinceSend, sentinelToken)
+							if (check.done) {
+								resolveReason = { type: 'done', exitCode: check.exitCode }
+								result = check.cleanOutput
+								dataListener.dispose()
+								resolve()
+							}
+						}
+					})
+					disposables.push(dataListener)
 
-					const dTimeout = terminal.onData(() => { resetTimer(); });
-					disposables.push(dTimeout, toDisposable(() => clearTimeout(globalTimeoutId)));
-					resetTimer();
+					// Tertiary: if the terminal process exits early (e.g. `exit`), resolve immediately instead of hanging
+					const exitListener = terminal.onExit((exitCode) => {
+						if (resolveReason) return
+						const numericExit = typeof exitCode === 'number'
+							? exitCode
+							: (typeof terminal.exitCode === 'number' ? terminal.exitCode : 0)
+						resolveReason = { type: 'done', exitCode: numericExit }
+						result = removeAnsiEscapeCodes(capturedSinceSend)
+						exitListener.dispose()
+						resolve()
+					})
+					disposables.push(exitListener)
 				})
 
-			// wait for result
-			await Promise.any([waitUntilDone, waitUntilInterrupt])
-				.finally(() => disposables.forEach(d => d.dispose()))
+				// Give freshly spawned shells a brief tick to finish printing initial prompt before sending text
+				if (!isPersistent && !cmdCap) {
+					await timeout(150)
+				}
 
+				// Send the command now that all listeners are attached
+				await terminal.sendText(commandToSend, true)
 
+				const bgTimeoutMs = safeSetTimeoutMs(MAX_TERMINAL_BG_COMMAND_TIME, 15)
+				const inactiveTimeoutMs = safeSetTimeoutMs(MAX_TERMINAL_INACTIVE_TIME, 120)
 
-			// read result if timed out, since we didn't get it (could clean this code up but it's ok)
-			if (resolveReason?.type === 'timeout') {
-				const terminalId = isPersistent ? params.persistentTerminalId : params.terminalId
-				result = await this.readTerminal(terminalId)
+				const waitUntilInterrupt = isPersistent
+					? new Promise<void>((res) => {
+						const bgTimer = setTimeout(() => {
+							if (resolveReason) return
+							resolveReason = { type: 'timeout' }
+							res()
+						}, bgTimeoutMs)
+						disposables.push(toDisposable(() => clearTimeout(bgTimer)))
+					})
+					: new Promise<void>((res) => {
+						let inactivityTimer: ReturnType<typeof setTimeout> | undefined
+						const resetTimer = () => {
+							if (inactivityTimer !== undefined) {
+								clearTimeout(inactivityTimer)
+							}
+							inactivityTimer = setTimeout(() => {
+								if (resolveReason) return
+								resolveReason = { type: 'timeout' }
+								res()
+							}, inactiveTimeoutMs)
+						}
+
+						const dTimeout = terminal.onData(() => { resetTimer() })
+						disposables.push(dTimeout, toDisposable(() => {
+							if (inactivityTimer !== undefined) {
+								clearTimeout(inactivityTimer)
+							}
+						}))
+						resetTimer()
+					})
+
+				// Wait for completion, exit, or safe timeout
+				await Promise.any([waitUntilDone, waitUntilInterrupt])
+					.finally(() => disposables.forEach(d => d.dispose()))
+
+				// If timed out (or command detection returned empty output), read captured output safely
+				if (resolveReason?.type === 'timeout' || !result.trim()) {
+					const fallbackOutput = capturedSinceSend.trim()
+						? removeAnsiEscapeCodes(capturedSinceSend)
+						: this._readTerminalBufferOrStream(tid, terminal)
+					if (resolveReason?.type === 'timeout' || !result.trim()) {
+						result = fallbackOutput
+					}
+				}
+
+				if (!resolveReason) {
+					throw new Error('Unexpected internal error: Promise.any should have resolved with a reason.')
+				}
+
+				if (!isPersistent) {
+					result = `$ ${command}\n${result}`
+				}
+				result = removeAnsiEscapeCodes(result)
+
+				// Trim safely (only when finite!)
+				if (Number.isFinite(MAX_TERMINAL_CHARS) && result.length > MAX_TERMINAL_CHARS) {
+					const half = Math.floor(MAX_TERMINAL_CHARS / 2)
+					result = result.slice(0, half)
+						+ '\n...\n'
+						+ result.slice(result.length - half)
+				}
+
+				// Mark terminal as not running
+				if (this.terminalExecutions[tid]) {
+					this.terminalExecutions[tid].isRunning = false
+					this.terminalExecutions[tid].exitCode = resolveReason.type === 'done' ? resolveReason.exitCode : null
+				}
+
+				return { result, resolveReason }
+			} finally {
+				// Always clean up temporary terminals so we never leak hidden PTYs even on error
+				if (!isPersistent) {
+					interrupt()
+				}
 			}
-
-			if (!isPersistent) {
-				interrupt()
-			}
-
-			if (!resolveReason) throw new Error('Unexpected internal error: Promise.any should have resolved with a reason.')
-
-			if (!isPersistent) result = `$ ${command}\n${result}`
-			result = removeAnsiEscapeCodes(result)
-			// trim
-			if (result.length > MAX_TERMINAL_CHARS) {
-				const half = MAX_TERMINAL_CHARS / 2
-				result = result.slice(0, half)
-					+ '\n...\n'
-					+ result.slice(result.length - half, Infinity)
-			}
-
-			// Mark terminal as not running
-			const tid = terminalId(terminal)
-			if (this.terminalExecutions[tid]) {
-				this.terminalExecutions[tid].isRunning = false
-				this.terminalExecutions[tid].exitCode = resolveReason?.type === 'done' ? resolveReason.exitCode : null
-			}
-
-			return { result, resolveReason }
-
 		}
 		const resPromise = waitForResult()
 
@@ -608,16 +715,6 @@ export class TerminalToolService extends Disposable implements ITerminalToolServ
 			resPromise,
 		}
 	}
-
-
-
-}
-
-// Helper to get terminal ID from terminal instance
-function terminalId(terminal: ITerminalInstance): string {
-	const id = idOfPersistentTerminalName(terminal.title)
-	if (id) return id
-	return terminal.title // fallback
 }
 
 registerSingleton(ITerminalToolService, TerminalToolService, InstantiationType.Delayed);

@@ -13,6 +13,24 @@ import { Disposable } from '../utils/dispose';
 import { equals } from '../utils/objects';
 import { ResourceMap } from '../utils/resourceMap';
 
+// Kodia: TypeScript 6.0 emits breaking config deprecation errors (TS5101/TS5107) on standard TS 5.x tsconfig.json files.
+// Suppress these noise codes as red errors so valid projects show only real errors, matching standard TS 5.x editors.
+const TS6_DEPRECATION_NOISE_CODES = new Set<number>([5101, 5107]);
+
+function filterFalsePositiveDiagnostics(diagnostics: ReadonlyArray<vscode.Diagnostic>): ReadonlyArray<vscode.Diagnostic> {
+	if (diagnostics.length === 0) {
+		return diagnostics;
+	}
+	return diagnostics.filter(diag => {
+		const rawCode = typeof diag.code === 'object' && diag.code !== null ? diag.code.value : diag.code;
+		const numericCode = typeof rawCode === 'number' ? rawCode : Number(rawCode);
+		if (TS6_DEPRECATION_NOISE_CODES.has(numericCode)) {
+			return false;
+		}
+		return true;
+	});
+}
+
 function diagnosticsEquals(a: vscode.Diagnostic, b: vscode.Diagnostic): boolean {
 	if (a === b) {
 		return true;
@@ -343,13 +361,14 @@ export class DiagnosticsManager extends Disposable {
 		diagnostics: ReadonlyArray<vscode.Diagnostic>,
 		ranges: ReadonlyArray<vscode.Range> | undefined,
 	): void {
+		const filteredDiagnostics = filterFalsePositiveDiagnostics(diagnostics);
 		let didUpdate = false;
 		const entry = this._diagnostics.get(file);
 		if (entry) {
-			didUpdate = entry.updateDiagnostics(language, kind, diagnostics, ranges);
-		} else if (diagnostics.length) {
+			didUpdate = entry.updateDiagnostics(language, kind, filteredDiagnostics, ranges);
+		} else if (filteredDiagnostics.length) {
 			const fileDiagnostics = new FileDiagnostics(file, language);
-			fileDiagnostics.updateDiagnostics(language, kind, diagnostics, ranges);
+			fileDiagnostics.updateDiagnostics(language, kind, filteredDiagnostics, ranges);
 			this._diagnostics.set(file, fileDiagnostics);
 			didUpdate = true;
 		}
@@ -363,7 +382,7 @@ export class DiagnosticsManager extends Disposable {
 		file: vscode.Uri,
 		diagnostics: ReadonlyArray<vscode.Diagnostic>
 	): void {
-		this._currentDiagnostics.set(file, diagnostics);
+		this._currentDiagnostics.set(file, filterFalsePositiveDiagnostics(diagnostics));
 	}
 
 	public deleteAllDiagnosticsInFile(resource: vscode.Uri): void {

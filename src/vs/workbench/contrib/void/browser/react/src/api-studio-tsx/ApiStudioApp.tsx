@@ -34,7 +34,9 @@ import {
 	X,
 	XCircle,
 } from 'lucide-react';
-import { useAccessor } from '../util/services.js';
+import '../styles.css';
+import { useAccessor, useIsDark } from '../util/services.js';
+import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import { ApiStudioWorkbenchState } from '../../../apiStudioService.js';
 import {
@@ -86,19 +88,21 @@ const METHOD_COLORS: Record<string, string> = {
 type ReqConfigTab = 'params' | 'auth' | 'headers' | 'body' | 'pre' | 'tests' | 'settings';
 type ResViewTab = 'pretty' | 'tree' | 'raw' | 'headers' | 'cookies' | 'timing' | 'assertions' | 'sse' | 'diff';
 
-export const ApiStudioApp: React.FC = () => {
+export const ApiStudioApp = () => {
+	const isDark = useIsDark();
 	const accessor = useAccessor();
 	const apiService = accessor.get('IApiStudioService');
 	const apiMain = accessor.get('IKodiaApiStudioMainService');
 	const toolsService = accessor.get('IToolsService');
 
 	const [state, setState] = useState<ApiStudioWorkbenchState>(() => apiService.state);
-	const [sidebarWidth, setSidebarWidth] = useState(250);
+	const [sidebarWidth, setSidebarWidth] = useState(195);
+	const [sidebarOpen, setSidebarOpen] = useState(true);
 	const [showLiveDrawer, setShowLiveDrawer] = useState(true);
 	const [navSearch, setNavSearch] = useState('');
 
 	// Request builder tabs & busy states
-	const [reqTab, setReqTab] = useState<ReqConfigTab>('params');
+	const [reqTab, setReqTab] = useState<ReqConfigTab>('body');
 	const [resTab, setResTab] = useState<ResViewTab>('pretty');
 	const [sending, setSending] = useState(false);
 	const [activeExecId, setActiveExecId] = useState<string | null>(null);
@@ -135,12 +139,27 @@ export const ApiStudioApp: React.FC = () => {
 	const [newEnvKind, setNewEnvKind] = useState<ApiEnvironment['kind']>('local');
 
 	const workspaceRoot = apiService.getWorkspaceRoot();
-	const req = state.activeRequest;
+	const rawReq = state.activeRequest;
+	const req: ApiRequestSpec = useMemo(() => ({
+		...rawReq,
+		params: Array.isArray(rawReq.params) ? rawReq.params : [],
+		headers: Array.isArray(rawReq.headers) ? rawReq.headers : [],
+		auth: rawReq.auth && typeof rawReq.auth.type === 'string' ? rawReq.auth : { type: 'none' },
+		body: rawReq.body && typeof rawReq.body.mode === 'string'
+			? rawReq.body
+			: (rawReq.body && typeof rawReq.body === 'object' ? { mode: 'json', raw: JSON.stringify(rawReq.body, null, 2) } : { mode: 'none' }),
+	}), [rawReq]);
 	const res = state.latestResponse;
 
 	useEffect(() => {
 		setState(apiService.state);
-		const d = apiService.onDidChange(() => setState({ ...apiService.state }));
+		const d = apiService.onDidChange(() => {
+			const next = { ...apiService.state };
+			setState(next);
+			if (next.activeRequest.body && next.activeRequest.body.mode && next.activeRequest.body.mode !== 'none') {
+				setReqTab('body');
+			}
+		});
 		void apiService.refreshFromDisk();
 		return () => d.dispose();
 	}, [apiService]);
@@ -160,7 +179,10 @@ export const ApiStudioApp: React.FC = () => {
 	};
 
 	const handleSendRequest = async () => {
-		if (!apiMain || !req.url.trim()) { return; }
+		if (!apiMain || !req.url.trim()) {
+			flash(!req.url.trim() ? 'Enter a request URL first' : 'API execution service unavailable');
+			return;
+		}
 		const execId = `ui-${Date.now().toString(36)}`;
 		setSending(true);
 		setActiveExecId(execId);
@@ -176,6 +198,8 @@ export const ApiStudioApp: React.FC = () => {
 			if (response.sseEvents && response.sseEvents.length > 0) {
 				setResTab('sse');
 			}
+		} catch (e) {
+			flash(`Request failed: ${e instanceof Error ? e.message : String(e)}`);
 		} finally {
 			setSending(false);
 			setActiveExecId(null);
@@ -412,21 +436,27 @@ export const ApiStudioApp: React.FC = () => {
 	}, [state.discovery, activeEnv]);
 
 	return (
-		<div className='void-scope w-full h-full flex flex-col bg-void-bg-2 text-void-fg-1 select-text overflow-hidden'>
+		<ErrorBoundary>
+		<div className={`@@void-scope ${isDark ? 'dark' : ''} w-full h-full flex flex-col bg-void-bg-2 text-void-fg-1 select-text overflow-hidden`}>
 			{/* Top Studio Command Bar */}
-			<header className='h-11 px-3 border-b border-void-border-2 bg-void-bg-1 flex items-center gap-2 shrink-0'>
-				<div className='flex items-center gap-2 mr-2'>
-					<div className='w-6 h-6 rounded-md flex items-center justify-center bg-sky-500/15 border border-sky-500/30'>
+			<header className='min-h-11 px-3 py-1.5 border-b border-void-border-2 bg-void-bg-1 flex flex-wrap items-center gap-2 shrink-0'>
+				<div className='flex items-center gap-2 mr-1 min-w-0'>
+					<button
+						type='button'
+						onClick={() => setSidebarOpen(v => !v)}
+						title={sidebarOpen ? 'Hide Explorer Sidebar' : 'Show Explorer Sidebar'}
+						className='w-6 h-6 rounded-md flex items-center justify-center bg-sky-500/15 border border-sky-500/30 hover:bg-sky-500/25 cursor-pointer shrink-0'
+					>
 						<Globe size={14} className='text-sky-400' />
-					</div>
-					<div className='leading-tight'>
-						<div className='text-xs font-semibold tracking-tight'>Kodia API Engineering Studio</div>
-						<div className='text-[10px] text-void-fg-3'>Live Protocol Testing · Discovery · Load · Security · Readiness</div>
+					</button>
+					<div className='leading-tight min-w-0'>
+						<div className='text-xs font-semibold tracking-tight truncate'>Kodia API Engineering Studio</div>
+						<div className='text-[10px] text-void-fg-3 truncate'>Live Protocol Testing · Discovery · Load · Security · Readiness</div>
 					</div>
 				</div>
 
 				{/* Layout Presets */}
-				<div className='hidden xl:flex items-center gap-1 bg-void-bg-2 p-0.5 rounded-md border border-void-border-2'>
+				<div className='hidden 2xl:flex items-center gap-1 bg-void-bg-2 p-0.5 rounded-md border border-void-border-2'>
 					{([
 						['request-builder', 'Builder'],
 						['live-runner', 'Test Runner'],
@@ -445,8 +475,8 @@ export const ApiStudioApp: React.FC = () => {
 					))}
 				</div>
 
-				<div className='ml-auto flex items-center gap-2'>
-					{statusMsg && <span className='text-[11px] text-emerald-400 hidden md:inline'>{statusMsg}</span>}
+				<div className='ml-auto flex flex-wrap items-center gap-1.5'>
+					{statusMsg && <span className='text-[11px] text-emerald-400 max-w-52 truncate'>{statusMsg}</span>}
 
 					{/* Active Environment Switcher */}
 					<div className='flex items-center gap-1.5'>
@@ -468,7 +498,7 @@ export const ApiStudioApp: React.FC = () => {
 							))}
 						</select>
 						{activeEnv && (activeEnv.kind === 'production' || activeEnv.isProtected) && (
-							<KodiaBadge tone='error'>PROTECTED PROD</KodiaBadge>
+							<KodiaBadge tone='danger'>PROTECTED PROD</KodiaBadge>
 						)}
 					</div>
 
@@ -481,7 +511,7 @@ export const ApiStudioApp: React.FC = () => {
 					<KodiaSecondaryButton onClick={() => setShowLiveDrawer(v => !v)} className='!py-1 !px-2 !text-[11px]'>
 						<Activity size={11} /> Live ({state.liveEvents.length})
 					</KodiaSecondaryButton>
-					<button type='button' onClick={() => void apiService.refreshFromDisk()} title='Sync persistent workspace state' className='p-1.5 rounded border border-void-border-2 text-void-fg-2 hover:text-void-fg-1 cursor-pointer'>
+					<button type='button' onClick={() => void apiService.refreshFromDisk()} title='Sync persistent workspace state' className='p-1.5 rounded border border-void-border-2 bg-void-bg-2 text-void-fg-2 hover:text-void-fg-1 cursor-pointer'>
 						<RefreshCw size={12} />
 					</button>
 				</div>
@@ -490,6 +520,7 @@ export const ApiStudioApp: React.FC = () => {
 			{/* Main 3-Pane Studio Workspace */}
 			<div className='flex-1 flex min-h-0 overflow-hidden'>
 				{/* Resizable Left Explorer Sidebar */}
+				{sidebarOpen && (
 				<aside style={{ width: sidebarWidth }} className='border-r border-void-border-2 bg-void-bg-1/80 flex flex-col shrink-0 min-h-0'>
 					<div className='p-2 border-b border-void-border-2'>
 						<div className='flex items-center gap-1.5 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2'>
@@ -562,13 +593,14 @@ export const ApiStudioApp: React.FC = () => {
 						)}
 					</nav>
 					<div className='px-2.5 py-1.5 border-t border-void-border-2 flex items-center justify-between text-[10px] text-void-fg-3'>
-						<span>Sidebar Width</span>
+						<span>Sidebar</span>
 						<div className='flex gap-1'>
-							<button type='button' onClick={() => setSidebarWidth(w => Math.max(180, w - 30))} className='px-1.5 rounded border border-void-border-2 cursor-pointer'>-</button>
-							<button type='button' onClick={() => setSidebarWidth(w => Math.min(380, w + 30))} className='px-1.5 rounded border border-void-border-2 cursor-pointer'>+</button>
+							<button type='button' onClick={() => setSidebarWidth(w => Math.max(150, w - 25))} className='px-1.5 rounded border border-void-border-2 bg-void-bg-2 text-void-fg-2 hover:text-void-fg-1 cursor-pointer'>-</button>
+							<button type='button' onClick={() => setSidebarWidth(w => Math.min(340, w + 25))} className='px-1.5 rounded border border-void-border-2 bg-void-bg-2 text-void-fg-2 hover:text-void-fg-1 cursor-pointer'>+</button>
 						</div>
 					</div>
 				</aside>
+				)}
 
 				{/* Center + Bottom Live Activity Column */}
 				<main className='flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden'>
@@ -626,12 +658,12 @@ export const ApiStudioApp: React.FC = () => {
 						{state.activeSection === 'requests' && (
 							<div className='flex-1 flex flex-col min-h-0 overflow-hidden'>
 								{/* Request URL Bar */}
-								<div className='p-2.5 border-b border-void-border-2 bg-void-bg-1/50 flex items-center gap-2 shrink-0'>
+								<div className='p-2.5 border-b border-void-border-2 bg-void-bg-1/50 flex flex-wrap items-center gap-2 shrink-0'>
 									<select
 										aria-label='HTTP Method'
 										value={req.method}
 										onChange={e => updateReq({ method: e.target.value as ApiHttpMethod })}
-										className={`px-2.5 py-1.5 rounded-md text-xs font-mono font-semibold border cursor-pointer ${METHOD_COLORS[req.method] ?? METHOD_COLORS.GET}`}
+										className={`px-2.5 py-1.5 rounded-md text-xs font-mono font-semibold border cursor-pointer shrink-0 ${METHOD_COLORS[req.method] ?? METHOD_COLORS.GET}`}
 									>
 										{(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const).map(m => (
 											<option key={m} value={m} className='bg-void-bg-1 text-void-fg-1'>{m}</option>
@@ -643,7 +675,7 @@ export const ApiStudioApp: React.FC = () => {
 										onChange={e => updateReq({ url: e.target.value })}
 										onKeyDown={e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { void handleSendRequest(); } }}
 										placeholder='https://api.example.com/v1/resource or {{baseUrl}}/health'
-										className='flex-1 px-3 py-1.5 rounded-md bg-void-bg-1 border border-void-border-2 text-xs font-mono text-void-fg-1 outline-none focus:border-sky-500/60'
+										className='flex-1 min-w-[180px] px-3 py-1.5 rounded-md bg-void-bg-1 border border-void-border-2 text-xs font-mono text-void-fg-1 outline-none focus:border-sky-500/60'
 									/>
 									<datalist id='kodia-api-route-suggestions'>
 										{(state.discovery?.routes ?? []).map(r => (
@@ -678,9 +710,9 @@ export const ApiStudioApp: React.FC = () => {
 										<div className='px-2.5 py-1 border-b border-void-border-2 bg-void-bg-1/30 flex items-center gap-1 shrink-0 overflow-x-auto'>
 											{([
 												['params', `Params (${req.params.filter(p => p.enabled).length})`],
-												['auth', `Auth (${req.auth.type})`],
+												['auth', `Auth (${req.auth?.type ?? 'none'})`],
 												['headers', `Headers (${req.headers.filter(h => h.enabled).length})`],
-												['body', `Body (${req.body.mode})`],
+												['body', `Body (${req.body?.mode ?? 'none'})`],
 												['pre', 'Pre-request'],
 												['tests', `Tests & Assertions (${req.assertions?.length ?? 0})`],
 												['settings', 'Settings'],
@@ -919,7 +951,7 @@ export const ApiStudioApp: React.FC = () => {
 											{res && (
 												<div className='ml-auto flex items-center gap-2 text-[11px] font-mono'>
 													{res.isMock && <KodiaBadge tone='warning'>MOCK SERVER</KodiaBadge>}
-													<KodiaBadge tone={res.ok ? 'success' : res.status >= 400 || res.error ? 'error' : 'warning'}>
+													<KodiaBadge tone={res.ok ? 'success' : res.status >= 400 || res.error ? 'danger' : 'warning'}>
 														{res.status ? `${res.status} ${res.statusText}` : res.statusText}
 													</KodiaBadge>
 													<span className='text-void-fg-2'>{res.timing.totalMs} ms</span>
@@ -1182,7 +1214,7 @@ export const ApiStudioApp: React.FC = () => {
 										<div className='flex items-center justify-between text-xs'>
 											<div className='flex items-center gap-2'>
 												<span className='font-mono font-semibold'>{sess.url}</span>
-												<KodiaBadge tone={sess.status === 'open' ? 'success' : sess.status === 'error' ? 'error' : 'neutral'}>{sess.status}</KodiaBadge>
+												<KodiaBadge tone={sess.status === 'open' ? 'success' : sess.status === 'error' ? 'danger' : 'neutral'}>{sess.status}</KodiaBadge>
 												{sess.handshakeStatus && <span className='text-[10px] text-void-fg-3'>HTTP {sess.handshakeStatus}</span>}
 											</div>
 											{sess.status === 'open' && (
@@ -1254,7 +1286,7 @@ export const ApiStudioApp: React.FC = () => {
 									<KodiaCard key={e.id} className='p-3 flex items-center justify-between text-xs'>
 										<div>
 											<span className='font-semibold'>{e.name}</span>{' '}
-											<KodiaBadge tone={e.isProtected || e.kind === 'production' ? 'error' : 'neutral'}>{e.kind}</KodiaBadge>{' '}
+											<KodiaBadge tone={e.isProtected || e.kind === 'production' ? 'danger' : 'neutral'}>{e.kind}</KodiaBadge>{' '}
 											<span className='font-mono text-void-fg-3'>{e.baseUrl}</span>
 										</div>
 										<KodiaSecondaryButton onClick={async () => {
@@ -1294,7 +1326,7 @@ export const ApiStudioApp: React.FC = () => {
 										<div className='flex items-center justify-between text-xs'>
 											<div className='font-semibold'>{run.suiteName} · {run.summary}</div>
 											<div className='flex items-center gap-1.5'>
-												<KodiaBadge tone={run.failed === 0 && run.blocked === 0 ? 'success' : 'error'}>
+												<KodiaBadge tone={run.failed === 0 && run.blocked === 0 ? 'success' : 'danger'}>
 													{run.passed}/{run.total} passed
 												</KodiaBadge>
 												<KodiaSecondaryButton onClick={() => { try { void navigator.clipboard?.writeText(exportTestRunToCsv(run)); } catch { /* ignore */ } flash('Copied CSV report'); }} className='!py-0.5 !px-2 !text-[10px]'>
@@ -1403,7 +1435,7 @@ export const ApiStudioApp: React.FC = () => {
 									<KodiaCard key={h.id} className='p-2.5 flex items-center gap-2 text-xs'>
 										<span className={`px-1.5 rounded text-[10px] font-mono border ${METHOD_COLORS[h.request.method] ?? METHOD_COLORS.GET}`}>{h.request.method}</span>
 										<span className='font-mono truncate flex-1'>{h.response.resolvedUrl}</span>
-										<KodiaBadge tone={h.response.ok ? 'success' : 'error'}>{h.response.status || 'ERR'}</KodiaBadge>
+										<KodiaBadge tone={h.response.ok ? 'success' : 'danger'}>{h.response.status || 'ERR'}</KodiaBadge>
 										<span className='font-mono text-[11px] text-void-fg-3'>{h.response.timing.totalMs}ms</span>
 										<KodiaSecondaryButton onClick={() => { apiService.setActiveRequest(h.request); apiService.recordResponse(h.response); apiService.setActiveSection('requests'); }} className='!py-0.5 !px-2 !text-[10px]'>
 											Inspect
@@ -1467,5 +1499,6 @@ export const ApiStudioApp: React.FC = () => {
 				</div>
 			)}
 		</div>
+		</ErrorBoundary>
 	);
 };

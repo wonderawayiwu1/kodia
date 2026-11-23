@@ -102,15 +102,15 @@ export class ImplicitProjectConfiguration {
 	}
 
 	private static readImplicitStrictNullChecks(configuration: vscode.WorkspaceConfiguration): boolean {
-		return configuration.get<boolean>('js/ts.implicitProjectConfig.strictNullChecks', true);
+		return configuration.get<boolean>('js/ts.implicitProjectConfig.strictNullChecks', false);
 	}
 
 	private static readImplicitStrictFunctionTypes(configuration: vscode.WorkspaceConfiguration): boolean {
-		return configuration.get<boolean>('js/ts.implicitProjectConfig.strictFunctionTypes', true);
+		return configuration.get<boolean>('js/ts.implicitProjectConfig.strictFunctionTypes', false);
 	}
 
 	private static readImplicitStrict(configuration: vscode.WorkspaceConfiguration): boolean {
-		return configuration.get<boolean>('js/ts.implicitProjectConfig.strict', true);
+		return configuration.get<boolean>('js/ts.implicitProjectConfig.strict', false);
 	}
 
 	private static hasValue(inspect: ReturnType<vscode.WorkspaceConfiguration['inspect']>): boolean {

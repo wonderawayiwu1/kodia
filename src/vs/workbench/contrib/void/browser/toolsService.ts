@@ -35,7 +35,7 @@ import { EndOfLinePreference } from '../../../../editor/common/model.js'
 import { IVoidCommandBarService } from './voidCommandBarServiceInterface.js'
 import { computeDirectoryTree1Deep, IDirectoryStrService, stringifyDirectoryTree1Deep } from '../common/directoryStrService.js'
 import { IMarkerService, MarkerSeverity } from '../../../../platform/markers/common/markers.js'
-import { raceTimeout, timeout } from '../../../../base/common/async.js'
+import { raceTimeout } from '../../../../base/common/async.js'
 import { RawToolParamsObj } from '../common/sendLLMMessageTypes.js'
 import { MAX_CHILDREN_URIs_PAGE, MAX_FILE_CHARS_PAGE, MAX_PROJECT_MEMORY_TOKENS, MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_INACTIVE_TIME } from '../common/prompt/prompts.js'
 import { IVoidSettingsService } from '../common/voidSettingsService.js'
@@ -53,6 +53,8 @@ import { IWebSearchService, SearchRequest } from '../common/webSearchTypes.js'
 import { INotebookService } from '../../notebook/common/notebookService.js'
 import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
 import { INotebookExecutionService } from '../../notebook/common/notebookExecutionService.js'
+import { INotebookEditorModelResolverService } from '../../notebook/common/notebookEditorModelResolverService.js'
+import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js'
 import { VSBuffer } from '../../../../base/common/buffer.js'
 import type { GitStepResult } from '../common/gitOperations.js'
 import type { GitChangedFile } from '../common/gitService.js'
@@ -1935,23 +1937,130 @@ export class ToolsService implements IToolsService {
 			}),
 			api_send_request: (params: RawToolParamsObj) => {
 				const parseObj = <T>(v: unknown): T | undefined => {
-					if (!v) return undefined
+					if (v === undefined || v === null || v === '') return undefined
 					if (typeof v === 'string') { try { return JSON.parse(v) as T } catch { return undefined } }
 					return v as T
 				}
+				const protocol = (validateOptionalStr('protocol', params.protocol) ?? 'http') as ApiProtocol
+
+				// Normalize headers: accept either Record<string, string> or Array<{ key, value, enabled? }>
+				let headers: Record<string, string> | undefined
+				const rawHeaders = parseObj<unknown>(params.headers)
+				if (Array.isArray(rawHeaders)) {
+					headers = {}
+					for (const h of rawHeaders) {
+						if (h && typeof h === 'object' && 'key' in h && (h as { enabled?: boolean }).enabled !== false) {
+							const k = String((h as { key?: unknown }).key ?? '').trim()
+							if (k) headers[k] = String((h as { value?: unknown }).value ?? '')
+						}
+					}
+				} else if (rawHeaders && typeof rawHeaders === 'object') {
+					headers = {}
+					for (const [k, v] of Object.entries(rawHeaders as Record<string, unknown>)) {
+						if (k.trim() && v !== undefined && v !== null) headers[k] = String(v)
+					}
+				}
+
+				// Normalize query params: accept either ApiKeyValuePair[] or Record<string, unknown>
+				let queryParams: ApiKeyValuePair[] | undefined
+				const rawParams = parseObj<unknown>(params.params)
+				if (Array.isArray(rawParams)) {
+					queryParams = rawParams
+						.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+						.map((item, i) => ({
+							id: String(item.id ?? `p-${i}`),
+							key: String(item.key ?? ''),
+							value: String(item.value ?? ''),
+							enabled: item.enabled !== false,
+						}))
+				} else if (rawParams && typeof rawParams === 'object') {
+					queryParams = Object.entries(rawParams as Record<string, unknown>).map(([k, v], i) => ({
+						id: `p-${i}`,
+						key: k,
+						value: v === undefined || v === null ? '' : String(v),
+						enabled: true,
+					}))
+				}
+
+				// Normalize body & body_raw: accept ApiRequestBody ({ mode, raw }), plain JSON object, or raw string!
+				const VALID_BODY_MODES = new Set(['none', 'json', 'xml', 'soap', 'graphql', 'text', 'html', 'form-urlencoded', 'multipart', 'binary'])
+				const contentTypeHdr = Object.entries(headers ?? {}).find(([k]) => k.toLowerCase() === 'content-type')?.[1]?.toLowerCase() ?? ''
+				const inferModeFromText = (txt: string): ApiRequestBody['mode'] => {
+					if (protocol === 'soap') return 'soap'
+					if (protocol === 'graphql') return 'graphql'
+					if (contentTypeHdr.includes('x-www-form-urlencoded')) return 'form-urlencoded'
+					if (contentTypeHdr.includes('xml')) return 'xml'
+					if (contentTypeHdr.includes('html')) return 'html'
+					if (contentTypeHdr.includes('json')) return 'json'
+					const trimmed = txt.trim()
+					if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+						try { JSON.parse(trimmed); return 'json' } catch { /* not valid json */ }
+					}
+					if (trimmed.startsWith('<')) return 'xml'
+					return 'text'
+				}
+
+				let body: ApiRequestBody | undefined
+				if (params.body !== undefined && params.body !== null && params.body !== '') {
+					const parsedBody = parseObj<unknown>(params.body)
+					if (parsedBody && typeof parsedBody === 'object' && !Array.isArray(parsedBody) && typeof (parsedBody as { mode?: unknown }).mode === 'string' && VALID_BODY_MODES.has((parsedBody as { mode: string }).mode)) {
+						const b = parsedBody as Record<string, unknown>
+						const rawField = b.raw !== undefined && b.raw !== null
+							? (typeof b.raw === 'string' ? b.raw : JSON.stringify(b.raw, null, 2))
+							: undefined
+						body = { ...(b as unknown as ApiRequestBody), ...(rawField !== undefined ? { raw: rawField } : {}) }
+					} else if (parsedBody !== undefined && typeof parsedBody === 'object') {
+						// Plain JSON object or array passed directly as `body` (most common LLM pattern!)
+						body = { mode: 'json', raw: JSON.stringify(parsedBody, null, 2) }
+					} else if (typeof params.body === 'string') {
+						body = { mode: inferModeFromText(params.body), raw: params.body }
+					}
+				}
+
+				let body_raw: string | undefined
+				if (params.body_raw !== undefined && params.body_raw !== null && params.body_raw !== '') {
+					body_raw = typeof params.body_raw === 'string' ? params.body_raw : JSON.stringify(params.body_raw, null, 2)
+					if (!body) {
+						body = { mode: inferModeFromText(body_raw), raw: body_raw }
+					}
+				}
+
+				// Normalize assertions
+				const rawAssertions = parseObj<unknown>(params.assertions)
+				const assertions: ApiAssertionSpec[] | undefined = Array.isArray(rawAssertions)
+					? rawAssertions
+						.filter((a): a is Record<string, unknown> => Boolean(a && typeof a === 'object'))
+						.map((a, i) => ({
+							id: String(a.id ?? `a-${i}`),
+							name: String(a.name ?? a.kind ?? `Assertion ${i + 1}`),
+							kind: String(a.kind ?? 'status_equals') as ApiAssertionSpec['kind'],
+							target: a.target !== undefined ? String(a.target) : undefined,
+							expected: a.expected !== undefined ? String(a.expected) : undefined,
+							enabled: a.enabled !== false,
+						}))
+					: undefined
+
+				// Normalize auth defensively
+				const rawAuth = parseObj<Record<string, unknown>>(params.auth)
+				const auth: ApiAuthConfig | undefined = rawAuth && typeof rawAuth.type === 'string'
+					? (rawAuth as unknown as ApiAuthConfig)
+					: rawAuth && typeof rawAuth.token === 'string'
+						? { type: 'bearer', token: rawAuth.token }
+						: undefined
+
 				return {
 					url: validateStr('url', params.url).trim(),
 					method: ((validateOptionalStr('method', params.method) ?? 'GET').toUpperCase()) as ApiHttpMethod,
-					protocol: (validateOptionalStr('protocol', params.protocol) ?? 'http') as ApiProtocol,
+					protocol,
 					name: validateOptionalStr('name', params.name) ?? undefined,
-					params: parseObj<ApiKeyValuePair[]>(params.params),
-					headers: parseObj<Record<string, string>>(params.headers),
-					auth: parseObj<ApiAuthConfig>(params.auth),
-					body: parseObj<ApiRequestBody>(params.body),
-					body_raw: validateOptionalStr('body_raw', params.body_raw) ?? undefined,
+					params: queryParams,
+					headers,
+					auth,
+					body,
+					body_raw,
 					pre_request_script: validateOptionalStr('pre_request_script', params.pre_request_script) ?? undefined,
 					test_script: validateOptionalStr('test_script', params.test_script) ?? undefined,
-					assertions: parseObj<ApiAssertionSpec[]>(params.assertions),
+					assertions,
 					environment_id: validateOptionalStr('environment_id', params.environment_id) ?? undefined,
 					timeout_ms: validateNumber(params.timeout_ms, { default: null }) ?? undefined,
 					allow_protected_environment: validateBoolean(params.allow_protected_environment, { default: false }),
@@ -2420,21 +2529,48 @@ export class ToolsService implements IToolsService {
 					workspaceContextService.getWorkspace().folders.map(f => f.uri)
 					: [searchInFolder]
 
-				const query = queryBuilder.text({
-					pattern: queryStr,
-					isRegExp: isRegex,
-				}, searchFolders)
+				const runTextSearch = (isCaseSensitive: boolean) => {
+					const query = queryBuilder.text({
+						pattern: queryStr,
+						isRegExp: isRegex,
+						isCaseSensitive,
+					}, searchFolders, {
+						previewOptions: { matchLines: 1, charsPerLine: 180 },
+						maxResults: 250,
+					})
+					return searchService.textSearch(query, CancellationToken.None)
+				}
 
-				const data = await searchService.textSearch(query, CancellationToken.None)
+				let data = await runTextSearch(true)
+				if (data.results.length === 0 && !isRegex) {
+					data = await runTextSearch(false)
+				}
 
 				const fromIdx = MAX_CHILDREN_URIs_PAGE * (pageNumber - 1)
 				const toIdx = MAX_CHILDREN_URIs_PAGE * pageNumber - 1
-				const uris = data.results
-					.slice(fromIdx, toIdx + 1) // paginate
-					.map(({ resource, results }) => resource)
+				const pageItems = data.results.slice(fromIdx, toIdx + 1)
+				const uris = pageItems.map(({ resource }) => resource)
+
+				// Extract rich line-numbered previews directly from ripgrep so the agent sees exact lines in 1 turn
+				const matches: Array<{ uri: URI, line: number, preview: string }> = []
+				const MAX_TOTAL_PREVIEWS = 60
+				for (const item of pageItems) {
+					if (matches.length >= MAX_TOTAL_PREVIEWS) break
+					const fileMatches = (item.results ?? []).slice(0, 4)
+					for (const m of fileMatches as any[]) {
+						if (matches.length >= MAX_TOTAL_PREVIEWS) break
+						if (m && typeof m.previewText === 'string' && Array.isArray(m.rangeLocations) && m.rangeLocations.length > 0) {
+							const lineNum = (m.rangeLocations[0]?.source?.startLineNumber ?? 0) + 1
+							const preview = m.previewText.replace(/\r?\n/g, ' ').trim().slice(0, 180)
+							if (preview) {
+								matches.push({ uri: item.resource, line: lineNum, preview })
+							}
+						}
+					}
+				}
 
 				const hasNextPage = (data.results.length - 1) - toIdx >= 1
-				return { result: { queryStr, uris, hasNextPage } }
+				return { result: { queryStr, uris, hasNextPage, matches } }
 			},
 			search_in_file: async ({ uri, query, isRegex }) => {
 				await voidModelService.initializeModel(uri);
@@ -2448,11 +2584,22 @@ export class ToolsService implements IToolsService {
 				for (let i = 0; i < totalLines; i++) {
 					const line = contentOfLine[i];
 					if ((isRegex && regex!.test(line)) || (!isRegex && line.includes(query))) {
-						const matchLine = i + 1;
-						lines.push(matchLine);
+						lines.push(i + 1);
 					}
 				}
-				return { result: { lines } };
+				let caseInsensitiveFallback = false;
+				if (lines.length === 0 && !isRegex && query.length > 0) {
+					const lowerQuery = query.toLowerCase();
+					for (let i = 0; i < totalLines; i++) {
+						if (contentOfLine[i].toLowerCase().includes(lowerQuery)) {
+							lines.push(i + 1);
+						}
+					}
+					if (lines.length > 0) {
+						caseInsensitiveFallback = true;
+					}
+				}
+				return { result: { lines, caseInsensitiveFallback } };
 			},
 
 			go_to_definition: async ({ uri, line, symbol }) => {
@@ -2504,7 +2651,7 @@ export class ToolsService implements IToolsService {
 			},
 
 			read_lint_errors: async ({ uri }) => {
-				await timeout(1000)
+				await this._waitForFreshLintErrors(uri, 450)
 				const { lintErrors } = this._getLintErrors(uri)
 				return { result: { lintErrors } }
 			},
@@ -3265,8 +3412,8 @@ export class ToolsService implements IToolsService {
 				}
 				await editCodeService.callBeforeApplyOrEdit(uri)
 				await editCodeService.instantlyRewriteFile({ uri, newContent })
-				// at end, get lint errors
-				await timeout(2000)
+				// Event-driven fresh diagnostics wait (0ms for non-code files, ~120-550ms for code files)
+				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
 				return { result: { lintErrors } }
 			},
@@ -3279,8 +3426,7 @@ export class ToolsService implements IToolsService {
 				}
 				await editCodeService.callBeforeApplyOrEdit(uri)
 				await editCodeService.instantlyRewriteFile({ uri, newContent })
-				// at end, get lint errors
-				await timeout(2000)
+				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
 				return { result: { lintErrors } }
 			},
@@ -3293,8 +3439,7 @@ export class ToolsService implements IToolsService {
 				await editCodeService.callBeforeApplyOrEdit(uri)
 				await editCodeService.instantlyApplySearchReplaceBlocks({ uri, searchReplaceBlocks })
 
-				// at end, get lint errors
-				await timeout(2000)
+				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
 				return { result: { lintErrors } }
 			},
@@ -3306,10 +3451,38 @@ export class ToolsService implements IToolsService {
 			// ---
 			run_command: async ({ command, cwd, terminalId }) => {
 				const resolvedCwd = resolveCwdUri(cwd, workspaceContextService)
-				// Wrap command for safe execution on Windows PowerShell
-				const wrappedCommand = wrapCommandForShell(command)
-				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, { type: 'temporary', cwd: resolvedCwd?.fsPath ?? cwd, terminalId })
-				return { result: resPromise, interruptTool: interrupt }
+				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
+
+				// Ultra-fast native main-process execution (~25-80ms vs ~2.5s PTY launch), with automatic fallback to TerminalToolService
+				const runFastOrFallback = async (): Promise<{ result: string; resolveReason: { type: 'done'; exitCode: number } | { type: 'timeout' } }> => {
+					try {
+						const fastRes = await kodiaOpsService.execFastCommand({
+							execId: terminalId,
+							command,
+							cwd: cwdPath,
+							inactiveTimeoutMs: MAX_TERMINAL_INACTIVE_TIME * 1000,
+						})
+						if (fastRes && typeof fastRes.exitCode === 'number') {
+							const formatted = `$ ${command}\n${fastRes.output}`
+							return {
+								result: formatted,
+								resolveReason: fastRes.timedOut ? { type: 'timeout' } : { type: 'done', exitCode: fastRes.exitCode },
+							}
+						}
+					} catch {
+						// Fallback to integrated VS Code PTY if main-process ops channel is unavailable (e.g. unit test mocks)
+					}
+					const wrappedCommand = wrapCommandForShell(command)
+					const { resPromise } = await this.terminalToolService.runCommand(wrappedCommand, { type: 'temporary', cwd: cwdPath ?? null, terminalId })
+					return await resPromise
+				}
+
+				return {
+					result: runFastOrFallback(),
+					interruptTool: () => {
+						void kodiaOpsService.cancelFastCommand(terminalId).catch(() => { })
+					},
+				}
 			},
 			run_persistent_command: async ({ command, persistentTerminalId }) => {
 				// Wrap command for safe execution on Windows PowerShell
@@ -5090,45 +5263,100 @@ export class ToolsService implements IToolsService {
 				return { result: { uri, applied } }
 			},
 			execute_notebook_cell: async ({ uri, cell_index, kernel_id }) => {
-				// Get the notebook model
-				await voidModelService.initializeModel(uri)
-				const { model } = await voidModelService.getModelSafe(uri)
-				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
-				const content = model.getValue(EndOfLinePreference.LF)
-				let notebook: any
-				try {
-					notebook = JSON.parse(content)
-				} catch (e) {
-					throw new Error(`Notebook is not valid JSON.`)
-				}
-				if (!notebook.cells || !Array.isArray(notebook.cells) || cell_index < 0 || cell_index >= notebook.cells.length) {
-					throw new Error(`Invalid cell index: ${cell_index}`)
-				}
-				const cell = notebook.cells[cell_index]
-				if (cell.cell_type !== 'code') {
-					throw new Error(`Cell ${cell_index} is not a code cell.`)
-				}
-				// Execute the cell using the notebook execution service
 				const startTime = Date.now()
+				let resolvedRef: { object: { notebook: any }; dispose(): void } | undefined
 				try {
-					// Get the notebook editor model
-					const notebookModel = await this.notebookService.getNotebookTextModel(uri)
-					if (!notebookModel) throw new Error('Notebook model not found')
+					let notebookModel = this.notebookService.getNotebookTextModel(uri)
+					if (!notebookModel) {
+						try {
+							const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+							resolvedRef = await resolver.resolve(uri, 'jupyter-notebook') as any
+							notebookModel = resolvedRef?.object?.notebook
+						} catch {
+							// fall through to check notebookModel
+						}
+					}
+					if (!notebookModel) {
+						throw new Error(`Notebook model could not be opened for ${uri.fsPath}. Ensure the file is a valid .ipynb notebook.`)
+					}
+					if (cell_index < 0 || cell_index >= notebookModel.cells.length) {
+						throw new Error(`Invalid cell index: ${cell_index} (notebook has ${notebookModel.cells.length} cells)`)
+					}
 					const cellModel = notebookModel.cells[cell_index]
-					if (!cellModel) throw new Error('Cell not found')
-					// Execute the cell
-					await this.notebookExecutionService.executeNotebookCells(notebookModel, [cellModel], undefined as any)
-					// Get the updated cell outputs
+					if (!cellModel) throw new Error(`Cell ${cell_index} not found`)
+
+					// Ensure a matching kernel is selected (respecting explicit kernel_id if provided)
+					const matchResult = this.notebookKernelService.getMatchingKernel(notebookModel)
+					const allKernels = [
+						...(matchResult.selected ? [matchResult.selected] : []),
+						...(matchResult.suggestions || []),
+						...(matchResult.all || []),
+					]
+					if (kernel_id) {
+						const requested = allKernels.find(k => k.id === kernel_id || k.label === kernel_id)
+						if (requested) {
+							this.notebookKernelService.selectKernelForNotebook(requested, notebookModel)
+						}
+					} else if (!matchResult.selected && allKernels.length > 0) {
+						this.notebookKernelService.selectKernelForNotebook(allKernels[0], notebookModel)
+					}
+
+					const contextKeyService = instantiationService.invokeFunction(a => a.get(IContextKeyService))
+					await this.notebookExecutionService.executeNotebookCells(notebookModel, [cellModel], contextKeyService)
+
 					const updatedCell = notebookModel.cells[cell_index]
-					const outputs = updatedCell?.outputs || []
+					const rawOutputs = updatedCell?.outputs || []
+					let cellError: string | undefined
+					const formattedOutputs: NotebookCellOutput[] = rawOutputs.map((out: any) => {
+						const items = Array.isArray(out.outputs) ? out.outputs : []
+						const firstItem = items[0]
+						const mime = firstItem?.mime ?? 'text/plain'
+						const textVal = firstItem?.data ? firstItem.data.toString() : ''
+						if (mime === 'application/vnd.code.notebook.error') {
+							try {
+								const parsed = JSON.parse(textVal)
+								cellError = `${parsed.name || 'Error'}: ${parsed.message || textVal}`
+								return { output_type: 'error', ename: parsed.name, evalue: parsed.message, traceback: parsed.stack ? String(parsed.stack).split('\n') : [] } as any
+							} catch {
+								cellError = textVal
+								return { output_type: 'error', ename: 'Error', evalue: textVal, traceback: [textVal] } as any
+							}
+						}
+						if (mime === 'application/vnd.code.notebook.stdout') {
+							return { output_type: 'stream', name: 'stdout', text: textVal } as any
+						}
+						if (mime === 'application/vnd.code.notebook.stderr') {
+							return { output_type: 'stream', name: 'stderr', text: textVal } as any
+						}
+						const dataObj: Record<string, string> = {}
+						for (const it of items) {
+							if (it.mime === 'image/png') {
+								dataObj[it.mime] = `<image/png ${it.data?.byteLength ?? 0} bytes>`
+							} else {
+								dataObj[it.mime] = it.data ? it.data.toString() : ''
+							}
+						}
+						return { output_type: 'display_data', data: dataObj } as any
+					})
+
 					const executionTime = Date.now() - startTime
-					return { result: { cell_index: cell_index, outputs: outputs as any, execution_time: executionTime, success: true } }
-				} catch (e) {
-					return { result: { cell_index: cell_index, outputs: [], execution_time: Date.now() - startTime, success: false, error: e.message } }
+					return {
+						result: {
+							cell_index,
+							outputs: formattedOutputs,
+							execution_time: executionTime,
+							success: !cellError,
+							...(cellError ? { error: cellError } : {}),
+						}
+					}
+				} catch (e: any) {
+					return { result: { cell_index, outputs: [], execution_time: Date.now() - startTime, success: false, error: e?.message ?? String(e) } }
+				} finally {
+					resolvedRef?.dispose()
 				}
 			},
 			execute_notebook: async ({ uri, kernel_id, cell_indices }) => {
-				// Execute multiple cells or all code cells
+				// Execute multiple cells or all code cells in the notebook
 				await voidModelService.initializeModel(uri)
 				const { model } = await voidModelService.getModelSafe(uri)
 				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
@@ -5149,9 +5377,8 @@ export class ToolsService implements IToolsService {
 				for (const idx of codeCellIndices) {
 					const startTime = Date.now()
 					try {
-						// Execute each cell
-						const cellResult = await this.callTool.execute_notebook_cell({ uri, cell_index: idx, kernel_id: kernel_id })
-						const cellResultData = cellResult.result as { outputs: NotebookCellOutput[]; execution_time: number; success: boolean; error?: string }
+						const cellResult = await this.callTool.execute_notebook_cell({ uri, cell_index: idx, kernel_id })
+						const cellResultData = await cellResult.result as { outputs: NotebookCellOutput[]; execution_time: number; success: boolean; error?: string }
 						results.push({
 							cell_index: idx,
 							outputs: cellResultData.outputs,
@@ -5159,53 +5386,66 @@ export class ToolsService implements IToolsService {
 							success: cellResultData.success,
 							error: cellResultData.error
 						})
-					} catch (e) {
+					} catch (e: any) {
 						results.push({
 							cell_index: idx,
 							outputs: [],
 							execution_time: Date.now() - startTime,
 							success: false,
-							error: e.message
+							error: e?.message ?? String(e)
 						})
 					}
 				}
 				return { result: { results } }
 			},
 			select_notebook_kernel: async ({ uri, kernel_id }): Promise<{ result: { kernel_id: string } }> => {
-				// Set the kernel for the notebook by updating the notebook metadata
-				const notebookModel = await this.notebookService.getNotebookTextModel(uri)
-				if (!notebookModel) throw new Error('Notebook model not found')
-				
-				// Update the notebook metadata with the kernel specification
-				const metadata = { ...notebookModel.metadata }
-				const existingKernelSpec = (metadata.kernelspec as Record<string, unknown>) || {}
-				metadata.kernelspec = {
-					...existingKernelSpec,
-					name: kernel_id,
-					display_name: kernel_id,
-					language: 'python'
+				let resolvedRef: { object: { notebook: any }; dispose(): void } | undefined
+				try {
+					let notebookModel = this.notebookService.getNotebookTextModel(uri)
+					if (!notebookModel) {
+						const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+						resolvedRef = await resolver.resolve(uri, 'jupyter-notebook') as any
+						notebookModel = resolvedRef?.object?.notebook
+					}
+					if (!notebookModel) throw new Error('Notebook model not found')
+
+					const matchResult = this.notebookKernelService.getMatchingKernel(notebookModel)
+					const allKernels = [
+						...(matchResult.selected ? [matchResult.selected] : []),
+						...(matchResult.suggestions || []),
+						...(matchResult.all || []),
+					]
+					const matched = allKernels.find(k => k.id === kernel_id || k.label === kernel_id) ?? allKernels[0]
+					if (matched) {
+						this.notebookKernelService.selectKernelForNotebook(matched, notebookModel)
+					}
+
+					const metadata = { ...notebookModel.metadata }
+					const existingKernelSpec = (metadata.kernelspec as Record<string, unknown>) || {}
+					metadata.kernelspec = {
+						...existingKernelSpec,
+						name: matched?.id ?? kernel_id,
+						display_name: matched?.label ?? kernel_id,
+						language: 'python'
+					}
+					notebookModel.metadata = metadata
+
+					return { result: { kernel_id: matched?.id ?? kernel_id } }
+				} finally {
+					resolvedRef?.dispose()
 				}
-				
-				// Update the notebook metadata directly on the model
-				notebookModel.metadata = metadata
-				
-				return { result: { kernel_id: kernel_id } }
 			},
 			list_notebook_kernels: async ({ uri }) => {
-				let notebookModel: any = null
-				if (uri) {
-					notebookModel = await this.notebookService.getNotebookTextModel(uri)
-				}
-				const matchResult = await this.notebookKernelService.getMatchingKernel(notebookModel)
-				// Combine all kernels from suggestions, all, and selected
+				const openModel = uri ? this.notebookService.getNotebookTextModel(uri) : undefined
+				const target = openModel ?? { uri: uri ?? URI.file('/notebook.ipynb'), notebookType: 'jupyter-notebook' }
+				const matchResult = this.notebookKernelService.getMatchingKernel(target)
 				const allKernels = [
+					...(matchResult.selected ? [matchResult.selected] : []),
 					...(matchResult.suggestions || []),
 					...(matchResult.all || []),
-					...(matchResult.selected ? [matchResult.selected] : []),
 					...(matchResult.hidden || [])
 				]
-				// Deduplicate by id
-				const uniqueKernels = new Map()
+				const uniqueKernels = new Map<string, any>()
 				for (const k of allKernels) {
 					if (!uniqueKernels.has(k.id)) {
 						uniqueKernels.set(k.id, k)
@@ -5216,7 +5456,7 @@ export class ToolsService implements IToolsService {
 					name: k.label,
 					description: k.description,
 					supported_languages: k.supportedLanguages,
-					is_preferred: k.isPreferred
+					is_preferred: Boolean(matchResult.selected?.id === k.id || k.isPreferred)
 				}))
 				return { result: { kernels: kernelInfos } }
 			},
@@ -5284,7 +5524,12 @@ export class ToolsService implements IToolsService {
 		// given to the LLM after the call for successful tool calls
 		this.stringOfResult = {
 			read_file: (params, result) => {
-				return `${params.uri.fsPath}\n\`\`\`\n${result.fileContents}\n\`\`\`${nextPageStr(result.hasNextPage)}${result.hasNextPage ? `\nMore info because truncated: this file has ${result.totalNumLines} lines, or ${result.totalFileLen} characters.` : ''}`
+				const baseLine = params.startLine ?? 1
+				const rawLines = result.fileContents.split('\n')
+				const numbered = rawLines.map((ln, idx) => `${baseLine + idx}| ${ln}`).join('\n')
+				const endLineShown = baseLine + rawLines.length - 1
+				const header = `${params.uri.fsPath} (showing lines ${baseLine}-${endLineShown} of ${result.totalNumLines})`
+				return `${header}\n\`\`\`\n${numbered}\n\`\`\`${nextPageStr(result.hasNextPage)}${result.hasNextPage ? `\nMore info because truncated: this file has ${result.totalNumLines} lines, or ${result.totalFileLen} characters.` : ''}`
 			},
 			ls_dir: (params, result) => {
 				const dirTreeStr = stringifyDirectoryTree1Deep(params, result)
@@ -5297,16 +5542,48 @@ export class ToolsService implements IToolsService {
 				return result.uris.map(uri => uri.fsPath).join('\n') + nextPageStr(result.hasNextPage)
 			},
 			search_for_files: (params, result) => {
+				if (result.matches && result.matches.length > 0) {
+					const byFile = new Map<string, Array<{ line: number; preview: string }>>()
+					for (const m of result.matches) {
+						const key = m.uri.fsPath
+						const list = byFile.get(key) ?? []
+						list.push({ line: m.line, preview: m.preview })
+						byFile.set(key, list)
+					}
+					const out: string[] = []
+					for (const uri of result.uris) {
+						const hits = byFile.get(uri.fsPath)
+						if (hits && hits.length > 0) {
+							out.push(uri.fsPath)
+							for (const h of hits) {
+								out.push(`  L${h.line}: ${h.preview}`)
+							}
+						} else {
+							out.push(uri.fsPath)
+						}
+					}
+					return out.join('\n') + nextPageStr(result.hasNextPage)
+				}
 				return result.uris.map(uri => uri.fsPath).join('\n') + nextPageStr(result.hasNextPage)
 			},
 			search_in_file: (params, result) => {
 				const { model } = voidModelService.getModel(params.uri)
 				if (!model) return '<Error getting string of result>'
-				const lines = result.lines.map(n => {
-					const lineContent = model.getValueInRange({ startLineNumber: n, startColumn: 1, endLineNumber: n, endColumn: Number.MAX_SAFE_INTEGER }, EndOfLinePreference.LF)
-					return `Line ${n}:\n\`\`\`\n${lineContent}\n\`\`\``
-				}).join('\n\n');
-				return lines;
+				if (result.lines.length === 0) return `No matches found in ${params.uri.fsPath}.`
+				const totalLines = model.getLineCount()
+				const prefix = result.caseInsensitiveFallback ? '(matched case-insensitively)\n' : ''
+				const blocks = result.lines.slice(0, 60).map(n => {
+					const start = Math.max(1, n - 1)
+					const end = Math.min(totalLines, n + 1)
+					const ctx: string[] = []
+					for (let ln = start; ln <= end; ln++) {
+						const text = model.getLineContent(ln)
+						ctx.push(`${ln === n ? '>' : ' '} L${ln}: ${text}`)
+					}
+					return ctx.join('\n')
+				}).join('\n---\n');
+				const tail = result.lines.length > 60 ? `\n... (${result.lines.length - 60} more matching lines)` : ''
+				return `${prefix}${blocks}${tail}`;
 			},
 			go_to_definition: (params, result) => {
 				if (!result.hasLanguageServer) return noLanguageServerMessage('definitions for this file type')
@@ -6533,6 +6810,34 @@ export class ToolsService implements IToolsService {
 
 		}
 	}
+	private async _waitForFreshLintErrors(uri: URI, maxWaitMs = 550): Promise<void> {
+		// Skip waiting completely for non-code / plain-text files that never produce language-server diagnostics
+		const lowerPath = uri.path.toLowerCase()
+		if (/\.(?:md|markdown|txt|log|csv|tsv|env|gitignore|dockerignore|lock|svg|png|jpg|jpeg|gif|webp|ico|pdf|toml|ini|conf|cfg)$/.test(lowerPath)) {
+			return
+		}
+		if (!this.voidSettingsService.state.globalSettings.includeToolLintErrors) {
+			return
+		}
+		// Resolve immediately once the language server publishes fresh markers for this URI, or after maxWaitMs
+		await new Promise<void>(resolve => {
+			let settled = false
+			const finish = () => {
+				if (settled) return
+				settled = true
+				clearTimeout(timer)
+				sub.dispose()
+				resolve()
+			}
+			const sub = this.markerService.onMarkerChanged(uris => {
+				if (uris.some(u => u.toString() === uri.toString())) {
+					setTimeout(finish, 40)
+				}
+			})
+			const timer = setTimeout(finish, maxWaitMs)
+		})
+	}
+
 	private _getLintErrors(uri: URI): { lintErrors: LintErrorItem[] | null } {
 		const lintErrors = this.markerService
 			.read({ resource: uri })

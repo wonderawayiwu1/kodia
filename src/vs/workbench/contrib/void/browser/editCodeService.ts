@@ -109,6 +109,73 @@ const removeWhitespaceExceptNewlines = (str: string): string => {
 
 
 
+const findClosestSnippetHint = (target: string, fileLines: string[]): string => {
+	const targetTokens = new Set(target.toLowerCase().split(/[^a-z0-9_]+/).filter(t => t.length >= 2));
+	if (targetTokens.size === 0 || fileLines.length === 0) return '';
+	const winSize = Math.max(3, Math.min(12, target.split('\n').length + 2));
+	let bestScore = 0;
+	let bestStart = 0;
+	for (let i = 0; i < fileLines.length; i++) {
+		const end = Math.min(fileLines.length, i + winSize);
+		const windowText = fileLines.slice(i, end).join(' ').toLowerCase();
+		let score = 0;
+		for (const tok of targetTokens) {
+			if (windowText.includes(tok)) score++;
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			bestStart = i;
+		}
+	}
+	if (bestScore < Math.max(2, Math.floor(targetTokens.size * 0.35))) return '';
+	const end = Math.min(fileLines.length, bestStart + winSize);
+	const preview = fileLines.slice(bestStart, end).map((ln, idx) => `${bestStart + idx + 1}| ${ln}`).join('\n');
+	return `\n\nClosest matching region in file (lines ${bestStart + 1}-${end}):\n${preview}`;
+};
+
+const findTrimmedLinesMatch = (searchText: string, fileLines: string[]): { startLine: number; endLine: number; baseIndent: string; searchIndent: string } | 'Not found' | 'Not unique' => {
+	const searchLines = searchText.replace(/\r\n/g, '\n').split('\n');
+	if (searchLines.length === 0) return 'Not found';
+	const trimmedSearch = searchLines.map(l => l.trim());
+	if (trimmedSearch.every(l => l === '')) return 'Not found';
+
+	const matches: number[] = [];
+	const limit = fileLines.length - searchLines.length;
+	for (let i = 0; i <= limit; i++) {
+		let ok = true;
+		for (let j = 0; j < searchLines.length; j++) {
+			if (fileLines[i + j].trim() !== trimmedSearch[j]) {
+				ok = false;
+				break;
+			}
+		}
+		if (ok) {
+			matches.push(i);
+			if (matches.length > 1) return 'Not unique';
+		}
+	}
+	if (matches.length === 0) return 'Not found';
+
+	const startLine = matches[0];
+	const firstNonEmptyIdx = searchLines.findIndex(l => l.trim().length > 0);
+	const fileFirstLine = fileLines[startLine + (firstNonEmptyIdx >= 0 ? firstNonEmptyIdx : 0)] ?? '';
+	const searchFirstLine = searchLines[firstNonEmptyIdx >= 0 ? firstNonEmptyIdx : 0] ?? '';
+	const baseIndent = /^[\t ]*/.exec(fileFirstLine)?.[0] ?? '';
+	const searchIndent = /^[\t ]*/.exec(searchFirstLine)?.[0] ?? '';
+	return { startLine, endLine: startLine + searchLines.length - 1, baseIndent, searchIndent };
+};
+
+const reindentReplacement = (replacement: string, searchIndent: string, baseIndent: string): string => {
+	if (searchIndent === baseIndent) return replacement;
+	return replacement.split('\n').map(line => {
+		if (!line.trim()) return line;
+		if (searchIndent && line.startsWith(searchIndent)) {
+			return baseIndent + line.slice(searchIndent.length);
+		}
+		return baseIndent + line;
+	}).join('\n');
+};
+
 // finds block.orig in fileContents and return its range in file
 // startingAtLine is 1-indexed and inclusive
 // returns 1-indexed lines
@@ -1679,26 +1746,41 @@ export class EditCodeService extends Disposable implements IEditCodeService {
 
 		const replacements: { origStart: number; origEnd: number; block: ExtractedSearchReplaceBlock }[] = []
 		for (const b of blocks) {
-			// An exact match is replaced exactly: character range, not the lines around it (widening it to whole
-			// lines dropped the rest of a partially matched line), and it must be unique (the first of several
-			// occurrences was edited silently).
-			const exactIdx = b.orig ? modelStr.indexOf(b.orig) : -1
+			const normalizedOrig = b.orig.replace(/\r\n/g, '\n')
+			const normalizedFinal = b.final.replace(/\r\n/g, '\n')
+
+			// Tier 1: Exact character-accurate match (must be unique)
+			const exactIdx = normalizedOrig ? modelStr.indexOf(normalizedOrig) : -1
 			if (exactIdx !== -1) {
-				if (modelStr.indexOf(b.orig, exactIdx + 1) !== -1)
+				if (modelStr.indexOf(normalizedOrig, exactIdx + 1) !== -1)
 					throw new Error(this._errContentOfInvalidStr('Not unique', b.orig))
-				replacements.push({ origStart: exactIdx, origEnd: exactIdx + b.orig.length - 1, block: b })
+				replacements.push({ origStart: exactIdx, origEnd: exactIdx + normalizedOrig.length - 1, block: { ...b, orig: normalizedOrig, final: normalizedFinal } })
 				continue
 			}
 
-			const res = findTextInCode(b.orig, modelStr, true, { returnType: 'lines' })
-			if (typeof res === 'string')
-				throw new Error(this._errContentOfInvalidStr(res, b.orig))
+			// Tier 2: Indentation-tolerant line-trimmed match (preserves file's real base indentation)
+			const trimmedMatch = findTrimmedLinesMatch(normalizedOrig, modelStrLines)
+			if (typeof trimmedMatch !== 'string') {
+				const { startLine, endLine, baseIndent, searchIndent } = trimmedMatch
+				const origStart = (startLine !== 0 ? modelStrLines.slice(0, startLine).join('\n') + '\n' : '').length
+				const origEnd = modelStrLines.slice(0, endLine + 1).join('\n').length - 1
+				const adjustedFinal = reindentReplacement(normalizedFinal, searchIndent, baseIndent)
+				replacements.push({ origStart, origEnd, block: { ...b, orig: normalizedOrig, final: adjustedFinal } })
+				continue
+			}
+
+			// Tier 3: Whitespace-normalized fallback
+			const res = findTextInCode(normalizedOrig, modelStr, true, { returnType: 'lines' })
+			if (typeof res === 'string') {
+				const hint = res === 'Not found' ? findClosestSnippetHint(normalizedOrig, modelStrLines) : ''
+				throw new Error(this._errContentOfInvalidStr(res, b.orig) + hint)
+			}
 			let [startLine, endLine] = res
 			startLine -= 1 // 0-index
 			endLine -= 1
 			// whitespace-insensitive match: lines are replaced whole, so the match must cover them whole
-			if (removeWhitespaceExceptNewlines(modelStrLines.slice(startLine, endLine + 1).join('\n')) !== removeWhitespaceExceptNewlines(b.orig))
-				throw new Error(this._errContentOfInvalidStr('Partial line', b.orig))
+			if (removeWhitespaceExceptNewlines(modelStrLines.slice(startLine, endLine + 1).join('\n')) !== removeWhitespaceExceptNewlines(normalizedOrig))
+				throw new Error(this._errContentOfInvalidStr('Partial line', b.orig) + findClosestSnippetHint(normalizedOrig, modelStrLines))
 
 			// including newline before start
 			const origStart = (startLine !== 0 ?
@@ -1708,7 +1790,7 @@ export class EditCodeService extends Disposable implements IEditCodeService {
 			// including endline at end
 			const origEnd = modelStrLines.slice(0, endLine + 1).join('\n').length - 1
 
-			replacements.push({ origStart, origEnd, block: b });
+			replacements.push({ origStart, origEnd, block: { ...b, orig: normalizedOrig, final: normalizedFinal } });
 		}
 		// sort in increasing order
 		replacements.sort((a, b) => a.origStart - b.origStart)

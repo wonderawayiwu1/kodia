@@ -14,6 +14,12 @@
   "contributes": {
     "themes": [
       {
+        "id": "Antigravity Dark",
+        "label": "Antigravity Dark (Kodia Default)",
+        "uiTheme": "vs-dark",
+        "path": "./themes/antigravity-dark.json"
+      },
+      {
         "id": "Kodia Obsidian",
         "label": "Kodia Obsidian (Dark)",
         "uiTheme": "vs-dark",

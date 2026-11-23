@@ -236,7 +236,7 @@ export const LoadTestDashboard: React.FC<{
 						<div className='flex items-center justify-between text-xs'>
 							<span className='font-medium text-void-fg-1'>Measured RPS & P95 Latency Over Time</span>
 							<div className='flex items-center gap-2'>
-								<KodiaBadge tone={latest.passedThresholds ? 'success' : 'error'}>
+								<KodiaBadge tone={latest.passedThresholds ? 'success' : 'danger'}>
 									{latest.passedThresholds ? 'Thresholds Passed' : 'Thresholds Failed'}
 								</KodiaBadge>
 								{latest.generatorSaturated && <KodiaBadge tone='warning'>Generator Saturated</KodiaBadge>}
@@ -293,14 +293,14 @@ export const SecurityAndReadinessView: React.FC<{
 					<div className='space-y-2.5'>
 						<KodiaCard className='p-3 flex items-center justify-between'>
 							<div className='text-xs text-void-fg-1'>{securityReport.summary}</div>
-							<KodiaBadge tone={securityReport.score >= 85 ? 'success' : securityReport.score >= 60 ? 'warning' : 'error'}>
+							<KodiaBadge tone={securityReport.score >= 85 ? 'success' : securityReport.score >= 60 ? 'warning' : 'danger'}>
 								Score: {securityReport.score}/100
 							</KodiaBadge>
 						</KodiaCard>
 						{securityReport.findings.map(f => (
 							<KodiaCard key={f.id} className='p-3 space-y-1'>
 								<div className='flex items-center gap-2 text-xs font-medium text-void-fg-1'>
-									<KodiaBadge tone={f.severity === 'critical' || f.severity === 'high' ? 'error' : 'warning'}>{f.severity.toUpperCase()}</KodiaBadge>
+									<KodiaBadge tone={f.severity === 'critical' || f.severity === 'high' ? 'danger' : 'warning'}>{f.severity.toUpperCase()}</KodiaBadge>
 									<KodiaBadge tone='neutral'>{f.confidence}</KodiaBadge>
 									<span>{f.title}</span>
 								</div>
@@ -332,7 +332,7 @@ export const SecurityAndReadinessView: React.FC<{
 				<div className='space-y-3'>
 					<KodiaCard className='p-3 flex items-center justify-between'>
 						<div className='text-xs font-medium text-void-fg-1'>{readinessReport.summary}</div>
-						<KodiaBadge tone={readinessReport.overallStatus === 'passed' ? 'success' : readinessReport.overallStatus === 'failed' ? 'error' : 'warning'}>
+						<KodiaBadge tone={readinessReport.overallStatus === 'passed' ? 'success' : readinessReport.overallStatus === 'failed' ? 'danger' : 'warning'}>
 							{readinessReport.overallStatus.toUpperCase()} · {readinessReport.overallScore}/100
 						</KodiaBadge>
 					</KodiaCard>
@@ -397,7 +397,7 @@ export const RuntimesTopologyView: React.FC<{
 						<div className='flex items-center justify-between gap-2'>
 							<div className='flex items-center gap-2 text-xs'>
 								<span className='font-semibold text-void-fg-1'>{rt.name}</span>
-								<KodiaBadge tone={rt.status === 'ready' ? 'success' : rt.status === 'failed' ? 'error' : 'neutral'}>{rt.status}</KodiaBadge>
+								<KodiaBadge tone={rt.status === 'ready' ? 'success' : rt.status === 'failed' ? 'danger' : 'neutral'}>{rt.status}</KodiaBadge>
 								{rt.baseUrl && <span className='font-mono text-[11px] text-sky-400'>{rt.baseUrl}</span>}
 								{rt.pid && <span className='text-[10px] text-void-fg-3'>PID {rt.pid}</span>}
 							</div>

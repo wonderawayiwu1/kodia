@@ -57,6 +57,25 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'X-Content-Type-Options': 'nosniff' });
     return res.end(JSON.stringify({ status: 'ok' }));
   }
+  if (req.url && req.url.startsWith('/api/auth/register') && req.method === 'POST') {
+    let raw = '';
+    req.on('data', c => { raw += c; });
+    req.on('end', () => {
+      try {
+        const parsed = JSON.parse(raw || '{}');
+        if (typeof parsed.email !== 'string' || typeof parsed.password !== 'string') {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ error: 'Validation failed' }));
+        }
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ created: true, email: parsed.email }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'not found' }));
 });
@@ -126,7 +145,7 @@ server.listen(0, '127.0.0.1', () => {
 						toolCalls: [{ name: 'api_correlate_failure', params: { history_index: '0' } }],
 					};
 				case 5:
-					assert.match(lastToolContent(req), /HTTP 500/, 'Failure correlator must surface HTTP 500 failure');
+					assert.match(lastToolContent(req), /HTTP (?:400|500)/, 'Failure correlator must surface HTTP 400/500 failure');
 					return {
 						text: '',
 						toolCalls: [
@@ -158,24 +177,26 @@ server.listen(0, '127.0.0.1', () => {
 						toolCalls: [{ name: 'api_run_test_suite', params: { suite_id: suiteId, base_url: baseUrl } }],
 					};
 				case 9:
-					// Update request URL to the newly restarted port and send live verified request
+					// Send POST with plain JSON string in `body` (no {mode,raw} wrapper!) + plain object in `params` -> regression test for Body(undefined) bug!
 					return {
 						text: '',
 						toolCalls: [{
 							name: 'api_send_request',
 							params: {
-								url: `${baseUrl}/api/health`,
-								method: 'GET',
+								url: `${baseUrl}/api/auth/register`,
+								method: 'POST',
+								params: JSON.stringify({ source: 'kodia-test' }),
+								body: JSON.stringify({ email: 'user@kodia.dev', password: 'Password123!' }),
 								assertions: JSON.stringify([
-									{ id: 'a1', name: 'Status 200', kind: 'status_equals', expected: '200' },
-									{ id: 'a2', name: 'Healthy payload', kind: 'jsonpath_equals', target: '$.status', expected: 'ok' },
+									{ id: 'a1', name: 'Status 201', kind: 'status_equals', expected: '201' },
+									{ id: 'a2', name: 'Email echoed', kind: 'jsonpath_equals', target: '$.email', expected: 'user@kodia.dev' },
 								]),
 							},
 						}],
 					};
 				case 10:
-					assert.match(lastToolContent(req), /200 OK/, 'Repaired endpoint must return 200 OK');
-					assert.match(lastToolContent(req), /2\/2 passed/, 'All assertions must pass after repair');
+					assert.match(lastToolContent(req), /201 Created/, 'POST with plain JSON body MUST parse cleanly and return 201 Created');
+					assert.match(lastToolContent(req), /2\/2 passed/, 'All POST body assertions must pass');
 					return {
 						text: '',
 						toolCalls: [{

@@ -23,6 +23,7 @@ import {
 	Trash2,
 	XCircle,
 } from 'lucide-react';
+import '../styles.css';
 import { useAccessor, useIsDark } from '../util/services.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import { CorrectnessWorkbenchState } from '../../../correctnessService.js';
@@ -78,7 +79,7 @@ function readinessMeta(outcome: ReleaseReadinessOutcome): { label: string; tone:
 	}
 }
 
-export const CorrectnessHubApp: React.FC = () => {
+export const CorrectnessHubApp = () => {
 	const isDark = useIsDark();
 	const accessor = useAccessor();
 	const correctnessService = accessor.get('ICorrectnessService');
@@ -175,7 +176,7 @@ export const CorrectnessHubApp: React.FC = () => {
 	}), [runAction, toolsService]);
 
 	const handleAddSuppression = useCallback(() => {
-		if (!suppressTarget || !suppressReason.trim()) { return; }
+		if (!correctnessMain || !suppressTarget || !suppressReason.trim()) { return; }
 		void runAction('Saving suppression', async () => {
 			const list = await correctnessMain.manageSuppressions(correctnessService.getWorkspaceRoot(), {
 				action: 'add',
@@ -191,6 +192,7 @@ export const CorrectnessHubApp: React.FC = () => {
 	}, [suppressTarget, suppressReason, runAction, correctnessMain, correctnessService]);
 
 	const handleRemoveSuppression = useCallback((id: string) => runAction('Removing suppression', async () => {
+		if (!correctnessMain) { return; }
 		const list = await correctnessMain.manageSuppressions(correctnessService.getWorkspaceRoot(), {
 			action: 'remove',
 			id,

@@ -663,8 +663,8 @@ export type BuiltinToolResultType = {
 	'ls_dir': { children: ShallowDirectoryItem[] | null, hasNextPage: boolean, hasPrevPage: boolean, itemsRemaining: number },
 	'get_dir_tree': { str: string, },
 	'search_pathnames_only': { uris: URI[], hasNextPage: boolean },
-	'search_for_files': { uris: URI[], hasNextPage: boolean },
-	'search_in_file': { lines: number[]; },
+	'search_for_files': { uris: URI[], hasNextPage: boolean, matches?: Array<{ uri: URI, line: number, preview: string }> },
+	'search_in_file': { lines: number[], caseInsensitiveFallback?: boolean },
 	// hasLanguageServer: false when no language server answers this request for the file / workspace
 	'go_to_definition': { locations: CodeLocation[], hasLanguageServer: boolean },
 	'find_references': { locations: CodeLocation[], totalCount: number, hasLanguageServer: boolean },

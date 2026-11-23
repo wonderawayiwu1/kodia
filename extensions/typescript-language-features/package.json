@@ -1589,19 +1589,19 @@
           },
           "js/ts.implicitProjectConfig.strictNullChecks": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%configuration.implicitProjectConfig.strictNullChecks%",
             "scope": "window"
           },
           "js/ts.implicitProjectConfig.strictFunctionTypes": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%configuration.implicitProjectConfig.strictFunctionTypes%",
             "scope": "window"
           },
           "js/ts.implicitProjectConfig.strict": {
             "type": "boolean",
-            "default": true,
+            "default": false,
             "markdownDescription": "%configuration.implicitProjectConfig.strict%",
             "scope": "window"
           }

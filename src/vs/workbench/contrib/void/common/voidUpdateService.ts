@@ -7,13 +7,16 @@ import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js';
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js';
-import { VoidCheckUpdateRespose } from './voidUpdateServiceTypes.js';
+import { KodiaApplyUpdateResult, KodiaUpdateStatus, VoidCheckUpdateRespose } from './voidUpdateServiceTypes.js';
 
 
 
 export interface IVoidUpdateService {
 	readonly _serviceBrand: undefined;
 	check: (explicit: boolean) => Promise<VoidCheckUpdateRespose>;
+	checkLocalOnly: () => Promise<VoidCheckUpdateRespose>;
+	getUpdateStatus: () => Promise<KodiaUpdateStatus>;
+	restartAndApplyUpdate: () => Promise<KodiaApplyUpdateResult>;
 }
 
 
@@ -29,7 +32,7 @@ export class VoidUpdateService implements IVoidUpdateService {
 	constructor(
 		@IMainProcessService mainProcessService: IMainProcessService, // (only usable on client side)
 	) {
-		// creates an IPC proxy to use metricsMainService.ts
+		// creates an IPC proxy to use voidUpdateMainService.ts
 		this.voidUpdateService = ProxyChannel.toService<IVoidUpdateService>(mainProcessService.getChannel('void-channel-update'));
 	}
 
@@ -38,6 +41,18 @@ export class VoidUpdateService implements IVoidUpdateService {
 	check: IVoidUpdateService['check'] = async (explicit) => {
 		const res = await this.voidUpdateService.check(explicit)
 		return res
+	}
+
+	checkLocalOnly: IVoidUpdateService['checkLocalOnly'] = async () => {
+		return await this.voidUpdateService.checkLocalOnly()
+	}
+
+	getUpdateStatus: IVoidUpdateService['getUpdateStatus'] = async () => {
+		return await this.voidUpdateService.getUpdateStatus()
+	}
+
+	restartAndApplyUpdate: IVoidUpdateService['restartAndApplyUpdate'] = async () => {
+		return await this.voidUpdateService.restartAndApplyUpdate()
 	}
 }
 

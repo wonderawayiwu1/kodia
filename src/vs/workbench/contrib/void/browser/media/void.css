@@ -51,25 +51,24 @@
 	--scrollbar-horizontal-height: 6px;
 }
 
-/* Target both void-scope and all its descendants with scrollbars */
+/* Target both void-scope and all its descendants with sleek Antigravity-style translucent scrollbars */
 .void-scope,
 .void-scope * {
 	scrollbar-width: thin !important;
-	scrollbar-color: var(--void-bg-1) var(--void-bg-3) !important;
-	/* For Firefox */
+	scrollbar-color: rgba(160, 160, 170, 0.25) transparent !important;
 }
 
 .void-scope::-webkit-scrollbar,
 .void-scope *::-webkit-scrollbar {
-	width: var(--scrollbar-vertical-width) !important;
-	height: var(--scrollbar-horizontal-height) !important;
-	background-color: var(--void-bg-3) !important;
+	width: 6px !important;
+	height: 6px !important;
+	background-color: transparent !important;
 }
 
 .void-scope::-webkit-scrollbar-thumb,
 .void-scope *::-webkit-scrollbar-thumb {
-	background-color: var(--void-bg-1) !important;
-	border-radius: 4px !important;
+	background-color: rgba(160, 160, 170, 0.24) !important;
+	border-radius: 9999px !important;
 	border: none !important;
 	-webkit-box-shadow: none !important;
 	box-shadow: none !important;
@@ -77,25 +76,23 @@
 
 .void-scope::-webkit-scrollbar-thumb:hover,
 .void-scope *::-webkit-scrollbar-thumb:hover {
-	background-color: var(--void-bg-1) !important;
-	filter: brightness(1.1) !important;
+	background-color: rgba(180, 180, 190, 0.42) !important;
 }
 
 .void-scope::-webkit-scrollbar-thumb:active,
 .void-scope *::-webkit-scrollbar-thumb:active {
-	background-color: var(--void-bg-1) !important;
-	filter: brightness(1.2) !important;
+	background-color: rgba(200, 200, 210, 0.55) !important;
 }
 
 .void-scope::-webkit-scrollbar-track,
 .void-scope *::-webkit-scrollbar-track {
-	background-color: var(--void-bg-3) !important;
+	background-color: transparent !important;
 	border: none !important;
 }
 
 .void-scope::-webkit-scrollbar-corner,
 .void-scope *::-webkit-scrollbar-corner {
-	background-color: var(--void-bg-3) !important;
+	background-color: transparent !important;
 }
 
 /* Add void-scrollable-element styles to match */

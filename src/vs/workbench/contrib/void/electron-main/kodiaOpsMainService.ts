@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from '../../../../base/common/path.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { removeAnsiEscapeCodes } from '../../../../base/common/strings.js';
 import {
 	DbColumnInfo,
 	DbInspectReport,
@@ -18,6 +19,8 @@ import {
 	DockerStatusReport,
 	EnvInspectReport,
 	EnvToolchainEntry,
+	FastCommandRequest,
+	FastCommandResult,
 	IKodiaOpsMainService,
 	isReadOnlySqlQuery,
 	isValidDockerContainerName,
@@ -141,6 +144,138 @@ async function openSqliteDb(dbPath: string, readOnly: boolean): Promise<{
 
 export class KodiaOpsMainService extends Disposable implements IKodiaOpsMainService {
 	readonly _serviceBrand: undefined;
+	private readonly _activeCommands = new Map<string, { proc: cp.ChildProcess; cancel: () => void }>();
+
+	override dispose(): void {
+		for (const [, entry] of this._activeCommands) {
+			entry.cancel();
+		}
+		this._activeCommands.clear();
+		super.dispose();
+	}
+
+	async cancelFastCommand(execId: string): Promise<void> {
+		const entry = this._activeCommands.get(execId);
+		if (entry) {
+			entry.cancel();
+			this._activeCommands.delete(execId);
+		}
+	}
+
+	async execFastCommand(req: FastCommandRequest): Promise<FastCommandResult> {
+		const startedAt = Date.now();
+		const maxChars = (typeof req.maxChars === 'number' && Number.isFinite(req.maxChars) && req.maxChars > 1000)
+			? req.maxChars
+			: 50_000;
+		const inactiveTimeoutMs = (typeof req.inactiveTimeoutMs === 'number' && Number.isFinite(req.inactiveTimeoutMs) && req.inactiveTimeoutMs >= 1000)
+			? Math.min(req.inactiveTimeoutMs, 2_147_483_000)
+			: 120_000;
+
+		const cwd = req.cwd && fs.existsSync(req.cwd) ? req.cwd : undefined;
+		const maxRawBuffer = Math.max(maxChars * 4, 250_000);
+
+		const killTree = (proc: cp.ChildProcess) => {
+			if (!proc.pid) { return; }
+			try {
+				if (process.platform === 'win32') {
+					cp.spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).unref();
+				} else {
+					try { process.kill(-proc.pid, 'SIGKILL'); } catch { proc.kill('SIGKILL'); }
+				}
+			} catch {
+				try { proc.kill(); } catch { /* ignore */ }
+			}
+		};
+
+		return await new Promise<FastCommandResult>((resolve) => {
+			let settled = false;
+			let timedOut = false;
+			let output = '';
+			let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+
+			let proc: cp.ChildProcess;
+			try {
+				proc = cp.spawn(req.command, [], {
+					cwd,
+					shell: true,
+					windowsHide: true,
+					detached: process.platform !== 'win32',
+					stdio: ['ignore', 'pipe', 'pipe'],
+					env: {
+						...process.env,
+						FORCE_COLOR: '0',
+						NO_COLOR: '1',
+						CI: process.env.CI ?? 'true',
+					},
+				});
+			} catch (err) {
+				resolve({
+					output: err instanceof Error ? err.message : String(err),
+					exitCode: 1,
+					timedOut: false,
+					durationMs: Date.now() - startedAt,
+				});
+				return;
+			}
+
+			const finish = (exitCode: number) => {
+				if (settled) { return; }
+				settled = true;
+				if (inactivityTimer) { clearTimeout(inactivityTimer); }
+				this._activeCommands.delete(req.execId);
+
+				let clean = removeAnsiEscapeCodes(output).replace(/\r\n/g, '\n');
+				if (clean.length > maxChars) {
+					const half = Math.floor(maxChars / 2);
+					clean = clean.slice(0, half) + '\n...\n' + clean.slice(clean.length - half);
+				}
+				resolve({
+					output: clean,
+					exitCode,
+					timedOut,
+					durationMs: Date.now() - startedAt,
+				});
+			};
+
+			const resetTimer = () => {
+				if (inactivityTimer) { clearTimeout(inactivityTimer); }
+				inactivityTimer = setTimeout(() => {
+					timedOut = true;
+					killTree(proc);
+					finish(124);
+				}, inactiveTimeoutMs);
+			};
+
+			const appendChunk = (chunk: Buffer) => {
+				resetTimer();
+				output += chunk.toString('utf8');
+				if (output.length > maxRawBuffer) {
+					const half = Math.floor(maxRawBuffer / 2);
+					output = output.slice(0, half) + '\n...\n' + output.slice(output.length - half);
+				}
+			};
+
+			this._activeCommands.set(req.execId, {
+				proc,
+				cancel: () => {
+					killTree(proc);
+					finish(130);
+				},
+			});
+
+			proc.stdout?.on('data', appendChunk);
+			proc.stderr?.on('data', appendChunk);
+			proc.once('error', (err) => {
+				output += `\n${err.message}`;
+				finish(1);
+			});
+			proc.once('close', (code) => {
+				finish(typeof code === 'number' ? code : (timedOut ? 124 : 0));
+			});
+
+			resetTimer();
+		});
+	}
 
 	async inspectEnvironment(workspaceRoot: string): Promise<EnvInspectReport> {
 		const probes: readonly { name: string; bin: string; args: string[] }[] = [

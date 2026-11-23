@@ -236,6 +236,8 @@ import { KodiaCorrectnessMainService } from '../../workbench/contrib/void/electr
 import { IKodiaCorrectnessMainService, KODIA_CORRECTNESS_CHANNEL } from '../../workbench/contrib/void/common/correctnessTypes.js';
 import { KodiaEvolutionMainService } from '../../workbench/contrib/void/electron-main/evolutionMainService.js';
 import { IKodiaEvolutionMainService, KODIA_EVOLUTION_CHANNEL } from '../../workbench/contrib/void/common/evolutionTypes.js';
+import { KodiaNotebookKernelMainService } from '../../workbench/contrib/void/electron-main/kodiaNotebookKernelMainService.js';
+import { IKodiaNotebookKernelMainService, KODIA_NOTEBOOK_KERNEL_CHANNEL } from '../../workbench/contrib/void/common/kodiaNotebookKernelTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
@@ -1395,6 +1397,7 @@ export class CodeApplication extends Disposable {
 		services.set(IKodiaApiStudioMainService, new SyncDescriptor(KodiaApiStudioMainService, undefined, false));
 		services.set(IKodiaCorrectnessMainService, new SyncDescriptor(KodiaCorrectnessMainService, undefined, false));
 		services.set(IKodiaEvolutionMainService, new SyncDescriptor(KodiaEvolutionMainService, undefined, false));
+		services.set(IKodiaNotebookKernelMainService, new SyncDescriptor(KodiaNotebookKernelMainService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
@@ -1622,6 +1625,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: Next-Generation Evolution, Supply-Chain SBOM, IaC/FinOps, Production/Release & Governance Engine
 		const kodiaEvolutionChannel = ProxyChannel.fromService(accessor.get(IKodiaEvolutionMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
 		mainProcessElectronServer.registerChannel(KODIA_EVOLUTION_CHANNEL, kodiaEvolutionChannel);
+
+		// Kodia: Built-in Persistent Python / Jupyter Notebook Kernel Engine
+		const kodiaNotebookKernelChannel = ProxyChannel.fromService(accessor.get(IKodiaNotebookKernelMainService), disposables);
+		mainProcessElectronServer.registerChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL, kodiaNotebookKernelChannel);
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);

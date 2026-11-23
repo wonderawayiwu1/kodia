@@ -63,6 +63,9 @@ import './projectMemoryBootstrapContrib.js'
 // disable built-in GitHub Copilot extension and sign-in UI
 import './disableCopilotContribution.js'
 
+// native built-in Python/Jupyter notebook kernel controller & null inline-chat shim for Notebook Editor
+import './kodiaNotebookKernelContrib.js'
+
 // register misc service
 import './miscWokrbenchContrib.js'
 

@@ -6,7 +6,19 @@
 import assert from 'assert';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { evaluateAutonomy, assessRisk, riskThresholdForApproval, defaultAutonomyMode, autonomyModes } from '../../common/autonomyPolicy.js';
-import { quotePowerShellArg, buildPowerShellCommand, isPowerShellPlatform, computeIncrementalRead } from '../../common/terminalUtils.js';
+import {
+	quotePowerShellArg,
+	buildPowerShellCommand,
+	isPowerShellPlatform,
+	computeIncrementalRead,
+	safeSetTimeoutMs,
+	unwrapCmdForShellType,
+	buildSentinelWrappedCommand,
+	extractSentinelCompletion,
+	wrapCommandForInteractiveShell,
+	wrapCommandForShell,
+} from '../../common/terminalUtils.js';
+import { MAX_TERMINAL_BG_COMMAND_TIME, MAX_TERMINAL_CHARS, MAX_TERMINAL_INACTIVE_TIME } from '../../common/prompt/prompts.js';
 
 suite('Kodia - Terminal Execution Engine (Stage 5A Day 1)', () => {
 	ensureNoDisposablesAreLeakedInTestSuite();
@@ -271,6 +283,57 @@ suite('Kodia - Terminal Execution Engine (Stage 5A Day 1)', () => {
 			const second = computeIncrementalRead('hello\nworld\n', 12, 0);
 			assert.strictEqual(second.output, 'hello\nworld\n');
 			assert.strictEqual(second.nextStoredOffset, 12); // stays at 12, not 0
+		});
+	});
+
+	suite('Terminal reliability regressions (timeouts, shell wrappers, sentinel completion)', () => {
+		test('terminal timeout & buffer constants are finite so setTimeout never overflows to 0ms', () => {
+			assert.ok(Number.isFinite(MAX_TERMINAL_INACTIVE_TIME) && MAX_TERMINAL_INACTIVE_TIME >= 30, 'MAX_TERMINAL_INACTIVE_TIME must be finite');
+			assert.ok(Number.isFinite(MAX_TERMINAL_BG_COMMAND_TIME) && MAX_TERMINAL_BG_COMMAND_TIME >= 5, 'MAX_TERMINAL_BG_COMMAND_TIME must be finite');
+			assert.ok(Number.isFinite(MAX_TERMINAL_CHARS) && MAX_TERMINAL_CHARS >= 10_000, 'MAX_TERMINAL_CHARS must be finite');
+		});
+
+		test('safeSetTimeoutMs prevents Infinity/NaN/overflow 0ms timer bugs', () => {
+			assert.strictEqual(safeSetTimeoutMs(Infinity, 120), 120_000);
+			assert.strictEqual(safeSetTimeoutMs(NaN, 15), 15_000);
+			assert.strictEqual(safeSetTimeoutMs(-5, 60), 60_000);
+			assert.strictEqual(safeSetTimeoutMs(30, 120), 30_000);
+			assert.ok(safeSetTimeoutMs(1e12, 120) <= 2_147_483_000);
+		});
+
+		test('unwrapCmdForShellType preserves cmd /c for PowerShell and unwraps for cmd/bash', () => {
+			const wrapped = `cmd /c 'node -e "console.log(''hi'')"'`;
+			assert.strictEqual(unwrapCmdForShellType(wrapped, 'pwsh'), wrapped);
+			assert.strictEqual(unwrapCmdForShellType(wrapped, 'powershell'), wrapped);
+			assert.strictEqual(unwrapCmdForShellType(wrapped, 'cmd'), `node -e "console.log('hi')"`);
+			assert.strictEqual(unwrapCmdForShellType(wrapped, 'gitbash'), `node -e "console.log('hi')"`);
+		});
+
+		test('wrapCommandForInteractiveShell preserves builtins and chained commands cleanly', () => {
+			assert.strictEqual(wrapCommandForInteractiveShell('  cd src && npm test  '), 'cd src && npm test');
+			assert.strictEqual(wrapCommandForInteractiveShell('echo hello'), 'echo hello');
+		});
+
+		test('extractSentinelCompletion ignores echoed command template and resolves runtime exit code', () => {
+			const token = 'tok123';
+			const wrapped = buildSentinelWrappedCommand(wrapCommandForShell('echo hello'), token, 'pwsh');
+			// Echoed command line alone must NOT trigger completion
+			const echoedOnly = extractSentinelCompletion(`PS C:\\repo> ${wrapped}\r\n`, token);
+			assert.strictEqual(echoedOnly.done, false);
+
+			// Runtime output with resolved numeric exit code MUST trigger completion and strip sentinel line
+			const fullStream = `PS C:\\repo> ${wrapped}\r\nhello\r\n__KODIA_DONE_${token}__:0__\r\nPS C:\\repo> `;
+			const completed = extractSentinelCompletion(fullStream, token);
+			assert.strictEqual(completed.done, true);
+			assert.strictEqual(completed.exitCode, 0);
+			assert.strictEqual(completed.cleanOutput, 'hello');
+
+			// Non-zero exit code is preserved accurately
+			const failedStream = `PS C:\\repo> ${wrapped}\r\nnpm ERR! missing script\r\n__KODIA_DONE_${token}__:3__\r\n`;
+			const failed = extractSentinelCompletion(failedStream, token);
+			assert.strictEqual(failed.done, true);
+			assert.strictEqual(failed.exitCode, 3);
+			assert.ok(failed.cleanOutput.includes('npm ERR! missing script'));
 		});
 	});
 });

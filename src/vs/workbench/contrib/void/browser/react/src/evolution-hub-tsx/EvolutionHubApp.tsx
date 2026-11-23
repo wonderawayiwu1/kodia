@@ -21,6 +21,7 @@ import {
 	Sparkles,
 	Trash2,
 } from 'lucide-react';
+import '../styles.css';
 import { useAccessor, useIsDark } from '../util/services.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import { EvolutionWorkbenchState } from '../../../evolutionService.js';
@@ -53,7 +54,7 @@ function sevTone(s: string): 'danger' | 'warning' | 'accent' | 'neutral' {
 	return 'neutral';
 }
 
-export const EvolutionHubApp: React.FC = () => {
+export const EvolutionHubApp = () => {
 	const isDark = useIsDark();
 	const accessor = useAccessor();
 	const evolutionService = accessor.get('IEvolutionService');

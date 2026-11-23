@@ -191,7 +191,10 @@ export class TypeScriptVersionManager extends Disposable {
 	}
 
 	private get useWorkspaceTsdkSetting(): boolean {
-		return this.workspaceState.get<boolean>(useWorkspaceTsdkStorageKey, false);
+		// Kodia: default to the workspace's own node_modules/typescript when trusted so
+		// projects use their exact TypeScript version (e.g. TS 5.x) instead of bundled TS 6.0,
+		// preventing false-positive red diagnostics that do not occur in other editors or `tsc`.
+		return this.workspaceState.get<boolean>(useWorkspaceTsdkStorageKey, true);
 	}
 
 	private get suppressPromptWorkspaceTsdkSetting(): boolean {

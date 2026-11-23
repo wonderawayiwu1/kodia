@@ -23,9 +23,9 @@ export const MAX_FILE_CHARS_PAGE = Infinity // No limit - read entire files
 export const MAX_CHILDREN_URIs_PAGE = Infinity // No limit - return all search results
 
 // terminal tool info
-export const MAX_TERMINAL_CHARS = Infinity // No limit - return all terminal output
-export const MAX_TERMINAL_INACTIVE_TIME = Infinity // seconds - no timeout
-export const MAX_TERMINAL_BG_COMMAND_TIME = Infinity // no timeout
+export const MAX_TERMINAL_CHARS = 50_000 // Cap terminal output returned to the model (~50 KB)
+export const MAX_TERMINAL_INACTIVE_TIME = 120 // seconds of inactivity before stopping a hung temporary command (must be finite; setTimeout(fn, Infinity) overflows to 0ms!)
+export const MAX_TERMINAL_BG_COMMAND_TIME = 15 // seconds to capture initial output for persistent/background commands (must be finite)
 
 // project memory tool info
 export const MAX_PROJECT_MEMORY_TOKENS = Infinity // No limit
@@ -2860,6 +2860,11 @@ Here's an example of a good code block:\n${chatSuggestionDiffExample}`)
 	}
 
 	details.push(`Each user message comes with a <workspace_context> block: the user's active file, open files${mode === 'agent' ? ', persistent terminals' : ''} and the date at the time they sent it. The block of the latest user message is the current one.`)
+	details.push(`High-speed engineering discipline:
+- Batch all independent read-only tool calls (read_file, search_for_files, search_pathnames_only, search_in_file, search_symbols, go_to_definition, find_references) in a single turn — Kodia executes them in parallel for maximum speed.
+- search_for_files returns matching file paths together with line numbers and code previews, and read_file returns 1-based line numbers; use those directly instead of redundant searches or re-reads.
+- Always read the exact relevant lines before editing, make clean minimal edits, and verify your changes with real builds, typechecks, or tests rather than guessing.
+- Ground every claim strictly in observed files, tool results, and command outputs. Be direct, accurate, and concise.`)
 	details.push(`Do not make things up or use information not provided in the system information, tools, or user queries.`)
 	details.push(`Format with Markdown where it helps the reader: lists, tables, code blocks.`)
 

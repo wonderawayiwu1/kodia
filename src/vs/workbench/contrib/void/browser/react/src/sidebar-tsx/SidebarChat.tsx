@@ -79,7 +79,7 @@ const IconArrowUp = ({ size, className = '' }: { size: number, className?: strin
 			xmlns="http://www.w3.org/2000/svg"
 		>
 			<path
-				fill="black"
+				fill="currentColor"
 				fillRule="evenodd"
 				clipRule="evenodd"
 				d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z"
@@ -93,8 +93,8 @@ const IconSquare = ({ size, className = '' }: { size: number, className?: string
 	return (
 		<svg
 			className={className}
-			stroke="black"
-			fill="black"
+			stroke="currentColor"
+			fill="currentColor"
 			strokeWidth="0"
 			viewBox="0 0 24 24"
 			width={size}
@@ -519,11 +519,12 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 			ref={divRef}
 			className={`
 				gap-x-1
-                flex flex-col p-2 relative input text-left shrink-0
-                rounded-md
+                flex flex-col p-2.5 relative input text-left shrink-0
+                rounded-xl
                 bg-void-bg-1
 				transition-all duration-200
-				border border-void-border-3 focus-within:border-void-border-1 hover:border-void-border-1
+				border border-void-border-2 focus-within:border-[#3B82F6]/70 hover:border-void-border-1
+				shadow-sm
 				max-h-[80vh] overflow-y-auto
                 ${className}
             `}
@@ -606,13 +607,13 @@ export const VoidChatArea: React.FC<VoidChatAreaProps> = ({
 
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement>
-const DEFAULT_BUTTON_SIZE = 22;
+const DEFAULT_BUTTON_SIZE = 26;
 export const ButtonSubmit = ({ className, disabled, ...props }: ButtonProps & Required<Pick<ButtonProps, 'disabled'>>) => {
 
 	return <button
 		type='button'
-		className={`rounded-full flex-shrink-0 flex-grow-0 flex items-center justify-center
-			${disabled ? 'bg-vscode-disabled-fg cursor-default' : 'bg-white cursor-pointer'}
+		className={`rounded-full flex-shrink-0 flex-grow-0 flex items-center justify-center transition-colors duration-150
+			${disabled ? 'bg-void-bg-2 text-void-fg-4 border border-void-border-2 cursor-default' : 'bg-[#2563EB] hover:bg-[#3B82F6] text-white shadow-sm cursor-pointer'}
 			${className}
 		`}
 		// data-tooltip-id='void-tooltip'
@@ -620,20 +621,20 @@ export const ButtonSubmit = ({ className, disabled, ...props }: ButtonProps & Re
 		// data-tooltip-place='left'
 		{...props}
 	>
-		<IconArrowUp size={DEFAULT_BUTTON_SIZE} className="stroke-[2] p-[2px]" />
+		<IconArrowUp size={DEFAULT_BUTTON_SIZE} className="stroke-[2] p-[4px]" />
 	</button>
 }
 
 export const ButtonStop = ({ className, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => {
 	return <button
-		className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center
-			bg-white
+		className={`rounded-full flex-shrink-0 flex-grow-0 cursor-pointer flex items-center justify-center transition-colors duration-150
+			bg-void-fg-1 text-void-bg-3 hover:opacity-90 shadow-sm
 			${className}
 		`}
 		type='button'
 		{...props}
 	>
-		<IconSquare size={DEFAULT_BUTTON_SIZE} className="stroke-[3] p-[7px]" />
+		<IconSquare size={DEFAULT_BUTTON_SIZE} className="stroke-[3] p-[8px]" />
 	</button>
 }
 
@@ -1016,9 +1017,9 @@ const ToolHeaderWrapper = ({
 	>{desc1}</span>
 
 	return (<div className=''>
-		<div className={`w-full border border-void-border-3 rounded px-2 py-1 bg-void-bg-3 overflow-hidden ${className}`}>
+		<div className={`w-full border border-void-border-2/70 hover:border-void-border-1/70 rounded-lg px-2.5 py-1.5 bg-void-bg-2/75 transition-colors duration-150 overflow-hidden ${className}`}>
 			{/* header */}
-			<div className={`select-none flex items-center min-h-[24px]`}>
+			<div className={`select-none flex items-center min-h-[22px]`}>
 				<div className={`flex items-center w-full gap-x-2 overflow-hidden justify-between ${isRejected ? 'line-through' : ''}`}>
 					{/* left */}
 					<div // container for if desc1 is clickable
@@ -1342,9 +1343,9 @@ const UserMessageComponent = ({ chatMessage, messageIdx, isCheckpointGhost, curr
 		<div
 			// style chatbubble according to role
 			className={`
-            text-left rounded-lg max-w-full
+            text-left rounded-xl max-w-full
             ${mode === 'edit' ? ''
-					: mode === 'display' ? 'p-2 flex flex-col bg-void-bg-1 text-void-fg-1 overflow-x-auto cursor-pointer' : ''
+					: mode === 'display' ? 'px-3.5 py-2.5 flex flex-col bg-void-bg-1 border border-void-border-2/80 text-void-fg-1 text-[13.5px] leading-relaxed shadow-sm overflow-x-auto cursor-pointer' : ''
 				}
         `}
 			onClick={() => { if (mode === 'display') { onOpenEdit() } }}

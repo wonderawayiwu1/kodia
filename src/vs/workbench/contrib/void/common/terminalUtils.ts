@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { isWindows } from '../../../../base/common/platform.js';
+import { removeAnsiEscapeCodes } from '../../../../base/common/strings.js';
 
 // PowerShell argument quoting utility for Windows
 // Properly quotes a single argument for PowerShell command line execution.
@@ -75,21 +76,104 @@ export function terminalCommandOutcome(res: { result: string; resolveReason: { t
 }
 
 /**
- * Wraps a command for safe execution in an interactive PowerShell session.
- * Uses the call operator (&) to invoke external commands, which prevents
- * PowerShell keyword conflicts (e.g., 'new' being interpreted as a keyword).
+ * Safely converts a timeout duration in seconds to milliseconds for `setTimeout`.
+ * In JavaScript/Chromium/Node.js, passing `Infinity`, `NaN`, or values > 2^31-1
+ * to `setTimeout` overflows the 32-bit signed integer and fires immediately (0ms/1ms).
+ */
+export function safeSetTimeoutMs(seconds: number, fallbackSeconds: number): number {
+	const MAX_TIMEOUT_MS = 2_147_483_000; // safely below 2^31 - 1
+	const effectiveSeconds = (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0)
+		? seconds
+		: fallbackSeconds;
+	return Math.max(1000, Math.min(Math.round(effectiveSeconds * 1000), MAX_TIMEOUT_MS));
+}
+
+/**
+ * Unwraps a Windows PowerShell `cmd /c '...'` wrapper when the actual terminal shell is
+ * Command Prompt (`cmd`) or a POSIX shell (`gitbash`, `bash`, `zsh`, `sh`, `wsl`), where
+ * single-quoted `cmd /c '...'` syntax is invalid.
+ */
+export function unwrapCmdForShellType(command: string, shellType: string | undefined): string {
+	if (!shellType) return command;
+	const lower = shellType.toLowerCase();
+	if (lower === 'pwsh' || lower === 'powershell') {
+		return command;
+	}
+	const match = /^cmd \/c '(.*)'$/s.exec(command.trim());
+	if (!match) return command;
+	return match[1].replace(/''/g, `'`);
+}
+
+/**
+ * Wraps a command with a deterministic completion sentinel so Kodia can detect command
+ * completion and exact exit codes reliably even when VS Code shell integration
+ * (`CommandDetection`) is unavailable or blocked (e.g. restricted PowerShell, cmd.exe,
+ * Git Bash, or hidden terminals).
+ *
+ * Notice that the echoed command itself contains a variable reference (`$__kodia_ec`,
+ * `%ERRORLEVEL%`, or `$?`), NOT literal digits, so matching `:(-?\d+)__` only triggers
+ * on the real runtime output after the command finishes.
+ */
+export function buildSentinelWrappedCommand(command: string, token: string, shellType: string | undefined): string {
+	const marker = `__KODIA_DONE_${token}__`;
+	const lower = (shellType ?? '').toLowerCase();
+
+	if (isWindows) {
+		if (lower === 'cmd' || lower === 'commandprompt') {
+			return `${command} && echo ${marker}^:0__ || echo ${marker}^:1__`;
+		}
+		if (lower === 'gitbash' || lower === 'bash' || lower === 'sh' || lower === 'zsh' || lower === 'wsl') {
+			return `${command}; printf '\\n${marker}:%s__\\n' "$?"`;
+		}
+		// Default Windows shell: PowerShell (pwsh / Windows PowerShell 5.1)
+		// Reset $global:LASTEXITCODE first so a previous failing native command in a persistent terminal never leaks its exit code.
+		return `$global:LASTEXITCODE = 0; ${command}; $__kodia_ec = if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { $LASTEXITCODE } elseif ($?) { 0 } else { 1 }; Write-Host "${marker}:$($__kodia_ec)__"`;
+	}
+
+	if (lower === 'fish') {
+		return `${command}; printf '\\n${marker}:%s__\\n' $status`;
+	}
+	return `${command}; printf '\\n${marker}:%s__\\n' "$?"`;
+}
+
+/**
+ * Checks raw terminal output for the runtime sentinel emitted by `buildSentinelWrappedCommand`.
+ */
+export function extractSentinelCompletion(
+	rawOutput: string,
+	token: string,
+): { done: boolean; exitCode: number; cleanOutput: string } {
+	const plain = removeAnsiEscapeCodes(rawOutput);
+	const marker = `__KODIA_DONE_${token}__`;
+	const regex = new RegExp(`${marker}:(-?\\d+)__`);
+	const match = regex.exec(plain);
+	if (!match) {
+		return { done: false, exitCode: 0, cleanOutput: plain };
+	}
+
+	const exitCode = Number.parseInt(match[1], 10);
+	const beforeMarker = plain.slice(0, match.index);
+	// Strip echoed sentinel command line if present (contains marker without resolved numeric code)
+	const cleanedLines = beforeMarker
+		.replace(/\r\n/g, '\n')
+		.replace(/\r/g, '\n')
+		.split('\n')
+		.filter(line => !line.includes(marker));
+
+	return {
+		done: true,
+		exitCode: Number.isNaN(exitCode) ? 0 : exitCode,
+		cleanOutput: cleanedLines.join('\n').trim(),
+	};
+}
+
+/**
+ * Wraps a command for safe execution in an interactive shell session.
+ * Preserves shell built-ins (cd, export, $env:), pipes, and chains (&&, ;) cleanly
+ * across PowerShell, Command Prompt, and POSIX shells.
  */
 export function wrapCommandForInteractiveShell(command: string): string {
-	if (isWindows) {
-		// Trim and check if already wrapped
-		const trimmed = command.trim();
-		if (trimmed.startsWith('& ') || trimmed.startsWith('cmd /c')) {
-			return trimmed;
-		}
-		// Use PowerShell call operator to invoke the command
-		return `& ${command}`;
-	}
-	return command;
+	return command.trim();
 }
 
 /**
