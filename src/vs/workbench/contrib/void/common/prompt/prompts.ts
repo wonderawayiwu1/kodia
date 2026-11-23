@@ -2210,6 +2210,216 @@ export const builtinTools: {
 		params: {},
 	},
 
+	// Kodia API Engineering Studio (20 tools)
+	api_open_studio: {
+		name: 'api_open_studio',
+		description: 'Opens and focuses the native in-editor Kodia API Engineering Studio tab, optionally switching to a specific section (overview, requests, explorer, specs, graphql, grpc, websockets, environments, suites, runner, performance, security, mocks, topology, history, readiness) and loading an endpoint.',
+		params: {
+			section: { description: 'Optional API Studio section to open.' },
+			method: { description: 'Optional HTTP method (GET, POST, PUT, PATCH, DELETE).' },
+			url: { description: 'Optional endpoint URL to load into the request builder.' },
+			protocol: { description: 'Optional protocol: http, graphql, grpc, websocket, sse, soap.' },
+		},
+	},
+	api_discover_project: {
+		name: 'api_discover_project',
+		description: 'Scans the workspace across Node/Express/NestJS/Fastify/Hono/Next.js, Python FastAPI/Flask/Django, Go Gin/Echo/Fiber/Chi, Rust Axum/Actix, Java Spring, C# ASP.NET, PHP Laravel, OpenAPI, GraphQL, and Protobuf files to map services, routes (file:line), auth, DB/queues, specs, and Mermaid topology.',
+		params: {
+			sub_path: { description: 'Optional relative subfolder to scope API discovery.' },
+			max_files: { description: 'Optional maximum files to scan (default 150).' },
+		},
+	},
+	api_runtime_start: {
+		name: 'api_runtime_start',
+		description: 'Starts a real local API service process, auto-detects its listening port, polls health readiness, streams live stdout/stderr logs to Kodia API Studio, and tracks its PID for clean teardown.',
+		params: {
+			name: { description: 'Service name (e.g., "orders-api").' },
+			command: { description: 'Start command (e.g., "node server.js", "uvicorn main:app --port 8000").' },
+			cwd: { description: 'Optional working directory relative to workspace.' },
+			port: { description: 'Optional expected listening port.' },
+			health_url: { description: 'Optional health check URL to poll until ready.' },
+			env: { description: 'Optional JSON object of environment variables.' },
+			ready_timeout_ms: { description: 'Optional startup timeout in ms (default 10000).' },
+		},
+	},
+	api_runtime_status: {
+		name: 'api_runtime_status',
+		description: 'Lists all managed API service runtimes with status, PID, port, base URL, and recent stdout/stderr logs.',
+		params: {},
+	},
+	api_runtime_stop: {
+		name: 'api_runtime_stop',
+		description: 'Gracefully stops a managed API runtime by runtime_id or stops all running API runtimes.',
+		params: {
+			runtime_id: { description: 'Optional runtime ID to stop.' },
+			stop_all: { description: 'Optional boolean ("true") to stop all managed runtimes.' },
+		},
+	},
+	api_send_request: {
+		name: 'api_send_request',
+		description: 'Executes a real HTTP/HTTPS/GraphQL/SOAP/SSE request with environment variable interpolation, authentication, measured DNS/TCP/TLS/TTFB/Download timing, sandboxed pre-request & test scripts, assertions, redacted history persistence, and live event streaming into Kodia API Studio.',
+		params: {
+			url: { description: 'Target URL (supports {{variable}} interpolation).' },
+			method: { description: 'HTTP method: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS (default GET).' },
+			protocol: { description: 'Optional protocol: http, graphql, soap, sse (default http).' },
+			name: { description: 'Optional friendly request name.' },
+			headers: { description: 'Optional JSON object of request headers.' },
+			auth: { description: 'Optional JSON auth config ({type:"bearer",token:"..."} | {type:"basic",username,password} | {type:"api-key",key,value,addTo:"header"|"query"}).' },
+			body_raw: { description: 'Optional raw JSON/XML/text request body.' },
+			body: { description: 'Optional structured JSON body config ({mode, raw, graphqlQuery, graphqlVariables, multipartParts, formFields}).' },
+			pre_request_script: { description: 'Optional sandboxed JS pre-request script using kodia.env.set/get.' },
+			test_script: { description: 'Optional sandboxed JS test script using kodia.test / kodia.expect / kodia.response.' },
+			assertions: { description: 'Optional JSON array of assertions ([{id, name, kind, target, expected}]).' },
+			environment_id: { description: 'Optional environment ID or name.' },
+			timeout_ms: { description: 'Optional timeout in milliseconds.' },
+			allow_protected_environment: { description: 'Set "true" only with explicit user confirmation to run mutating requests on production.' },
+		},
+	},
+	api_websocket_session: {
+		name: 'api_websocket_session',
+		description: 'Manages real live WebSocket connections (connect, send text/json/ping, inspect handshake & received frames, close, list) with real-time events streamed to API Studio.',
+		params: {
+			action: { description: 'One of: connect, send, close, list.' },
+			session_id: { description: 'Session ID (required for send/close).' },
+			url: { description: 'WebSocket URL ws:// or wss:// (required for connect).' },
+			message: { description: 'Message payload to send (for action=send).' },
+			kind: { description: 'Optional frame kind: text, json, or ping.' },
+			headers: { description: 'Optional JSON object of handshake headers.' },
+		},
+	},
+	api_generate_test_suite: {
+		name: 'api_generate_test_suite',
+		description: 'Generates a realistic automated API test suite (functional, auth-negative 401/403, latency assertions) from discovered workspace routes and optionally saves it.',
+		params: {
+			base_url: { description: 'Base URL for generated tests (e.g., "http://127.0.0.1:3000").' },
+			name: { description: 'Optional test suite name.' },
+			include_negative_tests: { description: 'Optional boolean (default true) to include unauthenticated negative checks.' },
+			save: { description: 'Optional boolean (default true) to persist suite to .kodia/api-studio/suites.json.' },
+		},
+	},
+	api_run_test_suite: {
+		name: 'api_run_test_suite',
+		description: 'Executes a real automated API test suite with variable chaining across workflow steps, live per-step events streamed to API Studio, explicit passed/failed/skipped/blocked/timed_out reporting, and persistent test run history.',
+		params: {
+			suite_id: { description: 'Saved test suite ID to execute.' },
+			suite: { description: 'Optional inline JSON ApiTestSuite object to run directly.' },
+			environment_id: { description: 'Optional environment ID or name.' },
+			base_url: { description: 'Optional baseUrl override.' },
+			allow_protected_environment: { description: 'Optional boolean for protected production environments.' },
+		},
+	},
+	api_run_load_test: {
+		name: 'api_run_load_test',
+		description: 'Executes a real concurrent performance/load test against a local or authorized endpoint, streaming per-second RPS/latency ticks and reporting exact P50/P90/P95/P99 latency, RPS, error rate, throughput, and generator saturation.',
+		params: {
+			name: { description: 'Load test profile name.' },
+			url: { description: 'Target endpoint URL.' },
+			method: { description: 'Optional HTTP method (default GET).' },
+			headers: { description: 'Optional JSON headers object.' },
+			body_raw: { description: 'Optional raw request body.' },
+			virtual_users: { description: 'Concurrent virtual users (1-200).' },
+			duration_seconds: { description: 'Test duration in seconds (1-120).' },
+			ramp_up_seconds: { description: 'Optional ramp-up seconds.' },
+			max_error_rate: { description: 'Optional max error rate threshold (0..1).' },
+			p95_threshold_ms: { description: 'Optional P95 latency threshold in ms.' },
+			allow_non_local_target: { description: 'Set "true" only when explicitly authorized to load-test non-localhost endpoints.' },
+		},
+	},
+	api_security_audit: {
+		name: 'api_security_audit',
+		description: 'Runs static API security analysis (SQLi, JWT verify, wildcard CORS, stack trace leakage) combined with safe live endpoint probes (unauthenticated access, security headers, CORS misconfiguration, error leakage).',
+		params: {
+			base_url: { description: 'Optional running API base URL for safe live security probes.' },
+			sub_path: { description: 'Optional subfolder for static security scan.' },
+			allow_live_probes: { description: 'Optional boolean (default true for localhost).' },
+		},
+	},
+	api_compare_responses: {
+		name: 'api_compare_responses',
+		description: 'Structurally compares two API responses (from execution history or inline JSON), highlighting status changes, header diffs, JSON field/type diffs, latency delta, and size delta.',
+		params: {
+			left_history_index: { description: 'History index for baseline response (default 1 = previous).' },
+			right_history_index: { description: 'History index for current response (default 0 = latest).' },
+		},
+	},
+	api_generate_openapi: {
+		name: 'api_generate_openapi',
+		description: 'Generates an OpenAPI 3.1.0 JSON specification from discovered API routes, path parameters, and authentication requirements.',
+		params: {
+			title: { description: 'API title for OpenAPI info.title.' },
+			version: { description: 'Optional version (default "1.0.0").' },
+			server_url: { description: 'Optional server base URL.' },
+			sub_path: { description: 'Optional subfolder to scope discovery.' },
+		},
+	},
+	api_diff_specs: {
+		name: 'api_diff_specs',
+		description: 'Compares two OpenAPI JSON specifications and reports breaking changes (removed operations, new required params) and non-breaking additions.',
+		params: {
+			base_spec_json: { description: 'Baseline OpenAPI JSON string.' },
+			target_spec_json: { description: 'Updated/target OpenAPI JSON string.' },
+		},
+	},
+	api_generate_client_sdk: {
+		name: 'api_generate_client_sdk',
+		description: 'Generates ready-to-use API client code or typed SDK snippet for curl, fetch, typescript-sdk, python, go, rust, csharp, or java.',
+		params: {
+			url: { description: 'Endpoint URL.' },
+			method: { description: 'HTTP method (default GET).' },
+			target: { description: 'Target language: curl, fetch, typescript-sdk, python, go, rust, csharp, java.' },
+			headers: { description: 'Optional JSON headers object.' },
+			body_raw: { description: 'Optional request body.' },
+		},
+	},
+	api_mock_server: {
+		name: 'api_mock_server',
+		description: 'Starts, stops, or lists real local disposable HTTP mock servers (explicitly marked isMock: true with X-Kodia-Mock header) supporting custom routes, status codes, headers, and simulated latency.',
+		params: {
+			action: { description: 'One of: start, stop, list.' },
+			name: { description: 'Mock server name (for start).' },
+			mock_id: { description: 'Mock server ID (for stop).' },
+			port: { description: 'Optional port (0 = auto-assign).' },
+			routes: { description: 'JSON array of mock routes ([{id, method, path, status, body, delayMs, headers}]).' },
+		},
+	},
+	api_manage_collection: {
+		name: 'api_manage_collection',
+		description: 'Lists, saves, deletes, imports (cURL or Postman v2.1), or exports (Postman v2.1) persistent API collections in .kodia/api-studio/collections.json.',
+		params: {
+			action: { description: 'One of: list, save, delete, import_curl, import_postman, export_postman.' },
+			collection_id: { description: 'Collection ID (for delete/export).' },
+			name: { description: 'Optional collection name.' },
+			raw_input: { description: 'Raw cURL command or Postman JSON string (for import actions).' },
+			collection: { description: 'JSON ApiCollection object (for action=save).' },
+		},
+	},
+	api_manage_environment: {
+		name: 'api_manage_environment',
+		description: 'Lists, saves, or activates API environments (local, development, testing, staging, production) and variables (including masked secrets and production protection).',
+		params: {
+			action: { description: 'One of: list, save, set_active.' },
+			environment_id: { description: 'Environment ID.' },
+			name: { description: 'Environment name (for save).' },
+			kind: { description: 'One of: local, development, testing, staging, production, custom.' },
+			base_url: { description: 'Optional base URL for the environment.' },
+			is_protected: { description: 'Optional boolean protecting destructive requests.' },
+			variables: { description: 'Optional JSON array of ApiKeyValuePair variables.' },
+			set_active: { description: 'Optional boolean to activate the saved environment.' },
+		},
+	},
+	api_assess_production_readiness: {
+		name: 'api_assess_production_readiness',
+		description: 'Produces an evidence-based 6-pillar API production readiness report (functional, security, performance, reliability, operational, documentation) using actual discovery, test runs, load runs, and security audits — never declares passed when critical tests have not executed.',
+		params: {},
+	},
+	api_correlate_failure: {
+		name: 'api_correlate_failure',
+		description: 'Correlates a failed API request/assertion from history with the discovered source route file:line and live runtime server logs to accelerate root-cause investigation and repair.',
+		params: {
+			history_index: { description: 'History index of the failed request (default 0 = latest).' },
+		},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -2369,6 +2579,11 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - Do NOT force AI into ordinary non-AI software requests. When a request is pure software engineering (websites, CRUD apps, utilities, games, APIs without AI), keep it clean and use Kodia's Universal Software Engineering Engine & Design Intelligence directly.
 - When a request involves AI systems, chatbots, RAG, ML/DL models, computer vision, speech/audio, autonomous agents, workflows, or full-stack AI products, coordinate both engines via ai_orchestrate_project / ai_scaffold_product_factory, probe real hardware (ai_probe_compute_hardware), profile datasets (ai_profile_dataset), build/evaluate RAG (ai_rag_build_index, ai_rag_query, ai_rag_evaluate), track experiments/models (ai_experiment_manage, ai_model_registry), run quantitative evaluations (ai_evaluate_system) and AI security audits (ai_audit_security), and delegate independent workstreams to AI specialists (ai_architect, ml_engineer, llm_engineer, rag_engineer, agentic_engineer, data_engineer, cv_engineer, mlops, ai_security, ai_eval).
 - Never claim a model was trained, evaluated, deployed, or verified on hardware unless the real operation actually ran and produced verifiable artifacts. Always clearly note required external API keys or unverified cloud services.`)
+		details.push(`NATIVE API ENGINEERING STUDIO & LIVE TESTING WORKFLOW: Whenever the user asks to build, inspect, test, debug, load-test, security-audit, document, or prepare an API (including "Test my API"):
+- Automatically open the native in-editor API Studio (api_open_studio) so the user can watch real execution live inside Kodia.
+- Discover actual routes, frameworks, protocols, specs, auth, and services with api_discover_project.
+- Start required local API service(s) with api_runtime_start (tracking PID, port, health, and live logs), generate or load tests (api_generate_test_suite), and execute genuine live requests/suites (api_send_request, api_run_test_suite, api_websocket_session, api_run_load_test, api_security_audit).
+- When any endpoint or assertion fails, correlate the failure to its source route and runtime logs (api_correlate_failure), inspect/fix the implementation, retest to prove resolution, compare responses (api_compare_responses), and produce an evidence-based readiness report (api_assess_production_readiness). Never fabricate test results or mark untested pillars as passed.`)
 		details.push(`AUTONOMOUS UI/UX DESIGN & FRONTEND ENGINEERING DEFAULT: Whenever building or redesigning a website, e-commerce store, web app, dashboard, mobile/desktop UI, game, or frontend component, automatically deliver world-class, art-directed, production-grade design without waiting for the user to specify colors, typography, cards, imagery, or responsiveness:
 - Before coding UI: inspect an existing repo with inspect_existing_design_system + discover_icon_library, and plan new products with analyze_product_design_requirements, generate_design_brief, generate_design_tokens (or generate_color_palette + recommend_typography), and generate_page_architecture / generate_responsive_layout.
 - Visual assets & icons: proactively discover and download verified imagery with discover_visual_assets + download_visual_assets (or generate bespoke SVG artwork when offline/appropriate) and use clean vector icons from one coherent icon library. Never ship broken image URLs, generic placeholder boxes, lorem ipsum, or emoji substitutes for UI icons.

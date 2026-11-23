@@ -23,6 +23,7 @@ export type SettingsNavigateTarget =
 	| 'features'
 	| 'agent'
 	| 'ai_engine'
+	| 'api_studio'
 	| 'design'
 	| 'instructions'
 	| 'operations'
@@ -70,6 +71,7 @@ export const SettingsHomeSection = ({
 		{ id: 'models' as const, title: 'Models & Fallbacks', desc: 'BYOK API keys, local servers, auto-failover & role routing', icon: <Sparkles size={15} /> },
 		{ id: 'agent' as const, title: 'Agent, Hooks & Policy', desc: 'Autonomy, approvals, lifecycle hooks, tool allow/deny & MCP', icon: <Bot size={15} /> },
 		{ id: 'ai_engine' as const, title: 'AI Engineering Engine', desc: 'Dual-engine orchestrator, compute, RAG, evals & AI security', icon: <Sparkles size={15} /> },
+		{ id: 'api_studio' as const, title: 'API Engineering Studio', desc: 'Native API workspace, live runner, load testing & security probes', icon: <Sliders size={15} /> },
 		{ id: 'design' as const, title: 'Design Intelligence & Brand', desc: 'Autonomous UI/UX, imagery providers, visual QA & brand systems', icon: <Palette size={15} /> },
 		{ id: 'operations' as const, title: 'Ops, Security & Diagnostics', desc: 'Toolchains, Docker, SQLite safety, spans & About Kodia', icon: <Cpu size={15} /> },
 	]), []);

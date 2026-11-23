@@ -11,6 +11,7 @@ import { AutonomyMode, defaultAutonomyMode } from './autonomyPolicy.js';
 import { InstructionsFramework } from './instructionsFrameworks.js';
 import { DEFAULT_DESIGN_INTELLIGENCE_SETTINGS, DesignIntelligenceSettings } from './designIntelligenceTypes.js';
 import { AIEngineSettings, DEFAULT_AI_ENGINE_SETTINGS } from './aiEngineeringTypes.js';
+import { ApiStudioSettings, DEFAULT_API_STUDIO_SETTINGS } from './apiStudioTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -527,6 +528,7 @@ export type GlobalSettings = {
 	designIntelligence: DesignIntelligenceSettings;
 	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
 	aiEngine: AIEngineSettings;
+	apiStudio: ApiStudioSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -573,6 +575,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	designIntelligence: DEFAULT_DESIGN_INTELLIGENCE_SETTINGS,
 	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
 	aiEngine: DEFAULT_AI_ENGINE_SETTINGS,
+	apiStudio: DEFAULT_API_STUDIO_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

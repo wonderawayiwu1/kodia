@@ -73,6 +73,8 @@ import { IDesignIntelligenceService } from '../../../designIntelligenceService.j
 import { IDesignAssetMainService } from '../../../../common/designIntelligenceTypes.js';
 import { IAIEngineeringService } from '../../../aiEngineeringService.js';
 import { IKodiaAIEngineMainService } from '../../../../common/aiEngineeringTypes.js';
+import { IApiStudioService } from '../../../apiStudioService.js';
+import { IKodiaApiStudioMainService } from '../../../../common/apiStudioTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -267,6 +269,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IDesignAssetMainService: (() => { try { return accessor.get(IDesignAssetMainService) } catch { return undefined } })(),
 		IAIEngineeringService: accessor.get(IAIEngineeringService),
 		IKodiaAIEngineMainService: (() => { try { return accessor.get(IKodiaAIEngineMainService) } catch { return undefined } })(),
+		IApiStudioService: accessor.get(IApiStudioService),
+		IKodiaApiStudioMainService: (() => { try { return accessor.get(IKodiaApiStudioMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

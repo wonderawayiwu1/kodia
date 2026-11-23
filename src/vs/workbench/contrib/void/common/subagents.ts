@@ -45,7 +45,9 @@ export type BuiltinSubagentType =
 	| 'ai_security'
 	| 'ai_eval'
 	| 'ai_research'
-	| 'robotics_iot';
+	| 'robotics_iot'
+	| 'api_engineer'
+	| 'api_qa_perf';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -220,6 +222,16 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		canChangeFiles: true,
 		description: 'specialist in Edge AI, TinyML, IoT sensor fusion, predictive maintenance, MQTT/OPC-UA, Jetson/ESP32/RPi, and robotics simulation',
 		guidance: 'Optimize for edge latency/memory (ONNX/INT8) and verify strictly against available simulators/emulators — never claim physical hardware verification without real hardware.',
+	},
+	api_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in API architecture, REST/GraphQL/gRPC/WebSocket/SSE implementation, OpenAPI specs, auth/RBAC, SDK generation, and debugging failed endpoints',
+		guidance: 'Use api_open_studio, api_discover_project, api_generate_openapi, api_generate_client_sdk, and api_correlate_failure. Build clean, validated, secure APIs and verify every endpoint live.',
+	},
+	api_qa_perf: {
+		canChangeFiles: true,
+		description: 'specialist in automated API testing, contract/regression suites, concurrent load/performance benchmarking, API security auditing, and production readiness assessment',
+		guidance: 'Use api_open_studio, api_runtime_start, api_generate_test_suite, api_run_test_suite, api_run_load_test, api_security_audit, and api_assess_production_readiness. Always execute real tests and report exact measured metrics.',
 	},
 };
 

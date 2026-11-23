@@ -122,6 +122,42 @@ import {
 } from '../common/aiEngineeringKnowledge.js'
 import { getModelCapabilities } from '../common/modelCapabilities.js'
 import { localProviderNames, providerNames } from '../common/voidSettingsTypes.js'
+import { IApiStudioService } from './apiStudioService.js'
+import {
+	ApiAssertionSpec,
+	ApiAuthConfig,
+	ApiCollection,
+	ApiEnvironment,
+	ApiHttpMethod,
+	ApiKeyValuePair,
+	ApiMockRoute,
+	ApiProtocol,
+	ApiRequestBody,
+	ApiRequestSpec,
+	ApiResponseResult,
+	ApiStudioSection,
+	ApiTestSuite,
+	DEFAULT_API_STUDIO_SETTINGS,
+	IKodiaApiStudioMainService,
+	KODIA_API_STUDIO_CHANNEL,
+} from '../common/apiStudioTypes.js'
+import {
+	assessApiProductionReadiness,
+	auditApiWorkspaceStaticSecurity,
+	ClientCodeTarget,
+	compareApiResponses,
+	correlateApiFailure,
+	diffOpenApiSpecs,
+	discoverWorkspaceApis,
+	exportCollectionToPostman,
+	formatDiscoveryForLLM,
+	formatResponseForLLM,
+	generateApiClientCode,
+	generateApiTestSuiteFromDiscovery,
+	generateOpenApiSpecFromDiscovery,
+	importFromCurl,
+	importFromPostmanCollection,
+} from '../common/apiStudioIntelligence.js'
 
 
 // tool use for AI
@@ -411,14 +447,19 @@ export class ToolsService implements IToolsService {
 		const kodiaOpsService = ProxyChannel.toService<IKodiaOpsMainService>(mainProcessService.getChannel(KODIA_OPS_CHANNEL))
 		const designAssetService = ProxyChannel.toService<IDesignAssetMainService>(mainProcessService.getChannel(KODIA_DESIGN_CHANNEL))
 		const aiEngineMainService = ProxyChannel.toService<IKodiaAIEngineMainService>(mainProcessService.getChannel(KODIA_AI_ENGINE_CHANNEL))
+		const apiStudioMainService = ProxyChannel.toService<IKodiaApiStudioMainService>(mainProcessService.getChannel(KODIA_API_STUDIO_CHANNEL))
 		const getDesignService = (): IDesignIntelligenceService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService)) } catch { return undefined }
 		}
 		const getAIEngineService = (): IAIEngineeringService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IAIEngineeringService)) } catch { return undefined }
 		}
+		const getApiStudioService = (): IApiStudioService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IApiStudioService)) } catch { return undefined }
+		}
 		const getDesignSettings = () => this.voidSettingsService.state.globalSettings.designIntelligence ?? DEFAULT_DESIGN_INTELLIGENCE_SETTINGS
 		const getAISettings = () => this.voidSettingsService.state.globalSettings.aiEngine ?? DEFAULT_AI_ENGINE_SETTINGS
+		const getApiStudioSettings = () => this.voidSettingsService.state.globalSettings.apiStudio ?? DEFAULT_API_STUDIO_SETTINGS
 		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
@@ -1817,6 +1858,208 @@ export class ToolsService implements IToolsService {
 				component: validateOptionalStr('component', params.component) ?? undefined,
 			}),
 			ai_check_provider_capabilities: () => ({}),
+
+			// Kodia API Engineering Studio (20 tools)
+			api_open_studio: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? undefined) as ApiStudioSection | undefined,
+				method: (validateOptionalStr('method', params.method)?.toUpperCase() ?? undefined) as ApiHttpMethod | undefined,
+				url: validateOptionalStr('url', params.url) ?? undefined,
+				protocol: (validateOptionalStr('protocol', params.protocol) ?? undefined) as ApiProtocol | undefined,
+			}),
+			api_discover_project: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+				max_files: validateNumber(params.max_files, { default: 150 }) ?? 150,
+			}),
+			api_runtime_start: (params: RawToolParamsObj) => {
+				let env: Record<string, string> | undefined
+				if (params.env) {
+					try { env = typeof params.env === 'string' ? JSON.parse(params.env) : params.env as Record<string, string> } catch { env = undefined }
+				}
+				return {
+					name: validateStr('name', params.name).trim(),
+					command: validateStr('command', params.command).trim(),
+					cwd: validateOptionalStr('cwd', params.cwd) ?? undefined,
+					port: validateNumber(params.port, { default: null }) ?? undefined,
+					health_url: validateOptionalStr('health_url', params.health_url) ?? undefined,
+					env,
+					ready_timeout_ms: validateNumber(params.ready_timeout_ms, { default: 10000 }) ?? 10000,
+				}
+			},
+			api_runtime_status: () => ({}),
+			api_runtime_stop: (params: RawToolParamsObj) => ({
+				runtime_id: validateOptionalStr('runtime_id', params.runtime_id) ?? undefined,
+				stop_all: validateBoolean(params.stop_all, { default: false }),
+			}),
+			api_send_request: (params: RawToolParamsObj) => {
+				const parseObj = <T>(v: unknown): T | undefined => {
+					if (!v) return undefined
+					if (typeof v === 'string') { try { return JSON.parse(v) as T } catch { return undefined } }
+					return v as T
+				}
+				return {
+					url: validateStr('url', params.url).trim(),
+					method: ((validateOptionalStr('method', params.method) ?? 'GET').toUpperCase()) as ApiHttpMethod,
+					protocol: (validateOptionalStr('protocol', params.protocol) ?? 'http') as ApiProtocol,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					params: parseObj<ApiKeyValuePair[]>(params.params),
+					headers: parseObj<Record<string, string>>(params.headers),
+					auth: parseObj<ApiAuthConfig>(params.auth),
+					body: parseObj<ApiRequestBody>(params.body),
+					body_raw: validateOptionalStr('body_raw', params.body_raw) ?? undefined,
+					pre_request_script: validateOptionalStr('pre_request_script', params.pre_request_script) ?? undefined,
+					test_script: validateOptionalStr('test_script', params.test_script) ?? undefined,
+					assertions: parseObj<ApiAssertionSpec[]>(params.assertions),
+					environment_id: validateOptionalStr('environment_id', params.environment_id) ?? undefined,
+					timeout_ms: validateNumber(params.timeout_ms, { default: null }) ?? undefined,
+					allow_protected_environment: validateBoolean(params.allow_protected_environment, { default: false }),
+				}
+			},
+			api_websocket_session: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['connect', 'send', 'close', 'list'].includes(rawAct) ? rawAct : 'list') as 'connect' | 'send' | 'close' | 'list'
+				let headers: Record<string, string> | undefined
+				if (params.headers) {
+					try { headers = typeof params.headers === 'string' ? JSON.parse(params.headers) : params.headers as Record<string, string> } catch { headers = undefined }
+				}
+				const rawKind = (validateOptionalStr('kind', params.kind) ?? 'text').toLowerCase()
+				return {
+					action,
+					session_id: validateOptionalStr('session_id', params.session_id) ?? undefined,
+					url: validateOptionalStr('url', params.url) ?? undefined,
+					message: validateOptionalStr('message', params.message) ?? undefined,
+					kind: (['text', 'json', 'ping'].includes(rawKind) ? rawKind : 'text') as 'text' | 'json' | 'ping',
+					headers,
+				}
+			},
+			api_generate_test_suite: (params: RawToolParamsObj) => ({
+				name: validateOptionalStr('name', params.name) ?? undefined,
+				base_url: validateStr('base_url', params.base_url).trim(),
+				include_negative_tests: validateBoolean(params.include_negative_tests, { default: true }),
+				save: validateBoolean(params.save, { default: true }),
+			}),
+			api_run_test_suite: (params: RawToolParamsObj) => {
+				let suite: ApiTestSuite | undefined
+				if (params.suite) {
+					try { suite = typeof params.suite === 'string' ? JSON.parse(params.suite) : params.suite as ApiTestSuite } catch { suite = undefined }
+				}
+				return {
+					suite_id: validateOptionalStr('suite_id', params.suite_id) ?? undefined,
+					suite,
+					environment_id: validateOptionalStr('environment_id', params.environment_id) ?? undefined,
+					base_url: validateOptionalStr('base_url', params.base_url) ?? undefined,
+					allow_protected_environment: validateBoolean(params.allow_protected_environment, { default: false }),
+				}
+			},
+			api_run_load_test: (params: RawToolParamsObj) => {
+				let headers: Record<string, string> | undefined
+				if (params.headers) {
+					try { headers = typeof params.headers === 'string' ? JSON.parse(params.headers) : params.headers as Record<string, string> } catch { headers = undefined }
+				}
+				const maxErrRaw = params.max_error_rate !== undefined && params.max_error_rate !== null ? Number(params.max_error_rate) : undefined
+				const p95Raw = params.p95_threshold_ms !== undefined && params.p95_threshold_ms !== null ? Number(params.p95_threshold_ms) : undefined
+				return {
+					name: validateStr('name', params.name).trim(),
+					url: validateStr('url', params.url).trim(),
+					method: ((validateOptionalStr('method', params.method) ?? 'GET').toUpperCase()) as ApiHttpMethod,
+					headers,
+					body_raw: validateOptionalStr('body_raw', params.body_raw) ?? undefined,
+					virtual_users: validateNumber(params.virtual_users, { default: 5 }) ?? 5,
+					duration_seconds: validateNumber(params.duration_seconds, { default: 3 }) ?? 3,
+					ramp_up_seconds: validateNumber(params.ramp_up_seconds, { default: 0 }) ?? 0,
+					max_error_rate: Number.isFinite(maxErrRaw) ? maxErrRaw : undefined,
+					p95_threshold_ms: Number.isFinite(p95Raw) ? p95Raw : undefined,
+					allow_non_local_target: validateBoolean(params.allow_non_local_target, { default: false }),
+				}
+			},
+			api_security_audit: (params: RawToolParamsObj) => ({
+				base_url: validateOptionalStr('base_url', params.base_url) ?? undefined,
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+				allow_live_probes: validateBoolean(params.allow_live_probes, { default: true }),
+			}),
+			api_compare_responses: (params: RawToolParamsObj) => ({
+				left_history_index: validateNumber(params.left_history_index, { default: 1 }) ?? 1,
+				right_history_index: validateNumber(params.right_history_index, { default: 0 }) ?? 0,
+			}),
+			api_generate_openapi: (params: RawToolParamsObj) => ({
+				title: validateStr('title', params.title).trim(),
+				version: validateOptionalStr('version', params.version) ?? '1.0.0',
+				server_url: validateOptionalStr('server_url', params.server_url) ?? undefined,
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			api_diff_specs: (params: RawToolParamsObj) => ({
+				base_spec_json: validateStr('base_spec_json', params.base_spec_json),
+				target_spec_json: validateStr('target_spec_json', params.target_spec_json),
+			}),
+			api_generate_client_sdk: (params: RawToolParamsObj) => {
+				let headers: Record<string, string> | undefined
+				if (params.headers) {
+					try { headers = typeof params.headers === 'string' ? JSON.parse(params.headers) : params.headers as Record<string, string> } catch { headers = undefined }
+				}
+				const rawTarget = (validateOptionalStr('target', params.target) ?? 'fetch').toLowerCase()
+				const validTargets: ClientCodeTarget[] = ['curl', 'fetch', 'typescript-sdk', 'python', 'go', 'rust', 'csharp', 'java']
+				const target: ClientCodeTarget = validTargets.includes(rawTarget as ClientCodeTarget) ? rawTarget as ClientCodeTarget : 'fetch'
+				return {
+					url: validateStr('url', params.url).trim(),
+					method: ((validateOptionalStr('method', params.method) ?? 'GET').toUpperCase()) as ApiHttpMethod,
+					headers,
+					body_raw: validateOptionalStr('body_raw', params.body_raw) ?? undefined,
+					target,
+				}
+			},
+			api_mock_server: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['start', 'stop', 'list'].includes(rawAct) ? rawAct : 'list') as 'start' | 'stop' | 'list'
+				let routes: ApiMockRoute[] | undefined
+				if (params.routes) {
+					try { routes = typeof params.routes === 'string' ? JSON.parse(params.routes) : params.routes as ApiMockRoute[] } catch { routes = undefined }
+				}
+				return {
+					action,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					mock_id: validateOptionalStr('mock_id', params.mock_id) ?? undefined,
+					port: validateNumber(params.port, { default: 0 }) ?? 0,
+					routes,
+				}
+			},
+			api_manage_collection: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['list', 'save', 'delete', 'import_curl', 'import_postman', 'export_postman'].includes(rawAct) ? rawAct : 'list') as 'list' | 'save' | 'delete' | 'import_curl' | 'import_postman' | 'export_postman'
+				let collection: ApiCollection | undefined
+				if (params.collection) {
+					try { collection = typeof params.collection === 'string' ? JSON.parse(params.collection) : params.collection as ApiCollection } catch { collection = undefined }
+				}
+				return {
+					action,
+					collection_id: validateOptionalStr('collection_id', params.collection_id) ?? undefined,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					raw_input: validateOptionalStr('raw_input', params.raw_input) ?? undefined,
+					collection,
+				}
+			},
+			api_manage_environment: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['list', 'save', 'set_active'].includes(rawAct) ? rawAct : 'list') as 'list' | 'save' | 'set_active'
+				const rawKind = (validateOptionalStr('kind', params.kind) ?? 'local').toLowerCase()
+				const kind = (['local', 'development', 'testing', 'staging', 'production', 'custom'].includes(rawKind) ? rawKind : 'local') as ApiEnvironment['kind']
+				let variables: ApiKeyValuePair[] | undefined
+				if (params.variables) {
+					try { variables = typeof params.variables === 'string' ? JSON.parse(params.variables) : params.variables as ApiKeyValuePair[] } catch { variables = undefined }
+				}
+				return {
+					action,
+					environment_id: validateOptionalStr('environment_id', params.environment_id) ?? undefined,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					kind,
+					base_url: validateOptionalStr('base_url', params.base_url) ?? undefined,
+					is_protected: validateBoolean(params.is_protected, { default: kind === 'production' }),
+					variables,
+					set_active: validateBoolean(params.set_active, { default: true }),
+				}
+			},
+			api_assess_production_readiness: () => ({}),
+			api_correlate_failure: (params: RawToolParamsObj) => ({
+				history_index: validateNumber(params.history_index, { default: 0 }) ?? 0,
+			}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -3859,6 +4102,359 @@ export class ToolsService implements IToolsService {
 				}
 			},
 
+			// Kodia API Engineering Studio (20 tools)
+			api_open_studio: async ({ section, method, url, protocol }) => {
+				const svc = getApiStudioService()
+				const targetSection: ApiStudioSection = section ?? 'requests'
+				let req: ApiRequestSpec | undefined
+				if (url) {
+					const cur = svc?.state.activeRequest
+					req = {
+						id: `req-${Date.now().toString(36)}`,
+						name: `${method ?? 'GET'} ${url}`,
+						protocol: protocol ?? 'http',
+						method: method ?? 'GET',
+						url,
+						params: cur?.params ?? [],
+						headers: cur?.headers ?? [{ id: 'h-accept', key: 'Accept', value: 'application/json', enabled: true }],
+						auth: cur?.auth ?? { type: 'none' },
+						body: cur?.body ?? { mode: 'none' },
+						assertions: cur?.assertions ?? [],
+					}
+				}
+				await svc?.openStudio({ section: targetSection, request: req })
+				return { result: { opened: true, section: targetSection, url } }
+			},
+			api_discover_project: async ({ sub_path, max_files }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: max_files ?? 150 })
+				const report = discoverWorkspaceApis(root, scanned.map(f => ({ path: f.relativePath, content: f.content })))
+				const svc = getApiStudioService()
+				svc?.recordDiscovery(report)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'explorer' })
+				}
+				return { result: report }
+			},
+			api_runtime_start: async ({ name, command, cwd, port, health_url, env, ready_timeout_ms }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const info = await apiStudioMainService.startRuntime(root, { name, command, cwd, port, healthUrl: health_url, env, readyTimeoutMs: ready_timeout_ms })
+				const all = await apiStudioMainService.listRuntimes()
+				const svc = getApiStudioService()
+				svc?.recordRuntimes(all)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'topology' })
+				}
+				return { result: info }
+			},
+			api_runtime_status: async () => {
+				const runtimes = await apiStudioMainService.listRuntimes()
+				getApiStudioService()?.recordRuntimes(runtimes)
+				return { result: { runtimes } }
+			},
+			api_runtime_stop: async ({ runtime_id, stop_all }) => {
+				if (stop_all || !runtime_id) {
+					const stoppedCount = await apiStudioMainService.stopAllRuntimes()
+					getApiStudioService()?.recordRuntimes(await apiStudioMainService.listRuntimes())
+					return { result: { stoppedCount } }
+				}
+				const runtime = await apiStudioMainService.stopRuntime(runtime_id)
+				getApiStudioService()?.recordRuntimes(await apiStudioMainService.listRuntimes())
+				return { result: { stoppedCount: runtime ? 1 : 0, runtime } }
+			},
+			api_send_request: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const headersList: ApiKeyValuePair[] = Object.entries(p.headers ?? {}).map(([k, v], i) => ({
+					id: `hdr-${i}`,
+					key: k,
+					value: String(v),
+					enabled: true,
+				}))
+				const body: ApiRequestBody = p.body ?? (p.body_raw !== undefined ? { mode: p.protocol === 'soap' ? 'soap' : 'json', raw: p.body_raw } : { mode: 'none' })
+				const reqSpec: ApiRequestSpec = {
+					id: `req-${Date.now().toString(36)}`,
+					name: p.name ?? `${p.method ?? 'GET'} ${p.url}`,
+					protocol: p.protocol ?? 'http',
+					method: p.method ?? 'GET',
+					url: p.url,
+					params: p.params ?? [],
+					headers: headersList,
+					auth: p.auth ?? { type: 'none' },
+					body,
+					preRequestScript: p.pre_request_script,
+					testScript: p.test_script,
+					assertions: p.assertions ?? [],
+					timeoutMs: p.timeout_ms ?? getApiStudioSettings().defaultTimeoutMs,
+				}
+				const svc = getApiStudioService()
+				svc?.setActiveRequest(reqSpec)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'requests', request: reqSpec })
+				}
+				const response = await apiStudioMainService.executeRequest(root, {
+					request: reqSpec,
+					environmentId: p.environment_id,
+					allowProtectedEnvironment: p.allow_protected_environment,
+					persistHistory: true,
+				})
+				svc?.recordResponse(response)
+				await svc?.refreshFromDisk()
+				return { result: response }
+			},
+			api_websocket_session: async ({ action, session_id, url, message, kind, headers }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				let session = null
+				if (action === 'connect') {
+					if (!url) throw new Error('url is required for api_websocket_session connect')
+					session = await apiStudioMainService.connectWebSocket(root, { url, headers })
+				} else if (action === 'send') {
+					if (!session_id) throw new Error('session_id is required for api_websocket_session send')
+					session = await apiStudioMainService.sendWebSocketMessage(session_id, message ?? '', kind ?? 'text')
+				} else if (action === 'close') {
+					if (!session_id) throw new Error('session_id is required for api_websocket_session close')
+					session = await apiStudioMainService.closeWebSocket(session_id)
+				}
+				const sessions = await apiStudioMainService.listWebSockets()
+				const svc = getApiStudioService()
+				svc?.recordWebSockets(sessions)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks && action === 'connect') {
+					void svc?.openStudio({ section: 'websockets' })
+				}
+				return { result: { session, sessions } }
+			},
+			api_generate_test_suite: async ({ name, base_url, include_negative_tests, save }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getApiStudioService()
+				let discovery = svc?.state.discovery ?? null
+				if (!discovery) {
+					const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 150 })
+					discovery = discoverWorkspaceApis(root, scanned.map(f => ({ path: f.relativePath, content: f.content })))
+					svc?.recordDiscovery(discovery)
+				}
+				const suite = generateApiTestSuiteFromDiscovery({ name, baseUrl: base_url, discovery, includeNegativeTests: include_negative_tests })
+				if (save !== false && root) {
+					const all = await apiStudioMainService.saveTestSuite(root, suite)
+					svc?.recordSuites(all)
+				}
+				return { result: suite }
+			},
+			api_run_test_suite: async ({ suite_id, suite, environment_id, base_url, allow_protected_environment }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getApiStudioService()
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'runner' })
+				}
+				const run = await apiStudioMainService.runTestSuite(root, {
+					suiteId: suite_id,
+					suite,
+					environmentId: environment_id,
+					baseUrlOverride: base_url,
+					allowProtectedEnvironment: allow_protected_environment,
+				})
+				svc?.recordTestRun(run)
+				await svc?.refreshFromDisk()
+				return { result: run }
+			},
+			api_run_load_test: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getApiStudioService()
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'performance' })
+				}
+				const headersList: ApiKeyValuePair[] = Object.entries(p.headers ?? {}).map(([k, v], i) => ({
+					id: `lh-${i}`, key: k, value: String(v), enabled: true,
+				}))
+				const run = await apiStudioMainService.runLoadTest(root, {
+					name: p.name,
+					request: {
+						id: `load-req-${Date.now().toString(36)}`,
+						name: p.name,
+						protocol: 'http',
+						method: p.method ?? 'GET',
+						url: p.url,
+						params: [],
+						headers: headersList,
+						auth: { type: 'none' },
+						body: p.body_raw ? { mode: 'json', raw: p.body_raw } : { mode: 'none' },
+					},
+					virtualUsers: p.virtual_users,
+					durationSeconds: p.duration_seconds,
+					rampUpSeconds: p.ramp_up_seconds,
+					maxErrorRate: p.max_error_rate,
+					p95ThresholdMs: p.p95_threshold_ms,
+					allowNonLocalTarget: p.allow_non_local_target,
+				})
+				svc?.recordLoadRun(run)
+				return { result: run }
+			},
+			api_security_audit: async ({ base_url, sub_path, allow_live_probes }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: 120 })
+				const staticAudit = auditApiWorkspaceStaticSecurity(scanned.map(f => ({ path: f.relativePath, content: f.content })))
+				const svc = getApiStudioService()
+				const discovery = svc?.state.discovery ?? discoverWorkspaceApis(root, scanned.map(f => ({ path: f.relativePath, content: f.content })))
+				const report = await apiStudioMainService.runSecurityAudit(root, {
+					baseUrl: base_url,
+					routes: discovery.routes,
+					staticFindings: staticAudit.findings,
+					filesScanned: scanned.length,
+					allowLiveProbes: allow_live_probes,
+				})
+				svc?.recordSecurityReport(report)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'security' })
+				}
+				return { result: report }
+			},
+			api_compare_responses: async ({ left_history_index, right_history_index, left_response, right_response }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+				const left: ApiResponseResult | undefined = left_response ?? snap.history[left_history_index ?? 1]?.response
+				const right: ApiResponseResult | undefined = right_response ?? snap.history[right_history_index ?? 0]?.response
+				if (!left || !right) {
+					throw new Error('At least two recorded API responses are required to compare.')
+				}
+				return { result: compareApiResponses(left, right, `History[${left_history_index ?? 1}]`, `History[${right_history_index ?? 0}]`) }
+			},
+			api_generate_openapi: async ({ title, version, server_url, sub_path }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: 150 })
+				const discovery = discoverWorkspaceApis(root, scanned.map(f => ({ path: f.relativePath, content: f.content })))
+				const spec = generateOpenApiSpecFromDiscovery({ title, version, serverUrl: server_url, discovery })
+				return { result: { spec, endpointCount: discovery.routes.filter(r => r.protocol === 'http').length } }
+			},
+			api_diff_specs: async ({ base_spec_json, target_spec_json }) => ({
+				result: diffOpenApiSpecs(base_spec_json, target_spec_json),
+			}),
+			api_generate_client_sdk: async ({ url, method, headers, body_raw, target }) => {
+				const req: ApiRequestSpec = {
+					id: 'sdk-gen',
+					name: `${method ?? 'GET'} ${url}`,
+					protocol: 'http',
+					method: method ?? 'GET',
+					url,
+					params: [],
+					headers: Object.entries(headers ?? {}).map(([k, v], i) => ({ id: `h-${i}`, key: k, value: String(v), enabled: true })),
+					auth: { type: 'none' },
+					body: body_raw ? { mode: 'json', raw: body_raw } : { mode: 'none' },
+				}
+				return { result: { target, code: generateApiClientCode(req, target) } }
+			},
+			api_mock_server: async ({ action, name, mock_id, port, routes }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				let mock = undefined
+				let stopped = undefined
+				if (action === 'start') {
+					mock = await apiStudioMainService.startMockServer(root, { name: name || 'Kodia Mock API', port, routes: routes ?? [] })
+				} else if (action === 'stop' && mock_id) {
+					stopped = await apiStudioMainService.stopMockServer(mock_id)
+				}
+				const mocks = await apiStudioMainService.listMockServers()
+				getApiStudioService()?.recordMockServers(mocks)
+				return { result: { mock, mocks, stopped } }
+			},
+			api_manage_collection: async ({ action, collection_id, name, raw_input, collection }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getApiStudioService()
+				if (action === 'save' && collection) {
+					const collections = await apiStudioMainService.saveCollection(root, collection)
+					svc?.recordCollections(collections)
+					return { result: { message: `Saved collection "${collection.name}".`, collections } }
+				}
+				if (action === 'delete' && collection_id) {
+					const collections = await apiStudioMainService.deleteCollection(root, collection_id)
+					svc?.recordCollections(collections)
+					return { result: { message: `Deleted collection ${collection_id}.`, collections } }
+				}
+				if (action === 'import_curl' && raw_input) {
+					const req = importFromCurl(raw_input)
+					const now = new Date().toISOString()
+					const col: ApiCollection = {
+						id: `col-curl-${Date.now().toString(36)}`,
+						name: name || 'Imported cURL',
+						variables: [],
+						requests: [req],
+						createdAt: now,
+						updatedAt: now,
+					}
+					const collections = await apiStudioMainService.saveCollection(root, col)
+					svc?.recordCollections(collections)
+					return { result: { message: `Imported cURL request into collection "${col.name}".`, collections } }
+				}
+				if (action === 'import_postman' && raw_input) {
+					const col = importFromPostmanCollection(raw_input)
+					const collections = await apiStudioMainService.saveCollection(root, col)
+					svc?.recordCollections(collections)
+					return { result: { message: `Imported Postman collection "${col.name}" (${col.requests.length} requests).`, collections } }
+				}
+				const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+				if (action === 'export_postman' && collection_id) {
+					const target = snap.collections.find(c => c.id === collection_id)
+					if (!target) throw new Error(`Collection "${collection_id}" not found.`)
+					return { result: { message: `Exported "${target.name}" as Postman v2.1 JSON.`, collections: [...snap.collections], exportedJson: JSON.stringify(exportCollectionToPostman(target), null, 2) } }
+				}
+				svc?.recordCollections(snap.collections)
+				return { result: { message: `${snap.collections.length} API collection(s) found.`, collections: [...snap.collections] } }
+			},
+			api_manage_environment: async ({ action, environment_id, name, kind, base_url, is_protected, variables, set_active }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getApiStudioService()
+				if (action === 'save') {
+					const env: ApiEnvironment = {
+						id: environment_id || `env-${(name || 'local').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString(36)}`,
+						name: name || 'Local',
+						kind: kind ?? 'local',
+						baseUrl: base_url,
+						isProtected: is_protected,
+						variables: variables ?? [],
+						updatedAt: new Date().toISOString(),
+					}
+					const res = await apiStudioMainService.saveEnvironment(root, env, set_active !== false)
+					svc?.recordEnvironments(res.environments, res.activeEnvironmentId)
+					return { result: { message: `Saved environment "${env.name}" (${env.kind}).`, environments: res.environments, activeEnvironmentId: res.activeEnvironmentId } }
+				}
+				if (action === 'set_active') {
+					const activeId = await apiStudioMainService.setActiveEnvironment(root, environment_id ?? null)
+					const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+					svc?.recordEnvironments(snap.environments, activeId)
+					return { result: { message: `Active API environment set to ${activeId ?? 'none'}.`, environments: [...snap.environments], activeEnvironmentId: activeId } }
+				}
+				const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+				svc?.recordEnvironments(snap.environments, snap.activeEnvironmentId)
+				return { result: { message: `${snap.environments.length} environment(s) configured (active=${snap.activeEnvironmentId ?? 'none'}).`, environments: [...snap.environments], activeEnvironmentId: snap.activeEnvironmentId } }
+			},
+			api_assess_production_readiness: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+				const svc = getApiStudioService()
+				const report = assessApiProductionReadiness({
+					discovery: svc?.state.discovery,
+					latestTestRun: snap.testRuns[0] ?? null,
+					latestLoadRun: snap.loadRuns[0] ?? null,
+					latestSecurityReport: snap.securityReports[0] ?? null,
+					runtimes: snap.runtimes,
+				})
+				svc?.recordReadiness(report)
+				if (getApiStudioSettings().autoOpenStudioOnApiTasks) {
+					void svc?.openStudio({ section: 'readiness' })
+				}
+				return { result: report }
+			},
+			api_correlate_failure: async ({ history_index }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = await apiStudioMainService.loadWorkspaceSnapshot(root)
+				const svc = getApiStudioService()
+				const target = snap.history[history_index ?? 0]?.response ?? svc?.state.latestResponse
+				if (!target) { throw new Error('No recorded API response found to correlate.'); }
+				const report = correlateApiFailure({
+					response: target,
+					discovery: svc?.state.discovery,
+					runtimes: snap.runtimes,
+				})
+				svc?.recordFailureCorrelation(report)
+				return { result: report }
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell }) => {
 				await voidModelService.initializeModel(uri)
@@ -5158,6 +5754,80 @@ export class ToolsService implements IToolsService {
 			ai_check_provider_capabilities: (_params, r) => [
 				`# Kodia Model-Agnostic Provider Matrix (${r.configuredCount} configured, ${r.localConfiguredCount} local)`,
 				...r.providers.filter(p => p.configured || p.isLocal).map(p => `- **${p.providerName}** [${p.isLocal ? 'local' : 'cloud'}] ${p.configured ? 'CONFIGURED' : 'not configured'}: ${p.modelCount} model(s), tools=${p.supportsToolCalling}, vision=${p.supportsVision}, reasoning=${p.supportsReasoning}${p.sampleModels.length ? ` (${p.sampleModels.join(', ')})` : ''}`),
+			].join('\n'),
+
+			// Kodia API Engineering Studio (20 tools)
+			api_open_studio: (_params, r) => `Opened native Kodia API Engineering Studio (section=${r.section}${r.url ? `, url=${r.url}` : ''}).`,
+			api_discover_project: (_params, r) => formatDiscoveryForLLM(r),
+			api_runtime_start: (_params, r) => [
+				`API Runtime **${r.name}** (${r.runtimeId}): status=${r.status}, pid=${r.pid ?? 'n/a'}, port=${r.port ?? 'n/a'}, baseUrl=${r.baseUrl ?? 'n/a'}`,
+				...(r.error ? [`Error: ${r.error}`] : []),
+				...(r.recentLogs.length ? [`Recent Logs:\n${r.recentLogs.slice(-10).join('\n')}`] : []),
+			].join('\n'),
+			api_runtime_status: (_params, r) => r.runtimes.length === 0
+				? 'No managed API runtimes currently tracked.'
+				: r.runtimes.map(rt => `- **${rt.name}** (${rt.runtimeId}): ${rt.status} | port=${rt.port ?? 'n/a'} | pid=${rt.pid ?? 'n/a'} | logs=${rt.recentLogs.length}`).join('\n'),
+			api_runtime_stop: (_params, r) => `Stopped ${r.stoppedCount} API runtime(s).`,
+			api_send_request: (_params, r) => formatResponseForLLM(r),
+			api_websocket_session: (_params, r) => [
+				...(r.session ? [`WebSocket ${r.session.sessionId} (${r.session.url}): status=${r.session.status}, messages=${r.session.messages.length}${r.session.error ? `, error=${r.session.error}` : ''}`, ...r.session.messages.slice(-6).map(m => `  [${m.direction}/${m.kind}] ${m.data.slice(0, 140)}`)] : []),
+				`Total tracked WebSocket sessions: ${r.sessions.length}`,
+			].join('\n'),
+			api_generate_test_suite: (_params, r) => [
+				`Generated API Test Suite **${r.name}** (${r.id}): ${r.requests.length} test(s)`,
+				...r.requests.slice(0, 20).map(req => `- ${req.method} ${req.url} (${req.assertions?.length ?? 0} assertions)`),
+			].join('\n'),
+			api_run_test_suite: (_params, r) => [
+				`# API Test Suite Run (${r.runId})`,
+				r.summary,
+				...r.cases.map(c => `- [${c.status.toUpperCase()}] ${c.method} ${c.url} (HTTP ${c.httpStatus ?? 0}, ${c.durationMs}ms)${c.failureReason ? ` -> ${c.failureReason}` : ''}`),
+			].join('\n'),
+			api_run_load_test: (_params, r) => [
+				`# API Performance Load Test (${r.runId})`,
+				r.summary,
+				`Latency ms: min=${r.latencyMs.min}, avg=${r.latencyMs.avg}, p50=${r.latencyMs.p50}, p90=${r.latencyMs.p90}, p95=${r.latencyMs.p95}, p99=${r.latencyMs.p99}, max=${r.latencyMs.max}`,
+				`Throughput: ${r.throughputBytesPerSec} B/s | Thresholds: ${r.passedThresholds ? 'PASSED' : 'FAILED'} | Generator Saturated: ${r.generatorSaturated ? 'YES' : 'NO'}`,
+				...r.thresholdDetails.map(d => `- ${d}`),
+			].join('\n'),
+			api_security_audit: (_params, r) => [
+				`# API Security Audit (${r.id})`,
+				r.summary,
+				...(r.findings.length ? r.findings.map(f => `- [${f.severity.toUpperCase()}/${f.confidence}] ${f.title} (${f.endpoint ?? `${f.file}:${f.line}`}) -> ${f.remediation}`) : ['- No security findings detected.']),
+			].join('\n'),
+			api_compare_responses: (_params, r) => [
+				`# API Response Comparison (${r.leftLabel} vs ${r.rightLabel})`,
+				r.summary,
+				`Latency delta: ${r.latencyDeltaMs >= 0 ? '+' : ''}${r.latencyDeltaMs}ms | Size delta: ${r.sizeDeltaBytes >= 0 ? '+' : ''}${r.sizeDeltaBytes}B`,
+				...r.bodyDiffs.slice(0, 20).map(d => `- [${d.kind}] ${d.path}: ${d.left ?? '<none>'} -> ${d.right ?? '<none>'}`),
+			].join('\n'),
+			api_generate_openapi: (_params, r) => `Generated OpenAPI 3.1.0 spec with ${r.endpointCount} HTTP endpoint(s):\n\`\`\`json\n${JSON.stringify(r.spec, null, 2).slice(0, 3000)}\n\`\`\``,
+			api_diff_specs: (_params, r) => [
+				`# OpenAPI Specification Diff (${r.baseSpec} -> ${r.targetSpec})`,
+				r.summary,
+				...r.breakingChanges.map(b => `- [BREAKING] ${b}`),
+				...r.nonBreakingChanges.map(n => `- [NON-BREAKING] ${n}`),
+			].join('\n'),
+			api_generate_client_sdk: (_params, r) => `# Generated API Client (${r.target})\n\`\`\`\n${r.code}\n\`\`\``,
+			api_mock_server: (_params, r) => [
+				...(r.mock ? [`Started MOCK Server **${r.mock.name}** (${r.mock.mockId}) at ${r.mock.baseUrl} [IS_MOCK=true, ${r.mock.routes.length} routes]`] : []),
+				...(r.stopped !== undefined ? [`Mock server stop result: ${r.stopped}`] : []),
+				`Active mock servers: ${r.mocks.length}`,
+			].join('\n'),
+			api_manage_collection: (_params, r) => r.exportedJson ? `${r.message}\n\`\`\`json\n${r.exportedJson.slice(0, 2500)}\n\`\`\`` : r.message,
+			api_manage_environment: (_params, r) => r.message,
+			api_assess_production_readiness: (_params, r) => [
+				`# API Production Readiness Assessment`,
+				r.summary,
+				...r.pillars.map(p => `- **${p.pillar.toUpperCase()}**: ${p.status.toUpperCase()} (${p.score}/100) ${p.evidence[0] ?? p.gaps[0] ?? ''}`),
+				...(r.blockers.length ? [`Blockers:\n${r.blockers.map(b => `- ${b}`).join('\n')}`] : []),
+			].join('\n'),
+			api_correlate_failure: (_params, r) => [
+				`# API Failure Correlation (${r.endpoint}, HTTP ${r.status})`,
+				r.summary,
+				...(r.matchedRoute ? [`Matched Source Route: ${r.matchedRoute.filePath}:${r.matchedRoute.line} (${r.matchedRoute.framework})`] : []),
+				...(r.failedAssertions.length ? [`Failed Assertions:\n${r.failedAssertions.map(a => `- ${a}`).join('\n')}`] : []),
+				...(r.matchedLogLines.length ? [`Correlated Runtime Logs:\n${r.matchedLogLines.map(l => `  ${l}`).join('\n')}`] : []),
+				`Repair Steps:\n${r.repairSteps.map(s => `- ${s}`).join('\n')}`,
 			].join('\n'),
 
 			// Notebook operations

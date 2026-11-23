@@ -267,6 +267,27 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	ai_scaffold_product_factory: { done: 'Generated AI Product Factory blueprint', proposed: 'Scaffold AI Product Factory', running: 'Planning 9-phase AI Product Factory' },
 	ai_diagnose_failure: { done: 'Diagnosed AI failure', proposed: 'Diagnose AI failure', running: 'Investigating AI failure root cause' },
 	ai_check_provider_capabilities: { done: 'Checked AI provider matrix', proposed: 'Check AI providers', running: 'Inspecting BYOK & local model capabilities' },
+	// Kodia API Engineering Studio
+	api_open_studio: { done: 'Opened Kodia API Studio', proposed: 'Open API Studio', running: 'Opening native API Engineering Studio' },
+	api_discover_project: { done: 'Discovered project APIs', proposed: 'Discover project APIs', running: 'Scanning routes, specs & services' },
+	api_runtime_start: { done: 'Started API service runtime', proposed: 'Start API runtime', running: 'Starting API server & checking health' },
+	api_runtime_status: { done: 'Checked API runtimes', proposed: 'Check API runtimes', running: 'Inspecting running API services & logs' },
+	api_runtime_stop: { done: 'Stopped API service runtime', proposed: 'Stop API runtime', running: 'Stopping API server process' },
+	api_send_request: { done: 'Executed API request', proposed: 'Send API request', running: 'Sending live API request' },
+	api_websocket_session: { done: 'Updated WebSocket session', proposed: 'Manage WebSocket session', running: 'Running live WebSocket operation' },
+	api_generate_test_suite: { done: 'Generated API test suite', proposed: 'Generate API test suite', running: 'Synthesizing automated API tests' },
+	api_run_test_suite: { done: 'Ran API test suite', proposed: 'Run API test suite', running: 'Executing live API test suite' },
+	api_run_load_test: { done: 'Completed API load test', proposed: 'Run API load test', running: 'Executing concurrent performance load test' },
+	api_security_audit: { done: 'Audited API security', proposed: 'Audit API security', running: 'Running static & live API security assessment' },
+	api_compare_responses: { done: 'Compared API responses', proposed: 'Compare API responses', running: 'Diffing response status, headers & JSON' },
+	api_generate_openapi: { done: 'Generated OpenAPI 3.1 spec', proposed: 'Generate OpenAPI spec', running: 'Generating OpenAPI 3.1 specification' },
+	api_diff_specs: { done: 'Compared OpenAPI specs', proposed: 'Diff OpenAPI specs', running: 'Checking for API breaking changes' },
+	api_generate_client_sdk: { done: 'Generated API client SDK', proposed: 'Generate API client SDK', running: 'Generating typed API client code' },
+	api_mock_server: { done: 'Managed API mock server', proposed: 'Manage API mock server', running: 'Configuring local API mock server' },
+	api_manage_collection: { done: 'Updated API collections', proposed: 'Manage API collection', running: 'Updating API collections & imports' },
+	api_manage_environment: { done: 'Updated API environment', proposed: 'Manage API environment', running: 'Updating API environment & variables' },
+	api_assess_production_readiness: { done: 'Assessed API readiness', proposed: 'Assess production readiness', running: 'Evaluating 6-pillar API production readiness' },
+	api_correlate_failure: { done: 'Correlated API failure', proposed: 'Correlate API failure', running: 'Correlating failure with logs & source code' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -290,6 +311,7 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 
 export function getToolCategory(toolName: string): ToolCategory {
 	if (toolName.startsWith('ai_')) { return 'ai'; }
+	if (toolName.startsWith('api_') || toolName.startsWith('oauth2_')) { return 'api'; }
 	if (
 		toolName.includes('design_')
 		|| toolName.includes('visual_')

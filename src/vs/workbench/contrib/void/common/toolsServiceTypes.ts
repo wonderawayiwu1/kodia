@@ -69,6 +69,32 @@ import type {
 	RagQueryResult,
 	TrainingStrategyRecommendation,
 } from './aiEngineeringTypes.js';
+import type {
+	ApiAssertionSpec,
+	ApiAuthConfig,
+	ApiCollection,
+	ApiEnvironment,
+	ApiFailureCorrelationReport,
+	ApiHttpMethod,
+	ApiKeyValuePair,
+	ApiLoadTestResult,
+	ApiManagedRuntimeInfo,
+	ApiMockRoute,
+	ApiMockServerStatus,
+	ApiProductionReadinessReport,
+	ApiProjectDiscoveryReport,
+	ApiProtocol,
+	ApiRequestBody,
+	ApiResponseDiffReport,
+	ApiResponseResult,
+	ApiSecurityReport,
+	ApiSpecDiffReport,
+	ApiStudioSection,
+	ApiTestRunResult,
+	ApiTestSuite,
+	ApiWebSocketSessionInfo,
+} from './apiStudioTypes.js';
+import type { ClientCodeTarget } from './apiStudioIntelligence.js';
 
 
 
@@ -257,6 +283,17 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'ai_model_registry': 'edits',
 	'ai_create_workflow': 'edits',
 	'ai_run_workflow': 'terminal',
+	// Kodia API Engineering Studio
+	'api_runtime_start': 'terminal',
+	'api_runtime_stop': 'terminal',
+	'api_send_request': 'web pages',
+	'api_websocket_session': 'web pages',
+	'api_run_test_suite': 'terminal',
+	'api_run_load_test': 'terminal',
+	'api_security_audit': 'web pages',
+	'api_mock_server': 'terminal',
+	'api_manage_collection': 'edits',
+	'api_manage_environment': 'edits',
 }
 
 
@@ -512,6 +549,43 @@ export type BuiltinToolCallParams = {
 	'ai_scaffold_product_factory': { objective: string, project_title?: string, compute_preference?: 'auto' | 'local-first' | 'hybrid' | 'cloud-first' },
 	'ai_diagnose_failure': { error_summary: string, logs?: string, component?: string },
 	'ai_check_provider_capabilities': {},
+	// Kodia API Engineering Studio (20 tools)
+	'api_open_studio': { section?: ApiStudioSection, method?: ApiHttpMethod, url?: string, protocol?: ApiProtocol },
+	'api_discover_project': { sub_path?: string, max_files?: number },
+	'api_runtime_start': { name: string, command: string, cwd?: string, port?: number, health_url?: string, env?: Record<string, string>, ready_timeout_ms?: number },
+	'api_runtime_status': {},
+	'api_runtime_stop': { runtime_id?: string, stop_all?: boolean },
+	'api_send_request': {
+		url: string,
+		method?: ApiHttpMethod,
+		protocol?: ApiProtocol,
+		name?: string,
+		params?: ApiKeyValuePair[],
+		headers?: Record<string, string>,
+		auth?: ApiAuthConfig,
+		body?: ApiRequestBody,
+		body_raw?: string,
+		pre_request_script?: string,
+		test_script?: string,
+		assertions?: ApiAssertionSpec[],
+		environment_id?: string,
+		timeout_ms?: number,
+		allow_protected_environment?: boolean,
+	},
+	'api_websocket_session': { action: 'connect' | 'send' | 'close' | 'list', session_id?: string, url?: string, message?: string, kind?: 'text' | 'json' | 'ping', headers?: Record<string, string> },
+	'api_generate_test_suite': { name?: string, base_url: string, include_negative_tests?: boolean, save?: boolean },
+	'api_run_test_suite': { suite_id?: string, suite?: ApiTestSuite, environment_id?: string, base_url?: string, allow_protected_environment?: boolean },
+	'api_run_load_test': { name: string, url: string, method?: ApiHttpMethod, headers?: Record<string, string>, body_raw?: string, virtual_users: number, duration_seconds: number, ramp_up_seconds?: number, max_error_rate?: number, p95_threshold_ms?: number, allow_non_local_target?: boolean },
+	'api_security_audit': { base_url?: string, sub_path?: string, allow_live_probes?: boolean },
+	'api_compare_responses': { left_history_index?: number, right_history_index?: number, left_response?: ApiResponseResult, right_response?: ApiResponseResult },
+	'api_generate_openapi': { title: string, version?: string, server_url?: string, sub_path?: string },
+	'api_diff_specs': { base_spec_json: string, target_spec_json: string },
+	'api_generate_client_sdk': { url: string, method?: ApiHttpMethod, headers?: Record<string, string>, body_raw?: string, target: ClientCodeTarget },
+	'api_mock_server': { action: 'start' | 'stop' | 'list', name?: string, mock_id?: string, port?: number, routes?: ApiMockRoute[] },
+	'api_manage_collection': { action: 'list' | 'save' | 'delete' | 'import_curl' | 'import_postman' | 'export_postman', collection_id?: string, name?: string, raw_input?: string, collection?: ApiCollection },
+	'api_manage_environment': { action: 'list' | 'save' | 'set_active', environment_id?: string, name?: string, kind?: ApiEnvironment['kind'], base_url?: string, is_protected?: boolean, variables?: ApiKeyValuePair[], set_active?: boolean },
+	'api_assess_production_readiness': {},
+	'api_correlate_failure': { history_index?: number },
 }
 
 // RESULT OF TOOL CALL
@@ -753,6 +827,27 @@ export type BuiltinToolResultType = {
 	'ai_scaffold_product_factory': OneCommandFactoryBlueprint,
 	'ai_diagnose_failure': AIFailureDiagnosisReport,
 	'ai_check_provider_capabilities': { providers: ProviderCapabilitySummary[], configuredCount: number, localConfiguredCount: number },
+	// Kodia API Engineering Studio (20 tools)
+	'api_open_studio': { opened: boolean, section: ApiStudioSection, url?: string },
+	'api_discover_project': ApiProjectDiscoveryReport,
+	'api_runtime_start': ApiManagedRuntimeInfo,
+	'api_runtime_status': { runtimes: ApiManagedRuntimeInfo[] },
+	'api_runtime_stop': { stoppedCount: number, runtime?: ApiManagedRuntimeInfo | null },
+	'api_send_request': ApiResponseResult,
+	'api_websocket_session': { session?: ApiWebSocketSessionInfo | null, sessions: ApiWebSocketSessionInfo[] },
+	'api_generate_test_suite': ApiTestSuite,
+	'api_run_test_suite': ApiTestRunResult,
+	'api_run_load_test': ApiLoadTestResult,
+	'api_security_audit': ApiSecurityReport,
+	'api_compare_responses': ApiResponseDiffReport,
+	'api_generate_openapi': { spec: Record<string, unknown>, endpointCount: number },
+	'api_diff_specs': ApiSpecDiffReport,
+	'api_generate_client_sdk': { target: ClientCodeTarget, code: string },
+	'api_mock_server': { mock?: ApiMockServerStatus, mocks: ApiMockServerStatus[], stopped?: boolean },
+	'api_manage_collection': { message: string, collections: ApiCollection[], exportedJson?: string },
+	'api_manage_environment': { message: string, environments: ApiEnvironment[], activeEnvironmentId: string | null },
+	'api_assess_production_readiness': ApiProductionReadinessReport,
+	'api_correlate_failure': ApiFailureCorrelationReport,
 }
 
 

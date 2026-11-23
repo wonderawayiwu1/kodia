@@ -230,6 +230,8 @@ import { KodiaDesignAssetMainService } from '../../workbench/contrib/void/electr
 import { IDesignAssetMainService, KODIA_DESIGN_CHANNEL } from '../../workbench/contrib/void/common/designIntelligenceTypes.js';
 import { KodiaAIEngineMainService } from '../../workbench/contrib/void/electron-main/aiEngineMainService.js';
 import { IKodiaAIEngineMainService, KODIA_AI_ENGINE_CHANNEL } from '../../workbench/contrib/void/common/aiEngineeringTypes.js';
+import { KodiaApiStudioMainService } from '../../workbench/contrib/void/electron-main/apiStudioMainService.js';
+import { IKodiaApiStudioMainService, KODIA_API_STUDIO_CHANNEL } from '../../workbench/contrib/void/common/apiStudioTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
@@ -1386,6 +1388,7 @@ export class CodeApplication extends Disposable {
 		services.set(IKodiaOpsMainService, new SyncDescriptor(KodiaOpsMainService, undefined, false));
 		services.set(IDesignAssetMainService, new SyncDescriptor(KodiaDesignAssetMainService, undefined, false));
 		services.set(IKodiaAIEngineMainService, new SyncDescriptor(KodiaAIEngineMainService, undefined, false));
+		services.set(IKodiaApiStudioMainService, new SyncDescriptor(KodiaApiStudioMainService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
@@ -1601,6 +1604,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: Universal AI Engineering Engine (hardware probe, dataset profiler, RAG, experiments, model registry, evals, workflows)
 		const kodiaAIEngineChannel = ProxyChannel.fromService(accessor.get(IKodiaAIEngineMainService), disposables);
 		mainProcessElectronServer.registerChannel(KODIA_AI_ENGINE_CHANNEL, kodiaAIEngineChannel);
+
+		// Kodia: API Engineering Studio (live HTTP/GraphQL/WS/SSE/SOAP/gRPC client, runtime manager, test runner, load engine, security & mock servers)
+		const kodiaApiStudioChannel = ProxyChannel.fromService(accessor.get(IKodiaApiStudioMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
+		mainProcessElectronServer.registerChannel(KODIA_API_STUDIO_CHANNEL, kodiaApiStudioChannel);
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);

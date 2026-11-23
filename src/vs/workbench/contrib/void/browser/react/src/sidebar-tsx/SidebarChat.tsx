@@ -3000,6 +3000,50 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 					</div>
 				)
 			}
+		} else if (category === 'api' && rawResult && typeof rawResult === 'object') {
+			if (toolMessage.name === 'api_send_request' && typeof rawResult.status === 'number') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className={rawResult.ok ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+							HTTP {rawResult.status}
+						</span>
+						<span className='text-void-fg-2'>{rawResult.timing?.totalMs ?? 0}ms</span>
+						<span className='text-void-fg-3'>{rawResult.sizeBytes ?? 0}B</span>
+						{rawResult.isMock && <span className='text-amber-400 font-sans font-semibold'>[MOCK]</span>}
+					</div>
+				)
+			} else if (toolMessage.name === 'api_run_test_suite' && typeof rawResult.total === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.failed === 0 && rawResult.blocked === 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+							API Suite: {rawResult.passed}/{rawResult.total} Passed
+						</span>
+						<span className='text-void-fg-3 font-mono text-[10px]'>{rawResult.durationMs}ms</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'api_run_load_test' && typeof rawResult.rps === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className='text-sky-400 font-semibold'>{rawResult.rps} RPS</span>
+						<span className='text-void-fg-2'>P95={rawResult.latencyMs?.p95 ?? 0}ms</span>
+						<span className='text-void-fg-3'>Err={(Number(rawResult.errorRate ?? 0) * 100).toFixed(1)}%</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'api_security_audit' && typeof rawResult.score === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='font-semibold'>API Security: {rawResult.score}/100</span>
+						<span className='text-void-fg-3'>{rawResult.criticalCount} critical · {rawResult.highCount} high</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'api_assess_production_readiness' && typeof rawResult.overallStatus === 'string') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='font-semibold uppercase'>Readiness: {rawResult.overallStatus}</span>
+						<span className='text-void-fg-3'>{rawResult.overallScore}/100</span>
+					</div>
+				)
+			}
 		}
 
 		if (outputText || designPreview) {

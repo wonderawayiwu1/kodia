@@ -218,6 +218,27 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'ai_scaffold_product_factory',
 	'ai_diagnose_failure',
 	'ai_check_provider_capabilities',
+	// Kodia API Engineering Studio (20 tools)
+	'api_open_studio',
+	'api_discover_project',
+	'api_runtime_start',
+	'api_runtime_status',
+	'api_runtime_stop',
+	'api_send_request',
+	'api_websocket_session',
+	'api_generate_test_suite',
+	'api_run_test_suite',
+	'api_run_load_test',
+	'api_security_audit',
+	'api_compare_responses',
+	'api_generate_openapi',
+	'api_diff_specs',
+	'api_generate_client_sdk',
+	'api_mock_server',
+	'api_manage_collection',
+	'api_manage_environment',
+	'api_assess_production_readiness',
+	'api_correlate_failure',
 ]);
 
 /**
@@ -567,6 +588,32 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'ai_model_registry':
 		case 'ai_create_workflow':
 		case 'ai_run_workflow':
+			return 'medium';
+
+		// Kodia API Engineering Studio — read/discover/analyze/generate tools are low risk
+		case 'api_open_studio':
+		case 'api_discover_project':
+		case 'api_runtime_status':
+		case 'api_generate_test_suite':
+		case 'api_compare_responses':
+		case 'api_generate_openapi':
+		case 'api_diff_specs':
+		case 'api_generate_client_sdk':
+		case 'api_assess_production_readiness':
+		case 'api_correlate_failure':
+			return 'low';
+
+		// API Engineering Studio live execution, runtime & state-writing tools
+		case 'api_runtime_start':
+		case 'api_runtime_stop':
+		case 'api_send_request':
+		case 'api_websocket_session':
+		case 'api_run_test_suite':
+		case 'api_run_load_test':
+		case 'api_security_audit':
+		case 'api_mock_server':
+		case 'api_manage_collection':
+		case 'api_manage_environment':
 			return 'medium';
 	}
 	return 'medium';

@@ -9,6 +9,7 @@ import {
 	Bot,
 	Brain,
 	Cpu,
+	Globe,
 	Home,
 	Palette,
 	Search,
@@ -31,6 +32,7 @@ import { AppearanceSection, EditorWorkbenchSection } from './AppearanceEditorSet
 import { OperationsDiagnosticsSection } from './OperationsDiagnosticsSettings.js';
 import { DesignIntelligenceSection } from './DesignIntelligenceSettings.js';
 import { AIEngineSettingsSection } from './AIEngineSettings.js';
+import { ApiStudioSettingsSection } from './ApiStudioSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -133,6 +135,16 @@ const SECTIONS: readonly NavSectionDef[] = [
 		},
 	},
 	{
+		id: 'api_studio',
+		group: 'Intelligence & Ops',
+		label: 'API Engineering Studio',
+		icon: <Globe size={14} />,
+		keywordsOfGroup: {
+			'Workspace & Native Studio Behavior': ['api', 'studio', 'rest', 'graphql', 'grpc', 'websocket', 'sse', 'postman', 'thunder', 'timeout', 'redirect'],
+			'Security, Sandboxing & Production Safeguards': ['production', 'redact', 'secret', 'sandbox', 'script', 'load', 'security', 'probe'],
+		},
+	},
+	{
 		id: 'design',
 		group: 'Intelligence & Ops',
 		label: 'Design Intelligence & Brand',
@@ -225,6 +237,7 @@ export const Settings = () => {
 			case 'features': return <FeaturesSection />;
 			case 'agent': return <AgentSection />;
 			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
+			case 'api_studio': return <ApiStudioSettingsSection onRecordChange={recordChange} />;
 			case 'design': return <DesignIntelligenceSection onRecordChange={recordChange} />;
 			case 'instructions': return <InstructionsSection />;
 			case 'operations': return <OperationsDiagnosticsSection />;
