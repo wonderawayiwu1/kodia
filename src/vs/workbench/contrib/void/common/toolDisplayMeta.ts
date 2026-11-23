@@ -288,6 +288,34 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	api_manage_environment: { done: 'Updated API environment', proposed: 'Manage API environment', running: 'Updating API environment & variables' },
 	api_assess_production_readiness: { done: 'Assessed API readiness', proposed: 'Assess production readiness', running: 'Evaluating 6-pillar API production readiness' },
 	api_correlate_failure: { done: 'Correlated API failure', proposed: 'Correlate API failure', running: 'Correlating failure with logs & source code' },
+	// Kodia Deep Debugging, Software Correctness & Independent Verification
+	correctness_open_hub: { done: 'Opened Correctness Hub', proposed: 'Open Correctness Hub', running: 'Opening Debugging & Correctness Hub' },
+	correctness_analyze_workspace: { done: 'Analyzed workspace correctness', proposed: 'Analyze correctness', running: 'Running incremental & deep defect analysis' },
+	correctness_run_compilers: { done: 'Ran multi-language compilers', proposed: 'Run compiler checks', running: 'Executing native compilers & syntax checks' },
+	correctness_taint_analysis: { done: 'Completed taint analysis', proposed: 'Run taint analysis', running: 'Tracing data flows from sources to sinks' },
+	correctness_investigate_root_cause: { done: 'Completed root-cause analysis', proposed: 'Investigate root cause', running: 'Ranking evidence-backed root-cause hypotheses' },
+	correctness_run_fuzz_test: { done: 'Completed property/fuzz test', proposed: 'Run fuzz test', running: 'Fuzzing inputs & minimizing counterexamples' },
+	correctness_run_mutation_test: { done: 'Completed mutation testing', proposed: 'Run mutation test', running: 'Evaluating isolated mutants against test suite' },
+	correctness_plan_repair: { done: 'Planned targeted repair', proposed: 'Plan targeted repair', running: 'Computing smallest safe fix & blast radius' },
+	correctness_independent_verify: { done: 'Issued independent verdict', proposed: 'Run independent verification', running: 'Independently verifying compilers, taint & tests' },
+	correctness_create_proof_record: { done: 'Saved proof-carrying record', proposed: 'Create proof record', running: 'Persisting proof-carrying change evidence' },
+	correctness_assess_release_readiness: { done: 'Assessed release readiness', proposed: 'Assess release readiness', running: 'Evaluating risk-based release readiness gates' },
+	correctness_export_sarif: { done: 'Exported SARIF 2.1.0 report', proposed: 'Export SARIF report', running: 'Formatting diagnostics as SARIF 2.1.0' },
+	correctness_list_proofs: { done: 'Listed proof records', proposed: 'List proof records', running: 'Loading persisted verification proofs' },
+	correctness_manage_suppressions: { done: 'Updated suppressions', proposed: 'Manage suppressions', running: 'Updating justified diagnostic suppressions' },
+	// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance
+	evolution_open_hub: { done: 'Opened Evolution & Ops Hub', proposed: 'Open Evolution Hub', running: 'Opening Next-Gen Evolution & Ops Hub' },
+	evolution_supply_chain_sbom: { done: 'Generated CycloneDX SBOM & supply-chain audit', proposed: 'Audit supply chain & SBOM', running: 'Scanning dependencies, licenses & CycloneDX 1.5 SBOM' },
+	evolution_audit_iac_finops: { done: 'Audited IaC & FinOps costs', proposed: 'Audit IaC & FinOps', running: 'Auditing Dockerfile/K8s/Terraform/CI-CD & cloud costs' },
+	evolution_analyze_incident: { done: 'Completed incident & SLO forensics', proposed: 'Analyze incident logs', running: 'Computing error clusters, P95 latency & SLO burn rate' },
+	evolution_plan_release: { done: 'Generated autonomous release plan', proposed: 'Plan release & migrations', running: 'Analyzing git history, SemVer & migration safety' },
+	evolution_audit_privacy_compliance: { done: 'Audited privacy & compliance', proposed: 'Audit GDPR/SOC2/HIPAA/AI Act', running: 'Scanning PII flows & compliance controls' },
+	evolution_plan_modernization: { done: 'Planned Strangler-Fig modernization', proposed: 'Plan legacy modernization', running: 'Analyzing monolith hotspots & migration waves' },
+	evolution_run_capability_radar: { done: 'Completed Capability Evolution Radar', proposed: 'Run capability radar', running: 'Evaluating emerging capabilities & filtering hype' },
+	evolution_evaluate_technology: { done: 'Evaluated technology candidate', proposed: 'Evaluate technology signal vs hype', running: 'Scoring maturity, license compatibility & hype risk' },
+	evolution_manage_proposals: { done: 'Updated Evolution proposals', proposed: 'Manage evolution proposals', running: 'Updating governed capability proposals' },
+	evolution_schedule_periodic_audit: { done: 'Scheduled periodic evolution audit', proposed: 'Schedule periodic audit', running: 'Registering recurring capability-discovery job' },
+	evolution_workspace_overview: { done: 'Loaded Evolution & Ops overview', proposed: 'Load evolution overview', running: 'Aggregating supply-chain, IaC, prod, compliance & radar' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -312,6 +340,8 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 export function getToolCategory(toolName: string): ToolCategory {
 	if (toolName.startsWith('ai_')) { return 'ai'; }
 	if (toolName.startsWith('api_') || toolName.startsWith('oauth2_')) { return 'api'; }
+	if (toolName.startsWith('correctness_')) { return 'debug'; }
+	if (toolName.startsWith('evolution_')) { return 'ai'; }
 	if (
 		toolName.includes('design_')
 		|| toolName.includes('visual_')

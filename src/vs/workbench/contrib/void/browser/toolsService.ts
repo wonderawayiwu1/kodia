@@ -158,6 +158,36 @@ import {
 	importFromCurl,
 	importFromPostmanCollection,
 } from '../common/apiStudioIntelligence.js'
+import { ICorrectnessService } from './correctnessService.js'
+import {
+	CorrectnessHubSection,
+	DEFAULT_CORRECTNESS_ENGINE_SETTINGS,
+	FuzzTestConfig,
+	IKodiaCorrectnessMainService,
+	KODIA_CORRECTNESS_CHANNEL,
+	ProofCarryingChangeRecord,
+} from '../common/correctnessTypes.js'
+import { IEvolutionService } from './evolutionService.js'
+import { IKodiaWorkflowsService } from '../common/kodiaWorkflows.js'
+import {
+	DEFAULT_EVOLUTION_ENGINE_SETTINGS,
+	EvolutionDomain,
+	EvolutionHubSection,
+	EvolutionProposal,
+	EvolutionVerdict,
+	IKodiaEvolutionMainService,
+	KODIA_EVOLUTION_CHANNEL,
+} from '../common/evolutionTypes.js'
+import {
+	analyzeTaintFlows,
+	analyzeWorkspaceCorrectness,
+	assessReleaseReadiness,
+	buildControlledRepairPlan,
+	exportDiagnosticsToSarif,
+	formatInvestigationForLLM,
+	investigateRootCause,
+	runIncrementalCorrectnessAnalysis,
+} from '../common/correctnessEngine.js'
 
 
 // tool use for AI
@@ -448,6 +478,8 @@ export class ToolsService implements IToolsService {
 		const designAssetService = ProxyChannel.toService<IDesignAssetMainService>(mainProcessService.getChannel(KODIA_DESIGN_CHANNEL))
 		const aiEngineMainService = ProxyChannel.toService<IKodiaAIEngineMainService>(mainProcessService.getChannel(KODIA_AI_ENGINE_CHANNEL))
 		const apiStudioMainService = ProxyChannel.toService<IKodiaApiStudioMainService>(mainProcessService.getChannel(KODIA_API_STUDIO_CHANNEL))
+		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
+		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
 		const getDesignService = (): IDesignIntelligenceService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService)) } catch { return undefined }
 		}
@@ -457,9 +489,20 @@ export class ToolsService implements IToolsService {
 		const getApiStudioService = (): IApiStudioService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IApiStudioService)) } catch { return undefined }
 		}
+		const getCorrectnessService = (): ICorrectnessService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(ICorrectnessService)) } catch { return undefined }
+		}
+		const getEvolutionService = (): IEvolutionService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IEvolutionService)) } catch { return undefined }
+		}
+		const getWorkflowsService = (): IKodiaWorkflowsService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IKodiaWorkflowsService)) } catch { return undefined }
+		}
 		const getDesignSettings = () => this.voidSettingsService.state.globalSettings.designIntelligence ?? DEFAULT_DESIGN_INTELLIGENCE_SETTINGS
 		const getAISettings = () => this.voidSettingsService.state.globalSettings.aiEngine ?? DEFAULT_AI_ENGINE_SETTINGS
 		const getApiStudioSettings = () => this.voidSettingsService.state.globalSettings.apiStudio ?? DEFAULT_API_STUDIO_SETTINGS
+		const getCorrectnessSettings = () => this.voidSettingsService.state.globalSettings.correctness ?? DEFAULT_CORRECTNESS_ENGINE_SETTINGS
+		const getEvolutionSettings = () => this.voidSettingsService.state.globalSettings.evolution ?? DEFAULT_EVOLUTION_ENGINE_SETTINGS
 		const workspaceFolderPaths = () => workspaceContextService.getWorkspace().folders.map(f => f.uri.fsPath)
 
 		const recentPages = new Map<string, WebFetchResult>()
@@ -2060,6 +2103,177 @@ export class ToolsService implements IToolsService {
 			api_correlate_failure: (params: RawToolParamsObj) => ({
 				history_index: validateNumber(params.history_index, { default: 0 }) ?? 0,
 			}),
+
+			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+			correctness_open_hub: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? undefined) as CorrectnessHubSection | undefined,
+			}),
+			correctness_analyze_workspace: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+				incremental: validateBoolean(params.incremental, { default: true }),
+				max_files: validateNumber(params.max_files, { default: 200 }) ?? 200,
+			}),
+			correctness_run_compilers: (params: RawToolParamsObj) => ({
+				target_files: validateOptionalStrList(params.target_files),
+				languages: validateOptionalStrList(params.languages),
+			}),
+			correctness_taint_analysis: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+				max_files: validateNumber(params.max_files, { default: 180 }) ?? 180,
+			}),
+			correctness_investigate_root_cause: (params: RawToolParamsObj) => ({
+				symptom: validateStr('symptom', params.symptom).trim(),
+				stack_trace_or_logs: validateOptionalStr('stack_trace_or_logs', params.stack_trace_or_logs) ?? undefined,
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			correctness_run_fuzz_test: (params: RawToolParamsObj) => {
+				const rawSchema = validateOptionalStrList(params.arg_schema) ?? ['number']
+				return {
+					target_file: validateStr('target_file', params.target_file).trim(),
+					export_name: validateStr('export_name', params.export_name).trim(),
+					property_expression: validateStr('property_expression', params.property_expression).trim(),
+					arg_schema: rawSchema as FuzzTestConfig['argSchema'],
+					iterations: validateNumber(params.iterations, { default: 150 }) ?? 150,
+					seed: validateNumber(params.seed, { default: 1337 }) ?? 1337,
+				}
+			},
+			correctness_run_mutation_test: (params: RawToolParamsObj) => ({
+				target_file: validateStr('target_file', params.target_file).trim(),
+				test_command: validateStr('test_command', params.test_command).trim(),
+				max_mutants: validateNumber(params.max_mutants, { default: 15 }) ?? 15,
+				timeout_ms: validateNumber(params.timeout_ms, { default: 12000 }) ?? 12000,
+			}),
+			correctness_plan_repair: (params: RawToolParamsObj) => ({
+				defect_summary: validateStr('defect_summary', params.defect_summary).trim(),
+				target_files: validateOptionalStrList(params.target_files) ?? [],
+				smallest_fix_strategy: validateStr('smallest_fix_strategy', params.smallest_fix_strategy).trim(),
+			}),
+			correctness_independent_verify: (params: RawToolParamsObj) => ({
+				change_description: validateStr('change_description', params.change_description).trim(),
+				changed_files: validateOptionalStrList(params.changed_files) ?? [],
+				requirements: validateOptionalStrList(params.requirements),
+				test_commands: validateOptionalStrList(params.test_commands),
+				require_tests: validateBoolean(params.require_tests, { default: true }),
+			}),
+			correctness_create_proof_record: (params: RawToolParamsObj) => ({
+				title: validateStr('title', params.title).trim(),
+				changed_files: validateOptionalStrList(params.changed_files) ?? [],
+				requirements: validateOptionalStrList(params.requirements),
+				summary: validateStr('summary', params.summary).trim(),
+				known_limitations: validateOptionalStrList(params.known_limitations),
+			}),
+			correctness_assess_release_readiness: (params: RawToolParamsObj) => ({
+				infrastructure_blocked_reason: validateOptionalStr('infrastructure_blocked_reason', params.infrastructure_blocked_reason) ?? undefined,
+			}),
+			correctness_export_sarif: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			correctness_list_proofs: () => ({}),
+			correctness_manage_suppressions: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['list', 'add', 'remove'].includes(rawAct) ? rawAct : 'list') as 'list' | 'add' | 'remove'
+				return {
+					action,
+					id: validateOptionalStr('id', params.id) ?? undefined,
+					rule_id: validateOptionalStr('rule_id', params.rule_id) ?? undefined,
+					file_pattern: validateOptionalStr('file_pattern', params.file_pattern) ?? undefined,
+					justification: validateOptionalStr('justification', params.justification) ?? undefined,
+				}
+			},
+
+			// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance (12 tools)
+			evolution_open_hub: (params: RawToolParamsObj) => {
+				const raw = validateOptionalStr('section', params.section)?.toLowerCase()
+				const valid: EvolutionHubSection[] = ['radar', 'supply-chain', 'iac-finops', 'prod-release', 'privacy-legacy', 'proposals']
+				return { section: (raw && valid.includes(raw as EvolutionHubSection) ? raw : undefined) as EvolutionHubSection | undefined }
+			},
+			evolution_supply_chain_sbom: (params: RawToolParamsObj) => ({
+				run_live_audit: params.run_live_audit !== undefined ? validateBoolean(params.run_live_audit, { default: true }) : undefined,
+				block_copyleft: params.block_copyleft !== undefined ? validateBoolean(params.block_copyleft, { default: false }) : undefined,
+			}),
+			evolution_audit_iac_finops: (params: RawToolParamsObj) => ({
+				monthly_budget_usd: validateNumber(params.monthly_budget_usd, { default: null }) ?? undefined,
+			}),
+			evolution_analyze_incident: (params: RawToolParamsObj) => ({
+				service_name: validateStr('service_name', params.service_name),
+				log_text: validateOptionalStr('log_text', params.log_text) ?? undefined,
+				log_file: validateOptionalStr('log_file', params.log_file) ?? undefined,
+				slo_target_pct: validateNumber(params.slo_target_pct, { default: null }) ?? undefined,
+				p95_budget_ms: validateNumber(params.p95_budget_ms, { default: null }) ?? undefined,
+			}),
+			evolution_plan_release: (params: RawToolParamsObj) => ({
+				since_ref: validateOptionalStr('since_ref', params.since_ref) ?? undefined,
+				current_version: validateOptionalStr('current_version', params.current_version) ?? undefined,
+			}),
+			evolution_audit_privacy_compliance: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			evolution_plan_modernization: (params: RawToolParamsObj) => ({
+				sub_path: validateOptionalStr('sub_path', params.sub_path) ?? undefined,
+			}),
+			evolution_run_capability_radar: (params: RawToolParamsObj) => ({
+				audit_interval_hours: validateNumber(params.audit_interval_hours, { default: null }) ?? undefined,
+			}),
+			evolution_evaluate_technology: (params: RawToolParamsObj) => {
+				const validDomains: EvolutionDomain[] = [
+					'engineering-techniques', 'languages-frameworks', 'testing-verification', 'ai-agents',
+					'security-threats', 'developer-workflows', 'infrastructure-cloud', 'hardware-embedded', 'kodia-self-improvement',
+				]
+				const rawDom = (validateOptionalStr('domain', params.domain) ?? 'engineering-techniques') as EvolutionDomain
+				const domain = validDomains.includes(rawDom) ? rawDom : 'engineering-techniques'
+				const rawMat = (validateOptionalStr('maturity', params.maturity) ?? 'emerging').toLowerCase()
+				const maturity = (['experimental', 'emerging', 'production-proven', 'declining'].includes(rawMat) ? rawMat : 'emerging') as 'experimental' | 'emerging' | 'production-proven' | 'declining'
+				const parseArr = (raw: unknown): string[] | undefined => {
+					if (Array.isArray(raw)) return raw.map(String)
+					if (typeof raw === 'string' && raw.trim()) {
+						try { const p = JSON.parse(raw); if (Array.isArray(p)) return p.map(String) } catch { /* fallback */ }
+						return raw.split(',').map(s => s.trim()).filter(Boolean)
+					}
+					return undefined
+				}
+				return {
+					name: validateStr('name', params.name),
+					domain,
+					summary: validateStr('summary', params.summary),
+					license: validateOptionalStr('license', params.license) ?? undefined,
+					maturity,
+					benchmarks_count: validateNumber(params.benchmarks_count, { default: null }) ?? undefined,
+					requires_new_dependency: params.requires_new_dependency !== undefined ? validateBoolean(params.requires_new_dependency, { default: false }) : undefined,
+					requires_special_hardware: params.requires_special_hardware !== undefined ? validateBoolean(params.requires_special_hardware, { default: false }) : undefined,
+					security_concerns: parseArr(params.security_concerns),
+					overlaps_existing: validateOptionalStr('overlaps_existing', params.overlaps_existing) ?? undefined,
+				}
+			},
+			evolution_manage_proposals: (params: RawToolParamsObj) => {
+				const rawAct = (validateOptionalStr('action', params.action) ?? 'list').toLowerCase()
+				const action = (['list', 'add', 'update_status', 'remove'].includes(rawAct) ? rawAct : 'list') as 'list' | 'add' | 'update_status' | 'remove'
+				const rawStatus = validateOptionalStr('status', params.status)?.toLowerCase()
+				const status = rawStatus && ['proposed', 'approved', 'deferred', 'rejected', 'implemented'].includes(rawStatus)
+					? rawStatus as EvolutionProposal['status'] : undefined
+				const rawVerdict = validateOptionalStr('verdict', params.verdict)?.toUpperCase()
+				const verdict = rawVerdict && ['ADOPT_CANDIDATE', 'MONITOR', 'DEFER', 'REJECT_HYPE', 'REJECT_INCOMPATIBLE'].includes(rawVerdict)
+					? rawVerdict as EvolutionVerdict : undefined
+				let acceptance_criteria: string[] | undefined
+				if (Array.isArray(params.acceptance_criteria)) { acceptance_criteria = params.acceptance_criteria.map(String) }
+				else if (typeof params.acceptance_criteria === 'string' && params.acceptance_criteria.trim()) {
+					try { const p = JSON.parse(params.acceptance_criteria); if (Array.isArray(p)) acceptance_criteria = p.map(String) } catch { acceptance_criteria = [params.acceptance_criteria] }
+				}
+				return {
+					action,
+					id: validateOptionalStr('id', params.id) ?? undefined,
+					status,
+					title: validateOptionalStr('title', params.title) ?? undefined,
+					domain: (validateOptionalStr('domain', params.domain) ?? undefined) as EvolutionDomain | undefined,
+					verdict,
+					signal_score: validateNumber(params.signal_score, { default: null }) ?? undefined,
+					justification: validateOptionalStr('justification', params.justification) ?? undefined,
+					acceptance_criteria,
+				}
+			},
+			evolution_schedule_periodic_audit: (params: RawToolParamsObj) => ({
+				interval_hours: validateNumber(params.interval_hours, { default: null }) ?? undefined,
+			}),
+			evolution_workspace_overview: () => ({}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -4455,6 +4669,304 @@ export class ToolsService implements IToolsService {
 				return { result: report }
 			},
 
+			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+			correctness_open_hub: async ({ section }) => {
+				const target: CorrectnessHubSection = section ?? 'diagnostics'
+				await getCorrectnessService()?.openHub(target)
+				return { result: { opened: true, section: target } }
+			},
+			correctness_analyze_workspace: async ({ sub_path, incremental, max_files }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: max_files ?? 200 })
+				const svc = getCorrectnessService()
+				const suppressions = root ? await correctnessMainService.manageSuppressions(root, { action: 'list' }) : []
+				const cache = incremental !== false && svc ? svc.getIncrementalCache() : { hashes: {}, diagnosticsByFile: {} }
+				const { report, nextHashes, nextDiagnosticsByFile } = runIncrementalCorrectnessAnalysis({
+					files: scanned,
+					previousHashes: incremental !== false ? cache.hashes : undefined,
+					previousDiagnosticsByFile: incremental !== false ? cache.diagnosticsByFile : undefined,
+					suppressions,
+				})
+				svc?.setIncrementalCache(nextHashes, nextDiagnosticsByFile)
+				svc?.recordIncremental(report)
+				return { result: report }
+			},
+			correctness_run_compilers: async ({ target_files, languages }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const outcomes = await correctnessMainService.runCompilerAndAnalyzers(root, { targetFiles: target_files, languages })
+				getCorrectnessService()?.recordCompilerOutcomes(outcomes)
+				const totalErrors = outcomes.reduce((s, o) => s + o.diagnostics.filter(d => d.severity === 'error' || d.severity === 'critical').length, 0)
+				return { result: { outcomes, totalErrors } }
+			},
+			correctness_taint_analysis: async ({ sub_path, max_files }) => {
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: max_files ?? 180 })
+				const report = analyzeTaintFlows(scanned)
+				getCorrectnessService()?.recordTaint(report)
+				return { result: report }
+			},
+			correctness_investigate_root_cause: async ({ symptom, stack_trace_or_logs, sub_path }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: 180 })
+				const svc = getCorrectnessService()
+				const suppressions = root ? await correctnessMainService.manageSuppressions(root, { action: 'list' }) : []
+				const diags = analyzeWorkspaceCorrectness(scanned, { suppressions })
+				const taint = analyzeTaintFlows(scanned)
+				const report = investigateRootCause({
+					symptom,
+					stackTraceOrLogs: stack_trace_or_logs,
+					files: scanned,
+					diagnostics: diags,
+					taintReport: taint,
+					compilerOutcomes: svc?.state.latestCompilerOutcomes,
+				})
+				svc?.recordInvestigation(report)
+				if (root) { await correctnessMainService.saveInvestigation(root, report) }
+				if (getCorrectnessSettings().autoOpenHubOnDeepInvestigation) {
+					void svc?.openHub('investigate')
+				}
+				return { result: report }
+			},
+			correctness_run_fuzz_test: async ({ target_file, export_name, property_expression, arg_schema, iterations, seed }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await correctnessMainService.runPropertyFuzzTest(root, {
+					targetFile: target_file,
+					exportName: export_name,
+					propertyExpression: property_expression,
+					argSchema: arg_schema,
+					iterations: iterations ?? getCorrectnessSettings().fuzzDefaultIterations,
+					seed,
+				})
+				getCorrectnessService()?.recordFuzzRun(report)
+				return { result: report }
+			},
+			correctness_run_mutation_test: async ({ target_file, test_command, max_mutants, timeout_ms }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await correctnessMainService.runMutationTesting(root, {
+					targetFile: target_file,
+					testCommand: test_command,
+					maxMutants: max_mutants ?? getCorrectnessSettings().mutationMaxMutantsPerRun,
+					timeoutMs: timeout_ms ?? getCorrectnessSettings().mutationTimeoutMs,
+				})
+				getCorrectnessService()?.recordMutationRun(report)
+				return { result: report }
+			},
+			correctness_plan_repair: async ({ defect_summary, target_files, smallest_fix_strategy }) => {
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { maxFiles: 180 })
+				const plan = buildControlledRepairPlan({
+					defectSummary: defect_summary,
+					targetFiles: target_files,
+					files: scanned,
+					smallestFixStrategy: smallest_fix_strategy,
+				})
+				getCorrectnessService()?.recordRepairPlan(plan)
+				return { result: plan }
+			},
+			correctness_independent_verify: async ({ change_description, changed_files, requirements, test_commands, require_tests }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await correctnessMainService.runIndependentVerification(root, {
+					changeDescription: change_description,
+					changedFiles: changed_files,
+					requirements,
+					testCommands: test_commands,
+					requireTests: require_tests,
+				})
+				const svc = getCorrectnessService()
+				svc?.recordVerification(report)
+				await svc?.refreshFromDisk()
+				return { result: report }
+			},
+			correctness_create_proof_record: async ({ title, changed_files, requirements, summary, known_limitations }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getCorrectnessService()
+				const latestV = svc?.state.verifications[0]
+				const record: ProofCarryingChangeRecord = {
+					id: `proof-${Date.now().toString(36)}`,
+					createdAt: new Date().toISOString(),
+					title,
+					requirementsCovered: requirements ?? [title],
+					changedFiles: changed_files,
+					originalFailureOrGoal: title,
+					analyzersRun: ['kodia-deep-analyzer', 'kodia-taint-analyzer'],
+					testsExecuted: [],
+					staticFindingsCount: svc?.state.latestIncremental?.diagnostics.filter(d => !d.suppressed).length ?? 0,
+					taintFindingsCount: svc?.state.latestTaint?.unsafeFlows.length ?? 0,
+					independentVerdict: latestV?.verdict ?? 'CONDITIONAL',
+					knownLimitations: known_limitations ?? ['Manually assembled proof record; run correctness_independent_verify for automated check capture.'],
+					unresolvedRisks: latestV?.rejectionReasons ? [...latestV.rejectionReasons] : [],
+					summary,
+				}
+				const all = root ? await correctnessMainService.saveProofRecord(root, record) : [record]
+				svc?.recordProofs(all)
+				return { result: { record, totalProofs: all.length } }
+			},
+			correctness_assess_release_readiness: async ({ infrastructure_blocked_reason }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const svc = getCorrectnessService()
+				const snap = root ? await correctnessMainService.loadWorkspaceSnapshot(root) : null
+				const report = assessReleaseReadiness({
+					compilerOutcomes: svc?.state.latestCompilerOutcomes,
+					diagnostics: svc?.state.latestIncremental?.diagnostics,
+					taintReport: svc?.state.latestTaint,
+					latestVerification: svc?.state.verifications[0] ?? snap?.verifications[0] ?? null,
+					infrastructureBlockedReason: infrastructure_blocked_reason,
+				})
+				svc?.recordReadiness(report)
+				if (root) { await correctnessMainService.saveReadinessReport(root, report) }
+				return { result: report }
+			},
+			correctness_export_sarif: async ({ sub_path }) => {
+				const scanned = await collectWorkspaceProjectFiles(fileService, workspaceContextService, { subPath: sub_path, maxFiles: 180 })
+				const diags = analyzeWorkspaceCorrectness(scanned)
+				const taint = analyzeTaintFlows(scanned)
+				const sarif = exportDiagnosticsToSarif(diags, taint.unsafeFlows)
+				return { result: { sarif, findingCount: diags.length + taint.unsafeFlows.length } }
+			},
+			correctness_list_proofs: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = root ? await correctnessMainService.loadWorkspaceSnapshot(root) : null
+				const proofs = [...(snap?.proofs ?? [])]
+				getCorrectnessService()?.recordProofs(proofs)
+				return { result: { proofs } }
+			},
+			correctness_manage_suppressions: async ({ action, id, rule_id, file_pattern, justification }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const suppressions = await correctnessMainService.manageSuppressions(root, {
+					action,
+					id,
+					ruleId: rule_id,
+					filePattern: file_pattern,
+					justification,
+				})
+				getCorrectnessService()?.recordSuppressions(suppressions)
+				return { result: { suppressions } }
+			},
+
+			// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance (12 tools)
+			evolution_open_hub: async ({ section }) => {
+				const target: EvolutionHubSection = section ?? 'radar'
+				await getEvolutionService()?.openHub(target)
+				return { result: { opened: true, section: target } }
+			},
+			evolution_supply_chain_sbom: async ({ run_live_audit, block_copyleft }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const cfg = getEvolutionSettings()
+				const report = await evolutionMainService.runSupplyChainAudit(root, {
+					runLiveAudit: run_live_audit ?? true,
+					blockCopyleft: block_copyleft ?? cfg.blockCopyleftLicensesInCommercialMode,
+				})
+				getEvolutionService()?.recordSupplyChain(report)
+				return { result: report }
+			},
+			evolution_audit_iac_finops: async ({ monthly_budget_usd }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const cfg = getEvolutionSettings()
+				const report = await evolutionMainService.runIacFinOpsAudit(root, {
+					monthlyBudgetUsd: monthly_budget_usd ?? cfg.monthlyCloudBudgetUsd,
+				})
+				getEvolutionService()?.recordIacFinOps(report)
+				return { result: report }
+			},
+			evolution_analyze_incident: async ({ service_name, log_text, log_file, slo_target_pct, p95_budget_ms }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const cfg = getEvolutionSettings()
+				const report = await evolutionMainService.analyzeProductionIncident(root, {
+					serviceName: service_name,
+					logText: log_text,
+					logFile: log_file,
+					sloTargetPct: slo_target_pct ?? cfg.defaultSloAvailabilityTarget,
+					p95BudgetMs: p95_budget_ms ?? cfg.defaultP95LatencyBudgetMs,
+				})
+				getEvolutionService()?.recordIncident(report)
+				return { result: report }
+			},
+			evolution_plan_release: async ({ since_ref, current_version }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await evolutionMainService.planAutonomousRelease(root, {
+					sinceRef: since_ref,
+					currentVersion: current_version,
+				})
+				getEvolutionService()?.recordReleasePlan(report)
+				return { result: report }
+			},
+			evolution_audit_privacy_compliance: async ({ sub_path }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const { privacy, modernization } = await evolutionMainService.auditPrivacyAndModernization(root, { subPath: sub_path })
+				getEvolutionService()?.recordPrivacy(privacy)
+				getEvolutionService()?.recordModernization(modernization)
+				return { result: privacy }
+			},
+			evolution_plan_modernization: async ({ sub_path }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const { privacy, modernization } = await evolutionMainService.auditPrivacyAndModernization(root, { subPath: sub_path })
+				getEvolutionService()?.recordPrivacy(privacy)
+				getEvolutionService()?.recordModernization(modernization)
+				return { result: modernization }
+			},
+			evolution_run_capability_radar: async ({ audit_interval_hours }) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const cfg = getEvolutionSettings()
+				const report = await evolutionMainService.runCapabilityEvolutionRadar(root, {
+					auditIntervalHours: audit_interval_hours ?? cfg.auditIntervalHours,
+				})
+				getEvolutionService()?.recordRadar(report)
+				return { result: report }
+			},
+			evolution_evaluate_technology: async (params) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const result = await evolutionMainService.evaluateTechnologyCandidate(root, {
+					name: params.name,
+					domain: params.domain,
+					summary: params.summary,
+					license: params.license,
+					maturity: params.maturity,
+					benchmarksOrEvidenceCount: params.benchmarks_count,
+					requiresNewRuntimeDependency: params.requires_new_dependency,
+					requiresSpecialHardware: params.requires_special_hardware,
+					knownSecurityConcerns: params.security_concerns,
+					overlapsExistingKodiaCapability: params.overlaps_existing,
+				})
+				const proposals = await evolutionMainService.manageProposals(root, { action: 'list' })
+				getEvolutionService()?.recordProposals(proposals)
+				return { result }
+			},
+			evolution_manage_proposals: async (params) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const proposals = await evolutionMainService.manageProposals(root, {
+					action: params.action,
+					id: params.id,
+					status: params.status,
+					title: params.title,
+					domain: params.domain,
+					verdict: params.verdict,
+					signalScore: params.signal_score,
+					justification: params.justification,
+					acceptanceCriteria: params.acceptance_criteria,
+				})
+				getEvolutionService()?.recordProposals(proposals)
+				return { result: { proposals } }
+			},
+			evolution_schedule_periodic_audit: async ({ interval_hours }) => {
+				const cfg = getEvolutionSettings()
+				const hours = Math.max(1, Math.min(720, Math.round(interval_hours ?? cfg.auditIntervalHours)))
+				const wf = getWorkflowsService()
+				if (!wf) {
+					return { result: { scheduled: false, intervalHours: hours, message: 'Kodia Workflows scheduler service unavailable in headless mode; run evolution_run_capability_radar manually.' } }
+				}
+				const job = wf.addScheduledJob({
+					name: 'Kodia Periodic Capability Evolution Audit',
+					prompt: 'Run evolution_run_capability_radar and evolution_supply_chain_sbom to evaluate emerging engineering capabilities, security threats, and dependency risks. Record proposals in .kodia/evolution/proposals.json and NEVER blindly install dependencies.',
+					chatMode: 'agent',
+					intervalMinutes: hours * 60,
+					enabled: true,
+				})
+				return { result: { scheduled: true, jobId: job.id, intervalHours: hours, message: `Scheduled recurring Kodia Capability Evolution Audit every ${hours}h (jobId=${job.id}).` } }
+			},
+			evolution_workspace_overview: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = await evolutionMainService.loadWorkspaceSnapshot(root)
+				return { result: snap }
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell }) => {
 				await voidModelService.initializeModel(uri)
@@ -5828,6 +6340,136 @@ export class ToolsService implements IToolsService {
 				...(r.failedAssertions.length ? [`Failed Assertions:\n${r.failedAssertions.map(a => `- ${a}`).join('\n')}`] : []),
 				...(r.matchedLogLines.length ? [`Correlated Runtime Logs:\n${r.matchedLogLines.map(l => `  ${l}`).join('\n')}`] : []),
 				`Repair Steps:\n${r.repairSteps.map(s => `- ${s}`).join('\n')}`,
+			].join('\n'),
+
+			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+			correctness_open_hub: (_params, r) => `Opened Kodia Debugging & Correctness Hub (section=${r.section}).`,
+			correctness_analyze_workspace: (_params, r) => [
+				`# Kodia Correctness Analysis [${r.mode.toUpperCase()}]`,
+				r.summary,
+				...(r.partialNotice ? [r.partialNotice] : []),
+				...r.diagnostics.filter(d => !d.suppressed).slice(0, 25).map(d => `- [${d.severity.toUpperCase()}/${d.ruleId}] ${d.file}:${d.line} — ${d.title}: ${d.message}`),
+			].join('\n'),
+			correctness_run_compilers: (_params, r) => [
+				`# Multi-Language Compiler & Syntax Checks (${r.totalErrors} error(s))`,
+				...r.outcomes.map(o => `- **${o.engine}** (${o.language}): ${!o.available ? `UNAVAILABLE (${o.note ?? 'not installed'})` : o.passed ? `PASS (${o.durationMs}ms)` : `FAIL (${o.diagnostics.length} diagnostic(s))`}`),
+				...r.outcomes.flatMap(o => o.diagnostics).slice(0, 20).map(d => `  - ${d.file}:${d.line} [${d.ruleId}] ${d.message}`),
+			].join('\n'),
+			correctness_taint_analysis: (_params, r) => [
+				`# Data-Flow & Taint Analysis`,
+				r.summary,
+				...r.unsafeFlows.slice(0, 20).map(f => `- [${f.severity.toUpperCase()}] ${f.title} (${f.source.file}:${f.source.line} -> ${f.sink.file}:${f.sink.line}) | ${f.remediation}`),
+			].join('\n'),
+			correctness_investigate_root_cause: (_params, r) => formatInvestigationForLLM(r),
+			correctness_run_fuzz_test: (_params, r) => [
+				`# Property-Based / Fuzz Test (${r.id})`,
+				r.summary,
+				...(r.counterexample ? [`Minimized Counterexample: ${JSON.stringify(r.counterexample.minimizedArgs)}`, `Error/Violation: ${r.counterexample.errorOrViolation}`, `Regression Test:\n\`\`\`js\n${r.counterexample.regressionTestSnippet}\n\`\`\``] : []),
+			].join('\n'),
+			correctness_run_mutation_test: (_params, r) => [
+				`# Isolated Mutation Testing (${r.id})`,
+				r.summary,
+				`Note: ${r.limitationsNote}`,
+				...r.outcomes.filter(o => o.status === 'survived').slice(0, 12).map(o => `- [SURVIVED] ${o.file}:${o.line} (${o.operator}): \`${o.originalCode}\` -> \`${o.mutatedCode}\``),
+			].join('\n'),
+			correctness_plan_repair: (_params, r) => [
+				`# Controlled Repair Plan (${r.id})`,
+				`Defect: ${r.defectSummary}`,
+				`Target Files: ${r.targetFiles.join(', ')}`,
+				`Blast Radius: ${r.blastRadiusFiles.join(', ') || 'isolated'}`,
+				`Targeted Regression Tests: ${r.targetedTests.join(', ') || 'run relevant suite'}`,
+				`Smallest Safe Fix: ${r.smallestFixStrategy}`,
+				`Rollback: ${r.rollbackStrategy}`,
+			].join('\n'),
+			correctness_independent_verify: (_params, r) => [
+				`# Independent Verification Verdict: **${r.verdict}** (${r.id})`,
+				r.summary,
+				...(r.proofRecordId ? [`Proof-Carrying Record: ${r.proofRecordId}`] : []),
+				...r.checks.map(c => `- [${c.status.toUpperCase()}] (${c.category}) ${c.name}: ${c.detail}`),
+				...(r.rejectionReasons.length ? [`Rejection Reasons:\n${r.rejectionReasons.map(x => `- ${x}`).join('\n')}`] : []),
+				...(r.untestedRisks.length ? [`Untested Risks:\n${r.untestedRisks.map(x => `- ${x}`).join('\n')}`] : []),
+			].join('\n'),
+			correctness_create_proof_record: (_params, r) => `Saved Proof-Carrying Change Record **${r.record.id}** [${r.record.independentVerdict}] (${r.totalProofs} total persisted proof(s)).`,
+			correctness_assess_release_readiness: (_params, r) => [
+				`# Risk-Based Release Readiness: **${r.outcome.toUpperCase()}**`,
+				r.summary,
+				...r.gates.map(g => `- [${g.status.toUpperCase()}] ${g.label}: ${g.evidence}${g.gap ? ` (Gap: ${g.gap})` : ''}`),
+				...(r.unverifiedDimensions.length ? [`Unverified Dimensions:\n${r.unverifiedDimensions.map(u => `- ${u}`).join('\n')}`] : []),
+				`Disclaimer: ${r.explicitDisclaimer}`,
+			].join('\n'),
+			correctness_export_sarif: (_params, r) => `Exported SARIF 2.1.0 report with ${r.findingCount} finding(s):\n\`\`\`json\n${JSON.stringify(r.sarif, null, 2).slice(0, 2600)}\n\`\`\``,
+			correctness_list_proofs: (_params, r) => r.proofs.length === 0 ? 'No proof-carrying change records persisted yet.' : r.proofs.map(p => `- **${p.id}** [${p.independentVerdict}] ${p.title} (${p.changedFiles.length} file(s), ${p.testsExecuted.length} test cmd(s))`).join('\n'),
+			correctness_manage_suppressions: (_params, r) => `${r.suppressions.length} justified diagnostic suppression(s) recorded.`,
+
+			// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance (12 tools)
+			evolution_open_hub: (_params, r) => `Opened Kodia Next-Gen Evolution & Ops Hub (section=${r.section}).`,
+			evolution_supply_chain_sbom: (_params, r) => [
+				`# Kodia Supply-Chain & CycloneDX 1.5 SBOM`,
+				r.summary,
+				`Live Audit: ${r.liveAuditNote}`,
+				...(r.sbomPath ? [`SBOM Saved: ${r.sbomPath}`] : []),
+				...r.findings.slice(0, 20).map(f => `- **[${f.severity.toUpperCase()}] ${f.category}** \`${f.packageName}\` (${f.file}): ${f.title} — ${f.remediation}`),
+			].join('\n'),
+			evolution_audit_iac_finops: (_params, r) => [
+				`# Kodia IaC Security & FinOps Cost Audit`,
+				r.summary,
+				...r.findings.slice(0, 20).map(f => `- **[${f.severity.toUpperCase()}] ${f.ruleId}** ${f.file}:${f.line} — ${f.title}`),
+				...r.costBreakdown.map(c => `- Cost: ${c.resource} (${c.sourceFile}) = $${c.estimatedMonthlyUsd}/mo (save ~$${c.rightSizingSavingsUsd}/mo: ${c.recommendation})`),
+			].join('\n'),
+			evolution_analyze_incident: (_params, r) => [
+				r.summary,
+				'',
+				r.postmortemDraft,
+			].join('\n'),
+			evolution_plan_release: (_params, r) => [
+				`# Kodia Autonomous Release Plan`,
+				r.summary,
+				'',
+				r.changelogMarkdown,
+				`## Canary Rollout Plan`,
+				...r.canaryRolloutPlan.map(s => `- ${s}`),
+				`## Rollback Playbook`,
+				...r.rollbackPlaybook.map(s => `- ${s}`),
+			].join('\n'),
+			evolution_audit_privacy_compliance: (_params, r) => [
+				`# Kodia Privacy & Governance Compliance Audit`,
+				r.summary,
+				...r.findings.slice(0, 20).map(f => `- **[${f.severity.toUpperCase()}] [${f.frameworks.join('/')}]** ${f.file}:${f.line} — ${f.title}`),
+				...r.missingControls.map(m => `- Missing Control: ${m}`),
+			].join('\n'),
+			evolution_plan_modernization: (_params, r) => [
+				`# Kodia Strangler-Fig Legacy Modernization Plan`,
+				r.summary,
+				...r.monolithHotspots.slice(0, 8).map(h => `- Hotspot: \`${h.file}\` (fanIn=${h.fanIn}, lines=${h.lines}) — ${h.reason}`),
+				...r.waves.map(w => `### Wave ${w.wave} (${w.risk} risk): ${w.title}\n- Targets: ${w.targetModules.join(', ') || 'TBD'}\n- Strategy: ${w.strategy}\n- Gate: ${w.verificationGate}`),
+			].join('\n'),
+			evolution_run_capability_radar: (_params, r) => [
+				`# Kodia Continuous Capability Evolution Radar`,
+				r.summary,
+				`Workspace Ecosystems: ${r.workspaceEcosystems.join(', ') || 'generic'} | Next Audit: ${r.nextRecommendedAuditAt}`,
+				...r.evaluations.map(e => `- **[${e.verdict}]** ${e.name} (${e.domain}) — signal=${e.signalScore}, hype=${e.hypeRiskScore}, licenseOk=${e.licenseCompatible}, autoInstallAllowed=${e.autoInstallAllowed}`),
+			].join('\n'),
+			evolution_evaluate_technology: (_params, r) => [
+				`# Technology Signal-vs-Hype Evaluation: ${r.name}`,
+				`Verdict: **${r.verdict}** | Signal: ${r.signalScore}/100 | Hype Risk: ${r.hypeRiskScore}/100 | License Compatible: ${r.licenseCompatible} | autoInstallAllowed: ${r.autoInstallAllowed}`,
+				`License Note: ${r.licenseNote}`,
+				...r.rationale.map(x => `- ${x}`),
+				`Recommended Action: ${r.recommendedAction}`,
+			].join('\n'),
+			evolution_manage_proposals: (_params, r) => r.proposals.length === 0
+				? 'No evolution proposals recorded yet.'
+				: r.proposals.map(p => `- **${p.id}** [${p.status}/${p.verdict}] ${p.title} (signal=${p.signalScore}, autoInstallAllowed=${p.autoInstallAllowed})`).join('\n'),
+			evolution_schedule_periodic_audit: (_params, r) => r.message,
+			evolution_workspace_overview: (_params, r) => [
+				`# Kodia Evolution & Enterprise Ops Snapshot`,
+				`- Supply-Chain SBOM reports: ${r.supplyChainReports.length}`,
+				`- IaC & FinOps reports: ${r.iacFinOpsReports.length}`,
+				`- Incident Forensics reports: ${r.incidentReports.length}`,
+				`- Release Plans: ${r.releasePlans.length}`,
+				`- Privacy Compliance reports: ${r.privacyReports.length}`,
+				`- Modernization Plans: ${r.modernizationReports.length}`,
+				`- Capability Radar audits: ${r.radarReports.length}`,
+				`- Governed Proposals: ${r.proposals.length}`,
 			].join('\n'),
 
 			// Notebook operations

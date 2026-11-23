@@ -21,6 +21,8 @@ import './autocompleteService.js'
 // settings pane & native API Engineering Studio pane
 import './voidSettingsPane.js'
 import './apiStudioPane.js'
+import './correctnessPane.js'
+import './evolutionPane.js'
 
 // register css
 import './media/void.css'
@@ -117,4 +119,6 @@ import './softwareFactoryService.js'
 import './designIntelligenceService.js'
 import './aiEngineeringService.js'
 import './apiStudioService.js'
+import './correctnessService.js'
+import './evolutionService.js'
 import '../common/executionObservability.js'

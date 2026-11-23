@@ -3,7 +3,25 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
+import { Event } from '../../../../base/common/event.js';
+import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { ChatMode } from './voidSettingsTypes.js';
+
+export const IKodiaWorkflowsService = createDecorator<IKodiaWorkflowsService>('kodiaWorkflowsService');
+
+export interface IKodiaWorkflowsService {
+	readonly _serviceBrand: undefined;
+	readonly onDidChangeJobs: Event<readonly KodiaScheduledJob[]>;
+
+	listWorkflows(): Promise<KodiaWorkflowDefinition[]>;
+	getScheduledJobs(): readonly KodiaScheduledJob[];
+	addScheduledJob(input: { name: string; prompt: string; workflowName?: string; chatMode?: ChatMode; intervalMinutes: number; enabled?: boolean }): KodiaScheduledJob;
+	toggleScheduledJob(jobId: string, enabled: boolean): void;
+	deleteScheduledJob(jobId: string): void;
+	runWorkflowNow(workflow: KodiaWorkflowDefinition): Promise<string>;
+	runJobNow(jobId: string): Promise<string | undefined>;
+	tickDueJobs(nowMs?: number): Promise<string[]>;
+}
 
 export interface KodiaWorkflowDefinition {
 	readonly name: string;

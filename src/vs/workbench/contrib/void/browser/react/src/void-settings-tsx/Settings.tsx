@@ -8,12 +8,14 @@ import {
 	BookOpen,
 	Bot,
 	Brain,
+	Compass,
 	Cpu,
 	Globe,
 	Home,
 	Palette,
 	Search,
 	Settings as SettingsIcon,
+	ShieldCheck,
 	Sliders,
 	Sparkles,
 	Wand2,
@@ -33,6 +35,8 @@ import { OperationsDiagnosticsSection } from './OperationsDiagnosticsSettings.js
 import { DesignIntelligenceSection } from './DesignIntelligenceSettings.js';
 import { AIEngineSettingsSection } from './AIEngineSettings.js';
 import { ApiStudioSettingsSection } from './ApiStudioSettings.js';
+import { CorrectnessSettingsSection } from './CorrectnessSettings.js';
+import { EvolutionSettingsSection } from './EvolutionSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -145,6 +149,26 @@ const SECTIONS: readonly NavSectionDef[] = [
 		},
 	},
 	{
+		id: 'correctness',
+		group: 'Intelligence & Ops',
+		label: 'Debugging & Correctness',
+		icon: <ShieldCheck size={14} />,
+		keywordsOfGroup: {
+			'Analysis, Taint & Hub Behavior': ['debug', 'correctness', 'compiler', 'taint', 'sarif', 'incremental', 'static', 'defect', 'root cause'],
+			'Independent Verification, Fuzz & Mutation Defaults': ['verify', 'verification', 'proof', 'fuzz', 'property', 'mutation', 'readiness', 'repair'],
+		},
+	},
+	{
+		id: 'evolution',
+		group: 'Intelligence & Ops',
+		label: 'Evolution, SBOM & Cloud Ops',
+		icon: <Compass size={14} />,
+		keywordsOfGroup: {
+			'Continuous Capability Discovery & Supply-Chain Policy': ['evolution', 'radar', 'sbom', 'cyclonedx', 'supply chain', 'license', 'copyleft', 'hype', 'proposals'],
+			'SLO & Cloud FinOps Thresholds': ['iac', 'finops', 'cost', 'terraform', 'kubernetes', 'dockerfile', 'slo', 'incident', 'release', 'gdpr', 'hipaa', 'modernization'],
+		},
+	},
+	{
 		id: 'design',
 		group: 'Intelligence & Ops',
 		label: 'Design Intelligence & Brand',
@@ -238,6 +262,8 @@ export const Settings = () => {
 			case 'agent': return <AgentSection />;
 			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
 			case 'api_studio': return <ApiStudioSettingsSection onRecordChange={recordChange} />;
+			case 'correctness': return <CorrectnessSettingsSection onRecordChange={recordChange} />;
+			case 'evolution': return <EvolutionSettingsSection onRecordChange={recordChange} />;
 			case 'design': return <DesignIntelligenceSection onRecordChange={recordChange} />;
 			case 'instructions': return <InstructionsSection />;
 			case 'operations': return <OperationsDiagnosticsSection />;

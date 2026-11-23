@@ -239,6 +239,21 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'api_manage_environment',
 	'api_assess_production_readiness',
 	'api_correlate_failure',
+	// Kodia Deep Debugging, Software Correctness & Independent Verification Engine (14 tools)
+	'correctness_open_hub',
+	'correctness_analyze_workspace',
+	'correctness_run_compilers',
+	'correctness_taint_analysis',
+	'correctness_investigate_root_cause',
+	'correctness_run_fuzz_test',
+	'correctness_run_mutation_test',
+	'correctness_plan_repair',
+	'correctness_independent_verify',
+	'correctness_create_proof_record',
+	'correctness_assess_release_readiness',
+	'correctness_export_sarif',
+	'correctness_list_proofs',
+	'correctness_manage_suppressions',
 ]);
 
 /**
@@ -614,6 +629,44 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'api_mock_server':
 		case 'api_manage_collection':
 		case 'api_manage_environment':
+			return 'medium';
+
+		// Kodia Deep Debugging & Software Correctness — read/analyze/plan/assess tools are low risk
+		case 'correctness_open_hub':
+		case 'correctness_analyze_workspace':
+		case 'correctness_taint_analysis':
+		case 'correctness_investigate_root_cause':
+		case 'correctness_plan_repair':
+		case 'correctness_assess_release_readiness':
+		case 'correctness_export_sarif':
+		case 'correctness_list_proofs':
+			return 'low';
+
+		// Correctness execution & verification record tools
+		case 'correctness_run_compilers':
+		case 'correctness_run_fuzz_test':
+		case 'correctness_run_mutation_test':
+		case 'correctness_independent_verify':
+		case 'correctness_create_proof_record':
+		case 'correctness_manage_suppressions':
+			return 'medium';
+
+		// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance — read/analyze/evaluate tools are low risk
+		case 'evolution_open_hub':
+		case 'evolution_audit_iac_finops':
+		case 'evolution_analyze_incident':
+		case 'evolution_plan_release':
+		case 'evolution_audit_privacy_compliance':
+		case 'evolution_plan_modernization':
+		case 'evolution_run_capability_radar':
+		case 'evolution_evaluate_technology':
+		case 'evolution_workspace_overview':
+			return 'low';
+
+		// Supply-chain live audit, proposal writes, and periodic scheduler registration
+		case 'evolution_supply_chain_sbom':
+		case 'evolution_manage_proposals':
+		case 'evolution_schedule_periodic_audit':
 			return 'medium';
 	}
 	return 'medium';

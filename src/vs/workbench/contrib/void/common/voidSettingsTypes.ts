@@ -12,6 +12,8 @@ import { InstructionsFramework } from './instructionsFrameworks.js';
 import { DEFAULT_DESIGN_INTELLIGENCE_SETTINGS, DesignIntelligenceSettings } from './designIntelligenceTypes.js';
 import { AIEngineSettings, DEFAULT_AI_ENGINE_SETTINGS } from './aiEngineeringTypes.js';
 import { ApiStudioSettings, DEFAULT_API_STUDIO_SETTINGS } from './apiStudioTypes.js';
+import { CorrectnessEngineSettings, DEFAULT_CORRECTNESS_ENGINE_SETTINGS } from './correctnessTypes.js';
+import { DEFAULT_EVOLUTION_ENGINE_SETTINGS, EvolutionEngineSettings } from './evolutionTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -529,6 +531,8 @@ export type GlobalSettings = {
 	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
 	aiEngine: AIEngineSettings;
 	apiStudio: ApiStudioSettings;
+	correctness: CorrectnessEngineSettings;
+	evolution: EvolutionEngineSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -576,6 +580,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	// Universal AI Engineering Engine & Unified Two-Engine Orchestrator
 	aiEngine: DEFAULT_AI_ENGINE_SETTINGS,
 	apiStudio: DEFAULT_API_STUDIO_SETTINGS,
+	correctness: DEFAULT_CORRECTNESS_ENGINE_SETTINGS,
+	evolution: DEFAULT_EVOLUTION_ENGINE_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

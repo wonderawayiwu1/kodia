@@ -75,6 +75,10 @@ import { IAIEngineeringService } from '../../../aiEngineeringService.js';
 import { IKodiaAIEngineMainService } from '../../../../common/aiEngineeringTypes.js';
 import { IApiStudioService } from '../../../apiStudioService.js';
 import { IKodiaApiStudioMainService } from '../../../../common/apiStudioTypes.js';
+import { ICorrectnessService } from '../../../correctnessService.js';
+import { IKodiaCorrectnessMainService } from '../../../../common/correctnessTypes.js';
+import { IEvolutionService } from '../../../evolutionService.js';
+import { IKodiaEvolutionMainService } from '../../../../common/evolutionTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -271,6 +275,10 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaAIEngineMainService: (() => { try { return accessor.get(IKodiaAIEngineMainService) } catch { return undefined } })(),
 		IApiStudioService: accessor.get(IApiStudioService),
 		IKodiaApiStudioMainService: (() => { try { return accessor.get(IKodiaApiStudioMainService) } catch { return undefined } })(),
+		ICorrectnessService: accessor.get(ICorrectnessService),
+		IKodiaCorrectnessMainService: (() => { try { return accessor.get(IKodiaCorrectnessMainService) } catch { return undefined } })(),
+		IEvolutionService: accessor.get(IEvolutionService),
+		IKodiaEvolutionMainService: (() => { try { return accessor.get(IKodiaEvolutionMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAccessor, useChatThreadsState, useIsDark } from '../util/services.js';
-import { Activity, BookOpen, Brain, ClipboardList, Factory, Globe, History, MessageCircle, Palette, Server, Settings, ShieldCheck, Users, Workflow } from 'lucide-react';
+import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Server, Settings, ShieldCheck, Users, Workflow } from 'lucide-react';
 
 import '../styles.css';
 import { SidebarChat } from './SidebarChat.js';
@@ -24,6 +24,8 @@ import ErrorBoundary from './ErrorBoundary.js';
 import { getPlanProgress } from '../../../../common/autonomousTask.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { KODIA_OPEN_API_STUDIO_ACTION_ID } from '../../../apiStudioService.js';
+import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from '../../../correctnessService.js';
+import { KODIA_OPEN_EVOLUTION_HUB_ACTION_ID } from '../../../evolutionService.js';
 
 type SidebarTab = 'chat' | 'ai-engine' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
@@ -147,6 +149,24 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 				className='p-1 rounded-md text-void-fg-3 hover:text-sky-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
 			>
 				<Globe size={13} />
+			</button>
+			<button
+				type='button'
+				title='Open Kodia Deep Debugging & Correctness Hub (Ctrl+Alt+D)'
+				aria-label='Open Kodia Deep Debugging & Correctness Hub'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID)}
+				className='p-1 rounded-md text-void-fg-3 hover:text-emerald-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<ShieldCheck size={13} />
+			</button>
+			<button
+				type='button'
+				title='Open Kodia Next-Gen Evolution, Supply-Chain & Ops Hub (Ctrl+Alt+E)'
+				aria-label='Open Kodia Evolution & Ops Hub'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_EVOLUTION_HUB_ACTION_ID)}
+				className='p-1 rounded-md text-void-fg-3 hover:text-violet-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<Compass size={13} />
 			</button>
 			<button
 				type='button'

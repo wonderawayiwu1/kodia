@@ -43,7 +43,7 @@ export function routingRoleForContext(opts: { chatMode?: ChatMode; subagentRole?
 		if (role === 'planner' || role === 'architect' || role === 'ai_architect' || role === 'ai_research') { return 'planning'; }
 		if (role === 'security' || role === 'ai_security') { return 'security'; }
 		if (role === 'debugging') { return 'debugging'; }
-		if (role === 'review' || role === 'performance') { return 'review'; }
+		if (role === 'review' || role === 'performance' || role === 'verifier' || role === 'supply_chain_ops' || role === 'evolution_scout') { return 'review'; }
 		if (role === 'testing' || role === 'browser' || role === 'ai_eval' || role === 'api_qa_perf') { return 'testing'; }
 		if (role === 'docs') { return 'docs'; }
 		return 'coding';

@@ -47,7 +47,10 @@ export type BuiltinSubagentType =
 	| 'ai_research'
 	| 'robotics_iot'
 	| 'api_engineer'
-	| 'api_qa_perf';
+	| 'api_qa_perf'
+	| 'verifier'
+	| 'supply_chain_ops'
+	| 'evolution_scout';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -232,6 +235,21 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		canChangeFiles: true,
 		description: 'specialist in automated API testing, contract/regression suites, concurrent load/performance benchmarking, API security auditing, and production readiness assessment',
 		guidance: 'Use api_open_studio, api_runtime_start, api_generate_test_suite, api_run_test_suite, api_run_load_test, api_security_audit, and api_assess_production_readiness. Always execute real tests and report exact measured metrics.',
+	},
+	verifier: {
+		canChangeFiles: false,
+		description: 'read-only Independent Verification specialist that audits repairs, runs deterministic compiler/taint/test checks, rejects unverified or broken fixes, and issues proof-carrying verdicts',
+		guidance: 'Never trust completion claims without real deterministic evidence. Use correctness_independent_verify, correctness_run_compilers, correctness_taint_analysis, change_impact_analysis, and correctness_assess_release_readiness. Explicitly REJECT any change with failing checks, security regressions, or missing tests.',
+	},
+	supply_chain_ops: {
+		canChangeFiles: false,
+		description: 'read-only Supply-Chain, IaC/FinOps, Production Incident, Release Safety & Privacy Governance specialist',
+		guidance: 'Use evolution_supply_chain_sbom, evolution_audit_iac_finops, evolution_analyze_incident, evolution_plan_release, evolution_audit_privacy_compliance, and evolution_plan_modernization. Report concrete file:line findings, SLO burn rates, migration risks, and cost savings honestly without blind mutations.',
+	},
+	evolution_scout: {
+		canChangeFiles: false,
+		description: 'read-only Continuous Capability Evolution & Signal-vs-Hype Scout that evaluates emerging engineering technologies, license compatibility, and Kodia self-improvement proposals',
+		guidance: 'Use evolution_run_capability_radar, evolution_evaluate_technology, and evolution_manage_proposals. Strictly distinguish verifiable engineering signal from marketing hype, flag incompatible licenses, avoid duplicating existing Kodia capabilities, and NEVER blindly install dependencies.',
 	},
 };
 

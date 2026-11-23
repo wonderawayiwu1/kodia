@@ -232,6 +232,10 @@ import { KodiaAIEngineMainService } from '../../workbench/contrib/void/electron-
 import { IKodiaAIEngineMainService, KODIA_AI_ENGINE_CHANNEL } from '../../workbench/contrib/void/common/aiEngineeringTypes.js';
 import { KodiaApiStudioMainService } from '../../workbench/contrib/void/electron-main/apiStudioMainService.js';
 import { IKodiaApiStudioMainService, KODIA_API_STUDIO_CHANNEL } from '../../workbench/contrib/void/common/apiStudioTypes.js';
+import { KodiaCorrectnessMainService } from '../../workbench/contrib/void/electron-main/correctnessMainService.js';
+import { IKodiaCorrectnessMainService, KODIA_CORRECTNESS_CHANNEL } from '../../workbench/contrib/void/common/correctnessTypes.js';
+import { KodiaEvolutionMainService } from '../../workbench/contrib/void/electron-main/evolutionMainService.js';
+import { IKodiaEvolutionMainService, KODIA_EVOLUTION_CHANNEL } from '../../workbench/contrib/void/common/evolutionTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
 import { IKodiaWebFetchService } from '../../workbench/contrib/void/common/webFetchTypes.js';
 import { KodiaWebFetchMainService } from '../../workbench/contrib/void/electron-main/webFetchMainService.js';
@@ -1389,6 +1393,8 @@ export class CodeApplication extends Disposable {
 		services.set(IDesignAssetMainService, new SyncDescriptor(KodiaDesignAssetMainService, undefined, false));
 		services.set(IKodiaAIEngineMainService, new SyncDescriptor(KodiaAIEngineMainService, undefined, false));
 		services.set(IKodiaApiStudioMainService, new SyncDescriptor(KodiaApiStudioMainService, undefined, false));
+		services.set(IKodiaCorrectnessMainService, new SyncDescriptor(KodiaCorrectnessMainService, undefined, false));
+		services.set(IKodiaEvolutionMainService, new SyncDescriptor(KodiaEvolutionMainService, undefined, false));
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
@@ -1608,6 +1614,14 @@ export class CodeApplication extends Disposable {
 		// Kodia: API Engineering Studio (live HTTP/GraphQL/WS/SSE/SOAP/gRPC client, runtime manager, test runner, load engine, security & mock servers)
 		const kodiaApiStudioChannel = ProxyChannel.fromService(accessor.get(IKodiaApiStudioMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
 		mainProcessElectronServer.registerChannel(KODIA_API_STUDIO_CHANNEL, kodiaApiStudioChannel);
+
+		// Kodia: Deep Debugging, Software Correctness, Fuzzing, Mutation Testing & Independent Verification Engine
+		const kodiaCorrectnessChannel = ProxyChannel.fromService(accessor.get(IKodiaCorrectnessMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
+		mainProcessElectronServer.registerChannel(KODIA_CORRECTNESS_CHANNEL, kodiaCorrectnessChannel);
+
+		// Kodia: Next-Generation Evolution, Supply-Chain SBOM, IaC/FinOps, Production/Release & Governance Engine
+		const kodiaEvolutionChannel = ProxyChannel.fromService(accessor.get(IKodiaEvolutionMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
+		mainProcessElectronServer.registerChannel(KODIA_EVOLUTION_CHANNEL, kodiaEvolutionChannel);
 
 		const mlxChannel = ProxyChannel.fromService(accessor.get(IMlxMainService), disposables);
 		mainProcessElectronServer.registerChannel('void-channel-mlx', mlxChannel);

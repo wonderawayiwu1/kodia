@@ -2420,6 +2420,239 @@ export const builtinTools: {
 		},
 	},
 
+	// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+	correctness_open_hub: {
+		name: 'correctness_open_hub',
+		description: 'Opens and focuses the native in-editor Kodia Deep Debugging & Correctness Intelligence Hub (diagnostics, taint, root-cause investigator, fuzzing, mutation testing, independent verification, release readiness).',
+		params: {
+			section: { description: 'Optional section: diagnostics, taint, investigate, impact, fuzz, mutation, verify, readiness.' },
+		},
+	},
+	correctness_analyze_workspace: {
+		name: 'correctness_analyze_workspace',
+		description: 'Runs multi-layer incremental & deep static correctness analysis (cross-file unresolved imports/exports, async/forEach bugs, resource leaks, auth/authz defects, weak crypto, Python mutable defaults) with dependency-aware invalidation.',
+		params: {
+			sub_path: { description: 'Optional relative subfolder.' },
+			incremental: { description: 'Optional boolean (default true) to reuse cached findings for unchanged non-dependent files.' },
+			max_files: { description: 'Optional maximum files to scan (default 200).' },
+		},
+	},
+	correctness_run_compilers: {
+		name: 'correctness_run_compilers',
+		description: 'Executes real installed language compilers and syntax/type checkers (node --check, tsc --noEmit, python -m py_compile, go vet, cargo check) and returns structured file:line:col diagnostics.',
+		params: {
+			target_files: { description: 'Optional JSON array of relative file paths to check.' },
+			languages: { description: 'Optional JSON array of languages to restrict checks (e.g., ["typescript","python"]).' },
+		},
+	},
+	correctness_taint_analysis: {
+		name: 'correctness_taint_analysis',
+		description: 'Performs source -> propagation -> sanitizer -> sink data-flow and taint analysis detecting unsanitized SQL injection, shell injection, eval/exec, XSS, path traversal, SSRF, and secret logging.',
+		params: {
+			sub_path: { description: 'Optional relative subfolder.' },
+			max_files: { description: 'Optional max files to scan (default 180).' },
+		},
+	},
+	correctness_investigate_root_cause: {
+		name: 'correctness_investigate_root_cause',
+		description: 'Conducts a structured root-cause investigation combining symptom, stack traces/logs, compiler/static/taint diagnostics, and change-impact blast radius into ranked hypotheses clearly separating confirmed root causes from unresolved uncertainty.',
+		params: {
+			symptom: { description: 'Bug report, failing test error, exception, or incident summary.' },
+			stack_trace_or_logs: { description: 'Optional stack trace, stderr, or API/runtime logs.' },
+			sub_path: { description: 'Optional relative subfolder.' },
+		},
+	},
+	correctness_run_fuzz_test: {
+		name: 'correctness_run_fuzz_test',
+		description: 'Runs real property-based & boundary/malformed-input fuzz testing on an exported JS/TS function with deterministic seeding, automatic counterexample input minimization, persistent fuzz corpus, and regression test generation.',
+		params: {
+			target_file: { description: 'Relative path to target JS/TS module.' },
+			export_name: { description: 'Exported function name to fuzz.' },
+			property_expression: { description: 'JS boolean invariant referencing `args` and `result` (e.g. "Number.isFinite(result)").' },
+			arg_schema: { description: 'JSON array of argument types: number, integer, string, boolean, json-object, array-number.' },
+			iterations: { description: 'Optional iteration count (default 150).' },
+			seed: { description: 'Optional deterministic integer seed (default 1337).' },
+		},
+	},
+	correctness_run_mutation_test: {
+		name: 'correctness_run_mutation_test',
+		description: 'Runs real isolated mutation testing in a disposable workspace copy (never modifying user source files), injecting controlled operator/branch mutants and measuring test-suite kill rate.',
+		params: {
+			target_file: { description: 'Relative path to source file to mutate.' },
+			test_command: { description: 'Real test command executed against baseline and each mutant.' },
+			max_mutants: { description: 'Optional max mutants to evaluate (default 15).' },
+			timeout_ms: { description: 'Optional per-mutant timeout in ms (default 12000).' },
+		},
+	},
+	correctness_plan_repair: {
+		name: 'correctness_plan_repair',
+		description: 'Creates a controlled repair plan calculating blast radius, targeted regression tests, side-effect risks, smallest safe fix strategy, and rollback checklist before modifying code.',
+		params: {
+			defect_summary: { description: 'Summary of confirmed defect.' },
+			target_files: { description: 'JSON array of files to modify.' },
+			smallest_fix_strategy: { description: 'Targeted minimal repair description.' },
+		},
+	},
+	correctness_independent_verify: {
+		name: 'correctness_independent_verify',
+		description: 'Runs genuinely separate Independent Verification (fresh compiler checks, fresh static & taint scans, and real test command execution) returning APPROVED, REJECTED, or CONDITIONAL and automatically persisting a Proof-Carrying Change Record.',
+		params: {
+			change_description: { description: 'Description of repair or feature being verified.' },
+			changed_files: { description: 'JSON array of modified file paths.' },
+			requirements: { description: 'Optional JSON array of requirement statements covered.' },
+			test_commands: { description: 'JSON array of real test commands to execute independently.' },
+			require_tests: { description: 'Optional boolean (default true) requiring at least one passing automated test check.' },
+		},
+	},
+	correctness_create_proof_record: {
+		name: 'correctness_create_proof_record',
+		description: 'Persists an inspectable Proof-Carrying Change Record (.kodia/correctness/proofs/*.json) summarizing requirements, checks, findings, and known limitations.',
+		params: {
+			title: { description: 'Change title.' },
+			changed_files: { description: 'JSON array of changed files.' },
+			requirements: { description: 'Optional JSON array of requirements covered.' },
+			summary: { description: 'Verification summary.' },
+			known_limitations: { description: 'Optional JSON array of unverified dimensions or limitations.' },
+		},
+	},
+	correctness_assess_release_readiness: {
+		name: 'correctness_assess_release_readiness',
+		description: 'Evaluates risk-based release readiness across compiler, static correctness, taint security, and independent verification gates with 5 honest outcomes (verified_against_checks, conditionally_ready, not_ready_failures, verification_incomplete, blocked_infrastructure).',
+		params: {
+			infrastructure_blocked_reason: { description: 'Optional note if external infrastructure/credentials prevented verification.' },
+		},
+	},
+	correctness_export_sarif: {
+		name: 'correctness_export_sarif',
+		description: 'Exports active static correctness, compiler, and taint findings in standard SARIF 2.1.0 JSON format.',
+		params: {
+			sub_path: { description: 'Optional subfolder scope.' },
+		},
+	},
+	correctness_list_proofs: {
+		name: 'correctness_list_proofs',
+		description: 'Lists persisted Proof-Carrying Change Records and their independent verification verdicts.',
+		params: {},
+	},
+	correctness_manage_suppressions: {
+		name: 'correctness_manage_suppressions',
+		description: 'Lists, adds, or removes justified diagnostic false-positive suppressions persisted in .kodia/correctness/suppressions.json.',
+		params: {
+			action: { description: 'One of: list, add, remove.' },
+			id: { description: 'Suppression ID (for remove).' },
+			rule_id: { description: 'Rule ID to suppress (for add).' },
+			file_pattern: { description: 'Optional filename substring scope.' },
+			justification: { description: 'Required documented justification for suppression.' },
+		},
+	},
+
+	// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Production/Release, Compliance & Continuous Self-Improvement (12 tools)
+	evolution_open_hub: {
+		name: 'evolution_open_hub',
+		description: 'Opens and focuses the native Kodia Next-Gen Evolution, Supply-Chain & Ops Hub (capability radar, CycloneDX SBOM, IaC/FinOps, production incident/release, privacy/modernization, proposals).',
+		params: {
+			section: { description: 'Optional section: radar, supply-chain, iac-finops, prod-release, privacy-legacy, proposals.' },
+		},
+	},
+	evolution_supply_chain_sbom: {
+		name: 'evolution_supply_chain_sbom',
+		description: 'Scans project manifests & lockfiles across npm/PyPI/Go/Cargo, generates a CycloneDX 1.5 JSON SBOM in .kodia/evolution/sbom.cdx.json, audits SPDX licenses, pinning, typosquatting, lifecycle scripts, and optionally runs offline npm audit.',
+		params: {
+			run_live_audit: { description: 'Optional boolean ("true"/"false") to run npm audit --json --offline when package-lock.json exists.' },
+			block_copyleft: { description: 'Optional boolean ("true"/"false") to elevate strong copyleft licenses to critical.' },
+		},
+	},
+	evolution_audit_iac_finops: {
+		name: 'evolution_audit_iac_finops',
+		description: 'Audits Dockerfiles, Kubernetes YAML, Terraform (.tf), and GitHub Actions workflows for security misconfigurations and computes FinOps monthly cloud cost & right-sizing savings.',
+		params: {
+			monthly_budget_usd: { description: 'Optional monthly cloud budget threshold in USD (default 500).' },
+		},
+	},
+	evolution_analyze_incident: {
+		name: 'evolution_analyze_incident',
+		description: 'Performs production log & latency forensics: clusters recurring error signatures, computes P50/P95/P99 latency and SLO error-budget burn rate, and drafts an incident runbook + postmortem.',
+		params: {
+			service_name: { description: 'Name of the service experiencing the incident.' },
+			log_text: { description: 'Raw application/HTTP/JSON log lines to analyze.' },
+			log_file: { description: 'Optional workspace-relative or absolute path to a log file when log_text is omitted.' },
+			slo_target_pct: { description: 'Optional availability SLO target percentage (default 99.9).' },
+			p95_budget_ms: { description: 'Optional P95 latency budget in milliseconds (default 400).' },
+		},
+	},
+	evolution_plan_release: {
+		name: 'evolution_plan_release',
+		description: 'Analyzes real git commit history and SQL/Prisma migrations to compute SemVer bump, categorized changelog, zero-downtime migration warnings, staged canary rollout plan, and rollback playbook (never pushes or deploys automatically).',
+		params: {
+			since_ref: { description: 'Optional git tag/ref to inspect commits since.' },
+			current_version: { description: 'Optional current version override (defaults to package.json version).' },
+		},
+	},
+	evolution_audit_privacy_compliance: {
+		name: 'evolution_audit_privacy_compliance',
+		description: 'Scans source code for unredacted PII/PHI logging, unregulated PII sent to AI models, high-stakes automated decisions without human oversight, and maps findings to GDPR, SOC2, HIPAA, and EU AI Act controls.',
+		params: {
+			sub_path: { description: 'Optional subdirectory to scope the scan.' },
+		},
+	},
+	evolution_plan_modernization: {
+		name: 'evolution_plan_modernization',
+		description: 'Reuses Kodia Project Digital Twin dependency graph to identify high-fan-in monolith hotspots and deprecated runtime APIs, generating a phased Strangler-Fig modernization plan.',
+		params: {
+			sub_path: { description: 'Optional subdirectory to analyze.' },
+		},
+	},
+	evolution_run_capability_radar: {
+		name: 'evolution_run_capability_radar',
+		description: 'Runs Kodia permanent Continuous Capability-Discovery Radar across 9 emerging engineering domains, scoring signal vs hype, checking license compatibility, and rejecting hype/incompatible candidates (never auto-installs).',
+		params: {
+			audit_interval_hours: { description: 'Optional hours until next recommended audit (default 168).' },
+		},
+	},
+	evolution_evaluate_technology: {
+		name: 'evolution_evaluate_technology',
+		description: 'Evaluates a specific emerging technology, framework, or tool for Kodia/project adoption with strict signal-vs-hype scoring, license compatibility checks, anti-duplication checks, and autoInstallAllowed=false guardrail.',
+		params: {
+			name: { description: 'Technology or library name.' },
+			domain: { description: 'One of: engineering-techniques, languages-frameworks, testing-verification, ai-agents, security-threats, developer-workflows, infrastructure-cloud, hardware-embedded, kodia-self-improvement.' },
+			summary: { description: 'Brief description of the capability.' },
+			license: { description: 'SPDX license string (e.g. MIT, Apache-2.0, AGPL-3.0, Unknown).' },
+			maturity: { description: 'One of: experimental, emerging, production-proven, declining.' },
+			benchmarks_count: { description: 'Optional count of independent benchmarks or production evidence points.' },
+			requires_new_dependency: { description: 'Optional boolean ("true"/"false").' },
+			requires_special_hardware: { description: 'Optional boolean ("true"/"false").' },
+			security_concerns: { description: 'Optional JSON array of known security concerns.' },
+			overlaps_existing: { description: 'Optional name of existing Kodia capability it overlaps.' },
+		},
+	},
+	evolution_manage_proposals: {
+		name: 'evolution_manage_proposals',
+		description: 'Lists, adds, updates status, or removes governed capability evolution proposals in .kodia/evolution/proposals.json (autoInstallAllowed is always false).',
+		params: {
+			action: { description: 'One of: list, add, update_status, remove.' },
+			id: { description: 'Proposal ID (for update_status/remove).' },
+			status: { description: 'Status: proposed, approved, deferred, rejected, implemented.' },
+			title: { description: 'Proposal title (for add).' },
+			domain: { description: 'Evolution domain (for add).' },
+			verdict: { description: 'Verdict: ADOPT_CANDIDATE, MONITOR, DEFER, REJECT_HYPE, REJECT_INCOMPATIBLE.' },
+			signal_score: { description: 'Signal score 0-100.' },
+			justification: { description: 'Engineering rationale.' },
+			acceptance_criteria: { description: 'Optional JSON array of measurable acceptance criteria.' },
+		},
+	},
+	evolution_schedule_periodic_audit: {
+		name: 'evolution_schedule_periodic_audit',
+		description: 'Schedules a recurring Capability Evolution Radar job in Kodia Workflows so emerging technologies, threats, and ecosystems are evaluated periodically without blind dependency installation.',
+		params: {
+			interval_hours: { description: 'Optional interval in hours (default 168 = weekly).' },
+		},
+	},
+	evolution_workspace_overview: {
+		name: 'evolution_workspace_overview',
+		description: 'Loads persisted Supply-Chain SBOM, IaC/FinOps, Incident, Release, Privacy, Modernization, Radar, and Proposal snapshots from .kodia/evolution/.',
+		params: {},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -2584,6 +2817,12 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - Discover actual routes, frameworks, protocols, specs, auth, and services with api_discover_project.
 - Start required local API service(s) with api_runtime_start (tracking PID, port, health, and live logs), generate or load tests (api_generate_test_suite), and execute genuine live requests/suites (api_send_request, api_run_test_suite, api_websocket_session, api_run_load_test, api_security_audit).
 - When any endpoint or assertion fails, correlate the failure to its source route and runtime logs (api_correlate_failure), inspect/fix the implementation, retest to prove resolution, compare responses (api_compare_responses), and produce an evidence-based readiness report (api_assess_production_readiness). Never fabricate test results or mark untested pillars as passed.`)
+		details.push(`DEEP DEBUGGING, SOFTWARE CORRECTNESS & INDEPENDENT VERIFICATION PROTOCOL:
+- When investigating bugs, verifying changes, auditing security/taint, or preparing software for release: run real compiler/syntax checks (correctness_run_compilers), incremental & cross-file analysis (correctness_analyze_workspace), source-to-sink taint tracing (correctness_taint_analysis), change-impact analysis (change_impact_analysis), and structured root-cause investigation (correctness_investigate_root_cause). Use real DAP debugging (debug_start_session / test_debug) when runtime inspection is needed, and use property/fuzz testing (correctness_run_fuzz_test) or isolated mutation testing (correctness_run_mutation_test) to expose subtle edge cases and weak tests.
+- Plan targeted minimal repairs (correctness_plan_repair) rather than speculative rewrites, and ALWAYS validate significant fixes with Independent Verification (correctness_independent_verify or the read-only \`verifier\` specialist). If Independent Verification returns REJECTED, resolve every rejection reason before claiming success. Never equate passing tests with a zero-defect guarantee; report exact verified evidence and unverified dimensions via correctness_assess_release_readiness.`)
+		details.push(`EVOLUTION, SUPPLY-CHAIN, INFRASTRUCTURE, COMPLIANCE & CONTINUOUS SELF-IMPROVEMENT:
+- For dependency/SBOM security, cloud/IaC/FinOps audits, production incident/SLO forensics, SemVer/migration release planning, GDPR/SOC2/HIPAA/EU AI Act governance, or Strangler-Fig legacy modernization, use Kodia's native \`evolution_*\` tools (or the read-only \`supply_chain_ops\` specialist) and open the native Hub via \`evolution_open_hub\`.
+- For evaluating emerging technologies, frameworks, or Kodia self-improvement ideas, use \`evolution_run_capability_radar\`, \`evolution_evaluate_technology\`, and \`evolution_manage_proposals\` (or the read-only \`evolution_scout\` specialist). Always distinguish verifiable engineering signal from hype, check license compatibility, avoid duplicating existing capabilities, and NEVER blindly install or integrate dependencies without explicit user approval.`)
 		details.push(`AUTONOMOUS UI/UX DESIGN & FRONTEND ENGINEERING DEFAULT: Whenever building or redesigning a website, e-commerce store, web app, dashboard, mobile/desktop UI, game, or frontend component, automatically deliver world-class, art-directed, production-grade design without waiting for the user to specify colors, typography, cards, imagery, or responsiveness:
 - Before coding UI: inspect an existing repo with inspect_existing_design_system + discover_icon_library, and plan new products with analyze_product_design_requirements, generate_design_brief, generate_design_tokens (or generate_color_palette + recommend_typography), and generate_page_architecture / generate_responsive_layout.
 - Visual assets & icons: proactively discover and download verified imagery with discover_visual_assets + download_visual_assets (or generate bespoke SVG artwork when offline/appropriate) and use clean vector icons from one coherent icon library. Never ship broken image URLs, generic placeholder boxes, lorem ipsum, or emoji substitutes for UI icons.

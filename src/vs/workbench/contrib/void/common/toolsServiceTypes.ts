@@ -95,6 +95,36 @@ import type {
 	ApiWebSocketSessionInfo,
 } from './apiStudioTypes.js';
 import type { ClientCodeTarget } from './apiStudioIntelligence.js';
+import type {
+	CompilerCheckOutcome,
+	CorrectnessHubSection,
+	DiagnosticSuppression,
+	FuzzTestConfig,
+	FuzzTestReport,
+	IncrementalAnalysisReport,
+	IndependentVerificationReport,
+	MutationTestReport,
+	ProofCarryingChangeRecord,
+	ReleaseReadinessReport,
+	RepairPlanRecord,
+	RootCauseInvestigationReport,
+	TaintAnalysisReport,
+} from './correctnessTypes.js';
+import type {
+	CapabilityRadarReport,
+	EvolutionDomain,
+	EvolutionHubSection,
+	EvolutionProposal,
+	EvolutionVerdict,
+	EvolutionWorkspaceSnapshot,
+	IacFinOpsReport,
+	IncidentForensicsReport,
+	LegacyModernizationReport,
+	PrivacyComplianceReport,
+	ReleasePlanReport,
+	SupplyChainAuditReport,
+	TechnologyEvaluationResult,
+} from './evolutionTypes.js';
 
 
 
@@ -294,6 +324,17 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'api_mock_server': 'terminal',
 	'api_manage_collection': 'edits',
 	'api_manage_environment': 'edits',
+	// Kodia Deep Debugging, Software Correctness & Independent Verification
+	'correctness_run_compilers': 'terminal',
+	'correctness_run_fuzz_test': 'test',
+	'correctness_run_mutation_test': 'test',
+	'correctness_independent_verify': 'test',
+	'correctness_create_proof_record': 'edits',
+	'correctness_manage_suppressions': 'edits',
+	// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance
+	'evolution_supply_chain_sbom': 'terminal',
+	'evolution_manage_proposals': 'edits',
+	'evolution_schedule_periodic_audit': 'edits',
 }
 
 
@@ -586,6 +627,34 @@ export type BuiltinToolCallParams = {
 	'api_manage_environment': { action: 'list' | 'save' | 'set_active', environment_id?: string, name?: string, kind?: ApiEnvironment['kind'], base_url?: string, is_protected?: boolean, variables?: ApiKeyValuePair[], set_active?: boolean },
 	'api_assess_production_readiness': {},
 	'api_correlate_failure': { history_index?: number },
+	// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+	'correctness_open_hub': { section?: CorrectnessHubSection },
+	'correctness_analyze_workspace': { sub_path?: string, incremental?: boolean, max_files?: number },
+	'correctness_run_compilers': { target_files?: string[], languages?: string[] },
+	'correctness_taint_analysis': { sub_path?: string, max_files?: number },
+	'correctness_investigate_root_cause': { symptom: string, stack_trace_or_logs?: string, sub_path?: string },
+	'correctness_run_fuzz_test': { target_file: string, export_name: string, property_expression: string, arg_schema: FuzzTestConfig['argSchema'], iterations?: number, seed?: number },
+	'correctness_run_mutation_test': { target_file: string, test_command: string, max_mutants?: number, timeout_ms?: number },
+	'correctness_plan_repair': { defect_summary: string, target_files: string[], smallest_fix_strategy: string },
+	'correctness_independent_verify': { change_description: string, changed_files: string[], requirements?: string[], test_commands?: string[], require_tests?: boolean },
+	'correctness_create_proof_record': { title: string, changed_files: string[], requirements?: string[], summary: string, known_limitations?: string[] },
+	'correctness_assess_release_readiness': { infrastructure_blocked_reason?: string },
+	'correctness_export_sarif': { sub_path?: string },
+	'correctness_list_proofs': {},
+	'correctness_manage_suppressions': { action: 'list' | 'add' | 'remove', id?: string, rule_id?: string, file_pattern?: string, justification?: string },
+	// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance (12 tools)
+	'evolution_open_hub': { section?: EvolutionHubSection },
+	'evolution_supply_chain_sbom': { run_live_audit?: boolean, block_copyleft?: boolean },
+	'evolution_audit_iac_finops': { monthly_budget_usd?: number },
+	'evolution_analyze_incident': { service_name: string, log_text?: string, log_file?: string, slo_target_pct?: number, p95_budget_ms?: number },
+	'evolution_plan_release': { since_ref?: string, current_version?: string },
+	'evolution_audit_privacy_compliance': { sub_path?: string },
+	'evolution_plan_modernization': { sub_path?: string },
+	'evolution_run_capability_radar': { audit_interval_hours?: number },
+	'evolution_evaluate_technology': { name: string, domain: EvolutionDomain, summary: string, license?: string, maturity: 'experimental' | 'emerging' | 'production-proven' | 'declining', benchmarks_count?: number, requires_new_dependency?: boolean, requires_special_hardware?: boolean, security_concerns?: string[], overlaps_existing?: string },
+	'evolution_manage_proposals': { action: 'list' | 'add' | 'update_status' | 'remove', id?: string, status?: EvolutionProposal['status'], title?: string, domain?: EvolutionDomain, verdict?: EvolutionVerdict, signal_score?: number, justification?: string, acceptance_criteria?: string[] },
+	'evolution_schedule_periodic_audit': { interval_hours?: number },
+	'evolution_workspace_overview': {},
 }
 
 // RESULT OF TOOL CALL
@@ -848,6 +917,34 @@ export type BuiltinToolResultType = {
 	'api_manage_environment': { message: string, environments: ApiEnvironment[], activeEnvironmentId: string | null },
 	'api_assess_production_readiness': ApiProductionReadinessReport,
 	'api_correlate_failure': ApiFailureCorrelationReport,
+	// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
+	'correctness_open_hub': { opened: boolean, section: CorrectnessHubSection },
+	'correctness_analyze_workspace': IncrementalAnalysisReport,
+	'correctness_run_compilers': { outcomes: CompilerCheckOutcome[], totalErrors: number },
+	'correctness_taint_analysis': TaintAnalysisReport,
+	'correctness_investigate_root_cause': RootCauseInvestigationReport,
+	'correctness_run_fuzz_test': FuzzTestReport,
+	'correctness_run_mutation_test': MutationTestReport,
+	'correctness_plan_repair': RepairPlanRecord,
+	'correctness_independent_verify': IndependentVerificationReport,
+	'correctness_create_proof_record': { record: ProofCarryingChangeRecord, totalProofs: number },
+	'correctness_assess_release_readiness': ReleaseReadinessReport,
+	'correctness_export_sarif': { sarif: Record<string, unknown>, findingCount: number },
+	'correctness_list_proofs': { proofs: ProofCarryingChangeRecord[] },
+	'correctness_manage_suppressions': { suppressions: DiagnosticSuppression[] },
+	// Kodia Next-Gen Evolution, Supply-Chain, IaC/FinOps, Ops & Governance (12 tools)
+	'evolution_open_hub': { opened: boolean, section: EvolutionHubSection },
+	'evolution_supply_chain_sbom': SupplyChainAuditReport,
+	'evolution_audit_iac_finops': IacFinOpsReport,
+	'evolution_analyze_incident': IncidentForensicsReport,
+	'evolution_plan_release': ReleasePlanReport,
+	'evolution_audit_privacy_compliance': PrivacyComplianceReport,
+	'evolution_plan_modernization': LegacyModernizationReport,
+	'evolution_run_capability_radar': CapabilityRadarReport,
+	'evolution_evaluate_technology': TechnologyEvaluationResult,
+	'evolution_manage_proposals': { proposals: EvolutionProposal[] },
+	'evolution_schedule_periodic_audit': { scheduled: boolean, jobId?: string, intervalHours: number, message: string },
+	'evolution_workspace_overview': EvolutionWorkspaceSnapshot,
 }
 
 

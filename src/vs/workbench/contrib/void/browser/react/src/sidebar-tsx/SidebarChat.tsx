@@ -2999,6 +2999,48 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 						<span className='text-void-fg-3'>{rawResult.criticalCount} critical · {rawResult.highCount} high</span>
 					</div>
 				)
+			} else if (toolMessage.name === 'evolution_supply_chain_sbom' && typeof rawResult.componentCount === 'number') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className='text-emerald-400 font-semibold'>CycloneDX 1.5 SBOM: {rawResult.componentCount} pkgs</span>
+						<span className='text-void-fg-3'>{Array.isArray(rawResult.findings) ? rawResult.findings.length : 0} finding(s)</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'evolution_audit_iac_finops' && typeof rawResult.estimatedMonthlyUsd === 'number') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className='text-sky-400 font-semibold'>IaC & FinOps: ${rawResult.estimatedMonthlyUsd}/mo</span>
+						<span className='text-emerald-400'>Save ~${rawResult.potentialMonthlySavingsUsd ?? 0}/mo</span>
+						<span className='text-void-fg-3'>{Array.isArray(rawResult.findings) ? rawResult.findings.length : 0} finding(s)</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'evolution_analyze_incident' && typeof rawResult.errorBudgetBurnRate === 'number') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className={rawResult.sloBreached ? 'text-rose-400 font-semibold' : 'text-emerald-400 font-semibold'}>
+							SLO {rawResult.sloBreached ? 'BREACHED' : 'OK'} ({rawResult.errorBudgetBurnRate}x burn)
+						</span>
+						<span className='text-void-fg-3'>{rawResult.errorRatePct}% errors</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'evolution_plan_release' && typeof rawResult.nextVersion === 'string') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className='text-violet-400 font-semibold'>v{rawResult.currentVersion} → v{rawResult.nextVersion}</span>
+						<span className={rawResult.releaseSafe ? 'text-emerald-400' : 'text-rose-400'}>
+							{rawResult.releaseSafe ? 'Migrations Safe' : 'Migration Risk'}
+						</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'evolution_evaluate_technology' && typeof rawResult.verdict === 'string') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.verdict === 'ADOPT_CANDIDATE' ? 'text-emerald-400 font-semibold' : rawResult.verdict.startsWith('REJECT') ? 'text-rose-400 font-semibold' : 'text-amber-400 font-semibold'}>
+							{rawResult.verdict}
+						</span>
+						<span className='text-void-fg-3 font-mono'>Signal {rawResult.signalScore}/100 · Hype {rawResult.hypeRiskScore}/100</span>
+					</div>
+				)
 			}
 		} else if (category === 'api' && rawResult && typeof rawResult === 'object') {
 			if (toolMessage.name === 'api_send_request' && typeof rawResult.status === 'number') {
@@ -3041,6 +3083,54 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
 						<span className='font-semibold uppercase'>Readiness: {rawResult.overallStatus}</span>
 						<span className='text-void-fg-3'>{rawResult.overallScore}/100</span>
+					</div>
+				)
+			}
+		} else if (category === 'debug' && rawResult && typeof rawResult === 'object') {
+			if (toolMessage.name === 'correctness_independent_verify' && typeof rawResult.verdict === 'string') {
+				designPreview = (
+					<div className='flex flex-wrap items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.verdict === 'APPROVED' ? 'text-emerald-400 font-semibold' : rawResult.verdict === 'REJECTED' ? 'text-rose-400 font-semibold' : 'text-amber-400 font-semibold'}>
+							Independent Verification: {rawResult.verdict}
+						</span>
+						<span className='text-void-fg-3'>{Array.isArray(rawResult.checks) ? rawResult.checks.length : 0} checks</span>
+						{Array.isArray(rawResult.rejectionReasons) && rawResult.rejectionReasons.length > 0 && (
+							<span className='text-rose-400'>{rawResult.rejectionReasons.length} blocker(s)</span>
+						)}
+					</div>
+				)
+			} else if (toolMessage.name === 'correctness_taint_analysis' && Array.isArray(rawResult.unsafeFlows)) {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.unsafeFlows.length === 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+							Taint Flows: {rawResult.unsafeFlows.length} unsafe
+						</span>
+						<span className='text-void-fg-3'>{rawResult.sanitizedFlowsCount ?? 0} sanitized · {rawResult.filesScanned ?? 0} files</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'correctness_run_fuzz_test' && typeof rawResult.iterationsRun === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className={rawResult.passed ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+							Fuzz: {rawResult.passed ? 'PASS' : 'COUNTEREXAMPLE'}
+						</span>
+						<span className='text-void-fg-3'>{rawResult.iterationsRun} iters · seed {rawResult.seed}</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'correctness_run_mutation_test' && typeof rawResult.mutationScore === 'number') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px] font-mono'>
+						<span className='text-sky-400 font-semibold'>Mutation Score: {rawResult.mutationScore}%</span>
+						<span className='text-void-fg-3'>{rawResult.killed ?? 0} killed · {rawResult.survived ?? 0} survived</span>
+					</div>
+				)
+			} else if (toolMessage.name === 'correctness_assess_release_readiness' && typeof rawResult.outcome === 'string') {
+				designPreview = (
+					<div className='flex items-center gap-2 mb-2 px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'>
+						<span className={rawResult.outcome === 'verified_against_checks' ? 'text-emerald-400 font-semibold uppercase' : 'text-amber-400 font-semibold uppercase'}>
+							Readiness: {rawResult.outcome}
+						</span>
+						<span className='text-void-fg-3'>{Array.isArray(rawResult.blockers) ? rawResult.blockers.length : 0} blocker(s)</span>
 					</div>
 				)
 			}

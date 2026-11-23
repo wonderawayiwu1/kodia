@@ -4,18 +4,18 @@
  *--------------------------------------------------------------------------------------*/
 
 import { mainWindow } from '../../../../base/browser/window.js';
-import { Emitter, Event } from '../../../../base/common/event.js';
+import { Emitter } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import { URI } from '../../../../base/common/uri.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { InstantiationType, registerSingleton } from '../../../../platform/instantiation/common/extensions.js';
-import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 import { IStorageService, StorageScope, StorageTarget } from '../../../../platform/storage/common/storage.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import { ChatMode } from '../common/voidSettingsTypes.js';
 import {
 	computeNextRunAt,
+	IKodiaWorkflowsService,
 	isScheduledJobDue,
 	KodiaScheduledJob,
 	KodiaWorkflowDefinition,
@@ -23,24 +23,10 @@ import {
 } from '../common/kodiaWorkflows.js';
 import { IChatThreadService } from './chatThreadService.js';
 
+export { IKodiaWorkflowsService };
+
 const SCHEDULED_JOBS_STORAGE_KEY = 'kodia.scheduledJobs.v1';
 const SCHEDULER_TICK_MS = 30_000;
-
-export const IKodiaWorkflowsService = createDecorator<IKodiaWorkflowsService>('kodiaWorkflowsService');
-
-export interface IKodiaWorkflowsService {
-	readonly _serviceBrand: undefined;
-	readonly onDidChangeJobs: Event<readonly KodiaScheduledJob[]>;
-
-	listWorkflows(): Promise<KodiaWorkflowDefinition[]>;
-	getScheduledJobs(): readonly KodiaScheduledJob[];
-	addScheduledJob(input: { name: string; prompt: string; workflowName?: string; chatMode?: ChatMode; intervalMinutes: number; enabled?: boolean }): KodiaScheduledJob;
-	toggleScheduledJob(jobId: string, enabled: boolean): void;
-	deleteScheduledJob(jobId: string): void;
-	runWorkflowNow(workflow: KodiaWorkflowDefinition): Promise<string>;
-	runJobNow(jobId: string): Promise<string | undefined>;
-	tickDueJobs(nowMs?: number): Promise<string[]>;
-}
 
 export class KodiaWorkflowsService extends Disposable implements IKodiaWorkflowsService {
 	readonly _serviceBrand: undefined;
