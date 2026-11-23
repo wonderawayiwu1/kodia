@@ -41,7 +41,7 @@
 		$starting_point++;
 	}
 
-	function foo bar(){}
+	function foobar(){}
 ?>
 
 </body>
