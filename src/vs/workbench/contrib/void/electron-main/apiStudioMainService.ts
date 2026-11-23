@@ -9,7 +9,22 @@ import * as http from 'http';
 import * as https from 'https';
 import * as path from 'path';
 import * as vm from 'vm';
-import WebSocket from 'ws';
+import { createRequire } from 'module';
+import type WebSocket from 'ws';
+
+let cachedWebSocketCtor: typeof WebSocket | null = null;
+async function loadWebSocketCtor(): Promise<typeof WebSocket> {
+	if (cachedWebSocketCtor) { return cachedWebSocketCtor; }
+	try {
+		const req = createRequire(import.meta.url);
+		const mod = req('ws') as typeof WebSocket | { default?: typeof WebSocket };
+		cachedWebSocketCtor = (typeof mod === 'function' ? mod : mod.default) as typeof WebSocket;
+		if (cachedWebSocketCtor) { return cachedWebSocketCtor; }
+	} catch { /* fallback to dynamic ESM import */ }
+	const esm = await import('ws');
+	cachedWebSocketCtor = (esm.default ?? esm) as typeof WebSocket;
+	return cachedWebSocketCtor;
+}
 import { Emitter, Event } from '../../../../base/common/event.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
 import {
@@ -922,10 +937,11 @@ export class KodiaApiStudioMainService extends Disposable implements IKodiaApiSt
 		const sessionId = `ws-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`;
 		const connectedAt = new Date().toISOString();
 		const messages: ApiWebSocketMessage[] = [];
+		const WsCtor = await loadWebSocketCtor();
 
 		return new Promise(resolve => {
 			let settled = false;
-			const ws = new WebSocket(opts.url, opts.protocols, { headers: opts.headers, handshakeTimeout: 8000 });
+			const ws = new WsCtor(opts.url, opts.protocols, { headers: opts.headers, handshakeTimeout: 8000 });
 			const record: ManagedWsRecord = {
 				info: { sessionId, url: opts.url, status: 'connecting', messages, connectedAt },
 				ws,
@@ -995,7 +1011,7 @@ export class KodiaApiStudioMainService extends Disposable implements IKodiaApiSt
 	async sendWebSocketMessage(sessionId: string, data: string, kind: 'text' | 'json' | 'ping' = 'text'): Promise<ApiWebSocketSessionInfo> {
 		const rec = this._webSockets.get(sessionId);
 		if (!rec) { throw new Error(`WebSocket session "${sessionId}" not found.`); }
-		if (rec.ws.readyState !== WebSocket.OPEN) {
+		if (rec.ws.readyState !== 1 /* WebSocket.OPEN */) {
 			throw new Error(`WebSocket session "${sessionId}" is not open (state=${rec.info.status}).`);
 		}
 		if (kind === 'ping') {
