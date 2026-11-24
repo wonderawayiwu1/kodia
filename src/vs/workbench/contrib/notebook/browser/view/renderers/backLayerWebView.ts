@@ -582,8 +582,12 @@ export class BackLayerWebView<T extends ICommonCellInfo> extends Themable {
 			return []; // script is inlined
 		}
 
+		const appOutDir = dirname(FileAccess.asFileUri('vs/nls.js'));
 		return [
-			dirname(FileAccess.asFileUri('vs/nls.js')),
+			appOutDir,
+			// Always allow built-in extension renderers (such as vscode.markdown-it-renderer)
+			// even if the notebook opens before notebookRendererExtensionPoint finishes registering.
+			joinPath(appOutDir, '..', 'extensions'),
 		];
 	}
 

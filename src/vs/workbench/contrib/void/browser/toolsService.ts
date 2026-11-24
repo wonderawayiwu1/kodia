@@ -54,6 +54,10 @@ import { INotebookService } from '../../notebook/common/notebookService.js'
 import { INotebookKernelService } from '../../notebook/common/notebookKernelService.js'
 import { INotebookExecutionService } from '../../notebook/common/notebookExecutionService.js'
 import { INotebookEditorModelResolverService } from '../../notebook/common/notebookEditorModelResolverService.js'
+import { CellKind } from '../../notebook/common/notebookCommon.js'
+import { IEditorService } from '../../../services/editor/common/editorService.js'
+import { IKodiaNotebookKernelMainService, KODIA_NOTEBOOK_KERNEL_CHANNEL } from '../common/kodiaNotebookKernelTypes.js'
+import { applyNotebookEditOperations, buildNbformatDocument, NbformatDocument, parseNotebookArrayParam } from '../common/notebookToolUtils.js'
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js'
 import { VSBuffer } from '../../../../base/common/buffer.js'
 import type { GitStepResult } from '../common/gitOperations.js'
@@ -482,6 +486,94 @@ export class ToolsService implements IToolsService {
 		const apiStudioMainService = ProxyChannel.toService<IKodiaApiStudioMainService>(mainProcessService.getChannel(KODIA_API_STUDIO_CHANNEL))
 		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
+		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
+		const openNotebookInEditor = async (uri: URI): Promise<boolean> => {
+			try {
+				const editorService = instantiationService.invokeFunction(a => a.get(IEditorService))
+				await editorService.openEditor({
+					resource: uri,
+					options: {
+						override: 'jupyter-notebook',
+						preserveFocus: true,
+						pinned: true,
+					},
+				})
+				return true
+			} catch {
+				return false
+			}
+		}
+		const syncOpenNotebookFromDisk = async (uri: URI): Promise<void> => {
+			try {
+				if (!this.notebookService.getNotebookTextModel(uri)) {
+					return
+				}
+				const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+				const ref = await resolver.resolve(uri, 'jupyter-notebook')
+				try {
+					await ref.object.revert({ soft: false })
+				} finally {
+					ref.dispose()
+				}
+			} catch {
+				// Best-effort sync; disk file is already authoritative
+			}
+		}
+		const ensureNotebookKernel = (notebookModel: any, kernelId?: string) => {
+			const matchResult = this.notebookKernelService.getMatchingKernel(notebookModel)
+			const allKernels = [
+				...(matchResult.selected ? [matchResult.selected] : []),
+				...(matchResult.suggestions || []),
+				...(matchResult.all || []),
+			]
+			if (kernelId) {
+				const requested = allKernels.find(k => k.id === kernelId || k.label === kernelId)
+				if (requested) {
+					this.notebookKernelService.selectKernelForNotebook(requested, notebookModel)
+					return requested
+				}
+			}
+			if (!matchResult.selected && allKernels.length > 0) {
+				this.notebookKernelService.selectKernelForNotebook(allKernels[0], notebookModel)
+				return allKernels[0]
+			}
+			return matchResult.selected
+		}
+		const formatNotebookCellOutputs = (rawOutputs: any[]): { formattedOutputs: NotebookCellOutput[]; cellError?: string } => {
+			let cellError: string | undefined
+			const formattedOutputs: NotebookCellOutput[] = rawOutputs.map((out: any) => {
+				const items = Array.isArray(out.outputs) ? out.outputs : []
+				const firstItem = items[0]
+				const mime = firstItem?.mime ?? 'text/plain'
+				const textVal = firstItem?.data ? firstItem.data.toString() : ''
+				if (mime === 'application/vnd.code.notebook.error') {
+					try {
+						const parsed = JSON.parse(textVal)
+						cellError = `${parsed.name || 'Error'}: ${parsed.message || textVal}`
+						return { output_type: 'error', ename: parsed.name, evalue: parsed.message, traceback: parsed.stack ? String(parsed.stack).split('\n') : [] } as any
+					} catch {
+						cellError = textVal
+						return { output_type: 'error', ename: 'Error', evalue: textVal, traceback: [textVal] } as any
+					}
+				}
+				if (mime === 'application/vnd.code.notebook.stdout') {
+					return { output_type: 'stream', name: 'stdout', text: textVal } as any
+				}
+				if (mime === 'application/vnd.code.notebook.stderr') {
+					return { output_type: 'stream', name: 'stderr', text: textVal } as any
+				}
+				const dataObj: Record<string, string> = {}
+				for (const it of items) {
+					if (it.mime === 'image/png') {
+						dataObj[it.mime] = `<image/png ${it.data?.byteLength ?? 0} bytes>`
+					} else {
+						dataObj[it.mime] = it.data ? it.data.toString() : ''
+					}
+				}
+				return { output_type: 'display_data', data: dataObj } as any
+			})
+			return { formattedOutputs, cellError }
+		}
 		const getDesignService = (): IDesignIntelligenceService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IDesignIntelligenceService)) } catch { return undefined }
 		}
@@ -2401,55 +2493,41 @@ export class ToolsService implements IToolsService {
 				return { uri, start_cell, end_cell }
 			},
 			write_notebook: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, cells: cellsUnknown } = params
+				const { uri: uriUnknown, cells: cellsUnknown, open_in_editor: openUnknown, execute: executeUnknown, kernel_id: kernelIdUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
-				const cells = validateStr('cells', cellsUnknown)
-				let parsedCells: any[]
-				try {
-					parsedCells = JSON.parse(cells)
-				} catch (e) {
-					throw new Error(`Invalid LLM output: cells must be valid JSON array.`)
-				}
-				if (!Array.isArray(parsedCells)) throw new Error(`Invalid LLM output: cells must be an array.`)
-				return { uri, cells: parsedCells }
+				const parsedCells = parseNotebookArrayParam('cells', cellsUnknown) as any[]
+				const open_in_editor = openUnknown !== undefined ? validateBoolean(openUnknown, { default: true }) : true
+				const execute = executeUnknown !== undefined ? validateBoolean(executeUnknown, { default: false }) : false
+				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
+				return { uri, cells: parsedCells, open_in_editor, execute, kernel_id }
 			},
 			edit_notebook: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, operations: operationsUnknown } = params
+				const { uri: uriUnknown, operations: operationsUnknown, open_in_editor: openUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
-				const operations = validateStr('operations', operationsUnknown)
-				let parsedOps: any[]
-				try {
-					parsedOps = JSON.parse(operations)
-				} catch (e) {
-					throw new Error(`Invalid LLM output: operations must be valid JSON array.`)
-				}
-				if (!Array.isArray(parsedOps)) throw new Error(`Invalid LLM output: operations must be an array.`)
-				return { uri, operations: parsedOps }
+				const parsedOps = parseNotebookArrayParam('operations', operationsUnknown) as any[]
+				const open_in_editor = openUnknown !== undefined ? validateBoolean(openUnknown, { default: true }) : true
+				return { uri, operations: parsedOps, open_in_editor }
 			},
 			execute_notebook_cell: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, cell_index: cellIndexUnknown, kernel_id: kernelIdUnknown } = params
+				const { uri: uriUnknown, cell_index: cellIndexUnknown, kernel_id: kernelIdUnknown, open_in_editor: openUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
 				const cell_index = validateNumber(cellIndexUnknown, { default: 0 }) as number
 				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
-				return { uri, cell_index, kernel_id }
+				const open_in_editor = openUnknown !== undefined ? validateBoolean(openUnknown, { default: true }) : true
+				return { uri, cell_index, kernel_id, open_in_editor }
 			},
 			execute_notebook: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, kernel_id: kernelIdUnknown, cell_indices: cellIndicesUnknown } = params
+				const { uri: uriUnknown, kernel_id: kernelIdUnknown, cell_indices: cellIndicesUnknown, restart_kernel: restartUnknown, open_in_editor: openUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
 				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
+				const restart_kernel = restartUnknown !== undefined ? validateBoolean(restartUnknown, { default: false }) : false
+				const open_in_editor = openUnknown !== undefined ? validateBoolean(openUnknown, { default: true }) : true
 				let cell_indices: number[] | undefined
 				if (cellIndicesUnknown !== undefined && cellIndicesUnknown !== null) {
-					if (typeof cellIndicesUnknown === 'string') {
-						try {
-							cell_indices = JSON.parse(cellIndicesUnknown)
-						} catch (e) {
-							throw new Error(`Invalid LLM output: cell_indices must be valid JSON array.`)
-						}
-					} else if (Array.isArray(cellIndicesUnknown)) {
-						cell_indices = (cellIndicesUnknown as unknown[]).map(Number)
-					}
+					const parsed = parseNotebookArrayParam('cell_indices', cellIndicesUnknown)
+					cell_indices = parsed.map(Number).filter(n => Number.isInteger(n))
 				}
-				return { uri, kernel_id, cell_indices }
+				return { uri, kernel_id, cell_indices, restart_kernel, open_in_editor }
 			},
 			select_notebook_kernel: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, kernel_id: kernelIdUnknown } = params
@@ -5142,140 +5220,134 @@ export class ToolsService implements IToolsService {
 
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell }) => {
-				await voidModelService.initializeModel(uri)
-				const { model } = await voidModelService.getModelSafe(uri)
-				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
-				const content = model.getValue(EndOfLinePreference.LF)
+				const openModel = this.notebookService.getNotebookTextModel(uri)
+				if (openModel) {
+					const start = start_cell ?? 0
+					const end = end_cell !== undefined ? end_cell : openModel.cells.length
+					const outputCells = openModel.cells.slice(start, end).map((cell: any, offset: number) => {
+						const { formattedOutputs } = formatNotebookCellOutputs(cell.outputs || [])
+						return {
+							index: start + offset,
+							cell_type: cell.cellKind === CellKind.Markup ? 'markdown' : 'code',
+							source: cell.getValue(),
+							outputs: formattedOutputs,
+							execution_count: cell.internalMetadata?.executionOrder ?? null,
+							metadata: cell.metadata || {},
+						}
+					})
+					return { result: { cells: outputCells as any } }
+				}
+				const fileContent = await fileService.readFile(uri)
 				let notebook: any
 				try {
-					notebook = JSON.parse(content)
+					notebook = JSON.parse(fileContent.value.toString())
 				} catch (e) {
 					throw new Error(`Notebook is not valid JSON.`)
 				}
 				if (!notebook.cells || !Array.isArray(notebook.cells)) {
 					throw new Error(`Notebook has no cells.`)
 				}
-				let cells = notebook.cells
-				if (start_cell !== null || end_cell !== null) {
-					const start = start_cell ?? 0
-					const end = end_cell !== null ? end_cell : cells.length
-					cells = cells.slice(start, end)
-				}
-				const outputCells = cells.map((cell: any, idx: number) => ({
-					index: idx,
+				const start = start_cell ?? 0
+				const end = end_cell !== undefined ? end_cell : notebook.cells.length
+				const sliced = notebook.cells.slice(start, end)
+				const outputCells = sliced.map((cell: any, offset: number) => ({
+					index: start + offset,
 					cell_type: cell.cell_type,
-					source: cell.source,
+					source: Array.isArray(cell.source) ? cell.source.join('') : cell.source,
 					outputs: cell.outputs || [],
-					execution_count: cell.execution_count,
+					execution_count: cell.execution_count ?? null,
 					metadata: cell.metadata || {},
 				}))
 				return { result: { cells: outputCells } }
 			},
-			write_notebook: async ({ uri, cells }) => {
-				const notebook = {
-					nbformat: 4,
-					nbformat_minor: 5,
-					metadata: {
-						kernelspec: {
-							display_name: 'Python 3',
-							language: 'python',
-							name: 'python3'
-						},
-						language_info: {
-							name: 'python',
-							version: '3.8.0'
-						}
-					},
-					cells: cells.map((cell: any) => ({
-						cell_type: cell.cell_type,
-						source: cell.source,
-						metadata: cell.metadata || {},
-						outputs: cell.outputs || [],
-						execution_count: cell.execution_count || null
-					}))
-				}
-				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
-				return { result: { uri } }
-			},
-			edit_notebook: async ({ uri, operations }) => {
-				await voidModelService.initializeModel(uri)
-				const { model } = await voidModelService.getModelSafe(uri)
-				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
-				const content = model.getValue(EndOfLinePreference.LF)
-				let notebook: any
+			write_notebook: async ({ uri, cells, open_in_editor, execute, kernel_id }) => {
+				let pythonVersion = '3.11.0'
+				let kernelDisplayName = 'Python 3'
 				try {
-					notebook = JSON.parse(content)
+					const workspaceFolder = workspaceContextService.getWorkspace().folders[0]?.uri.fsPath
+					const discovered = await notebookKernelMainService.discoverKernels(workspaceFolder)
+					const preferred = discovered.find(k => k.isPreferred) ?? discovered[0]
+					if (preferred) {
+						pythonVersion = preferred.version || pythonVersion
+						kernelDisplayName = preferred.label || kernelDisplayName
+					}
+				} catch {
+					// Use sensible defaults if discovery isn't available
+				}
+				const notebook = buildNbformatDocument(cells, { pythonVersion, kernelDisplayName })
+				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
+				await syncOpenNotebookFromDisk(uri)
+
+				const shouldOpen = open_in_editor !== false
+				const opened = shouldOpen ? await openNotebookInEditor(uri) : false
+
+				let execution_results: any[] | undefined
+				if (execute) {
+					const execCall = await this.callTool.execute_notebook({
+						uri,
+						kernel_id,
+						open_in_editor: shouldOpen,
+					})
+					const execData = await execCall.result
+					execution_results = execData.results
+				}
+				return {
+					result: {
+						uri,
+						cell_count: notebook.cells.length,
+						opened,
+						...(execution_results ? { execution_results } : {}),
+					}
+				}
+			},
+			edit_notebook: async ({ uri, operations, open_in_editor }) => {
+				// If the notebook is currently open with unsaved execution outputs, flush to disk first
+				if (this.notebookService.getNotebookTextModel(uri)) {
+					try {
+						const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+						const ref = await resolver.resolve(uri, 'jupyter-notebook')
+						try {
+							if (ref.object.isDirty()) {
+								await ref.object.save()
+							}
+						} finally {
+							ref.dispose()
+						}
+					} catch {
+						// best effort
+					}
+				}
+				const fileContent = await fileService.readFile(uri)
+				let notebook: NbformatDocument
+				try {
+					notebook = JSON.parse(fileContent.value.toString())
 				} catch (e) {
 					throw new Error(`Notebook is not valid JSON.`)
 				}
-				if (!notebook.cells || !Array.isArray(notebook.cells)) {
-					notebook.cells = []
-				}
-				let applied = 0
-				for (const op of operations) {
-					switch (op.type) {
-						case 'add_cell':
-							if (op.index >= 0 && op.index <= notebook.cells.length) {
-								notebook.cells.splice(op.index, 0, op.cell)
-								applied++
-							}
-							break
-						case 'remove_cell':
-							if (op.index >= 0 && op.index < notebook.cells.length) {
-								notebook.cells.splice(op.index, 1)
-								applied++
-							}
-							break
-						case 'replace_cell':
-							if (op.index >= 0 && op.index < notebook.cells.length) {
-								notebook.cells[op.index] = op.cell
-								applied++
-							}
-							break
-						case 'move_cell':
-							if (op.from_index >= 0 && op.from_index < notebook.cells.length && op.to_index >= 0 && op.to_index <= notebook.cells.length) {
-								const [cell] = notebook.cells.splice(op.from_index, 1)
-								notebook.cells.splice(op.to_index, 0, cell)
-								applied++
-							}
-							break
-						case 'update_cell_source':
-							if (op.index >= 0 && op.index < notebook.cells.length) {
-								notebook.cells[op.index].source = op.source
-								applied++
-							}
-							break
-						case 'update_cell_outputs':
-							if (op.index >= 0 && op.index < notebook.cells.length) {
-								notebook.cells[op.index].outputs = op.outputs
-								applied++
-							}
-							break
-						case 'clear_cell_outputs':
-							if (op.index >= 0 && op.index < notebook.cells.length) {
-								notebook.cells[op.index].outputs = []
-								applied++
-							}
-							break
-					}
-				}
+				const summary = applyNotebookEditOperations(notebook, operations)
 				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
-				return { result: { uri, applied } }
-			},
-			execute_notebook_cell: async ({ uri, cell_index, kernel_id }) => {
-				const startTime = Date.now()
-				let resolvedRef: { object: { notebook: any }; dispose(): void } | undefined
-				try {
-					let notebookModel = this.notebookService.getNotebookTextModel(uri)
-					if (!notebookModel) {
-						try {
-							const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
-							resolvedRef = await resolver.resolve(uri, 'jupyter-notebook') as any
-							notebookModel = resolvedRef?.object?.notebook
-						} catch {
-							// fall through to check notebookModel
-						}
+				await syncOpenNotebookFromDisk(uri)
+				const opened = open_in_editor !== false ? await openNotebookInEditor(uri) : false
+				return {
+					result: {
+						uri,
+						applied: summary.applied,
+						cell_count: summary.cellCount,
+						opened,
+						...(summary.warnings.length > 0 ? { warnings: summary.warnings } : {}),
 					}
+				}
+			},
+			execute_notebook_cell: async ({ uri, cell_index, kernel_id, open_in_editor }) => {
+				const startTime = Date.now()
+				let resolvedRef: { object: { notebook: any; save(): Promise<boolean> }; dispose(): void } | undefined
+				try {
+					if (open_in_editor !== false) {
+						await openNotebookInEditor(uri)
+					}
+					const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+					resolvedRef = await resolver.resolve(uri, 'jupyter-notebook') as any
+					const notebookModel = resolvedRef?.object?.notebook ?? this.notebookService.getNotebookTextModel(uri)
 					if (!notebookModel) {
 						throw new Error(`Notebook model could not be opened for ${uri.fsPath}. Ensure the file is a valid .ipynb notebook.`)
 					}
@@ -5285,59 +5357,20 @@ export class ToolsService implements IToolsService {
 					const cellModel = notebookModel.cells[cell_index]
 					if (!cellModel) throw new Error(`Cell ${cell_index} not found`)
 
-					// Ensure a matching kernel is selected (respecting explicit kernel_id if provided)
-					const matchResult = this.notebookKernelService.getMatchingKernel(notebookModel)
-					const allKernels = [
-						...(matchResult.selected ? [matchResult.selected] : []),
-						...(matchResult.suggestions || []),
-						...(matchResult.all || []),
-					]
-					if (kernel_id) {
-						const requested = allKernels.find(k => k.id === kernel_id || k.label === kernel_id)
-						if (requested) {
-							this.notebookKernelService.selectKernelForNotebook(requested, notebookModel)
-						}
-					} else if (!matchResult.selected && allKernels.length > 0) {
-						this.notebookKernelService.selectKernelForNotebook(allKernels[0], notebookModel)
-					}
+					ensureNotebookKernel(notebookModel, kernel_id)
 
 					const contextKeyService = instantiationService.invokeFunction(a => a.get(IContextKeyService))
 					await this.notebookExecutionService.executeNotebookCells(notebookModel, [cellModel], contextKeyService)
 
 					const updatedCell = notebookModel.cells[cell_index]
-					const rawOutputs = updatedCell?.outputs || []
-					let cellError: string | undefined
-					const formattedOutputs: NotebookCellOutput[] = rawOutputs.map((out: any) => {
-						const items = Array.isArray(out.outputs) ? out.outputs : []
-						const firstItem = items[0]
-						const mime = firstItem?.mime ?? 'text/plain'
-						const textVal = firstItem?.data ? firstItem.data.toString() : ''
-						if (mime === 'application/vnd.code.notebook.error') {
-							try {
-								const parsed = JSON.parse(textVal)
-								cellError = `${parsed.name || 'Error'}: ${parsed.message || textVal}`
-								return { output_type: 'error', ename: parsed.name, evalue: parsed.message, traceback: parsed.stack ? String(parsed.stack).split('\n') : [] } as any
-							} catch {
-								cellError = textVal
-								return { output_type: 'error', ename: 'Error', evalue: textVal, traceback: [textVal] } as any
-							}
-						}
-						if (mime === 'application/vnd.code.notebook.stdout') {
-							return { output_type: 'stream', name: 'stdout', text: textVal } as any
-						}
-						if (mime === 'application/vnd.code.notebook.stderr') {
-							return { output_type: 'stream', name: 'stderr', text: textVal } as any
-						}
-						const dataObj: Record<string, string> = {}
-						for (const it of items) {
-							if (it.mime === 'image/png') {
-								dataObj[it.mime] = `<image/png ${it.data?.byteLength ?? 0} bytes>`
-							} else {
-								dataObj[it.mime] = it.data ? it.data.toString() : ''
-							}
-						}
-						return { output_type: 'display_data', data: dataObj } as any
-					})
+					const { formattedOutputs, cellError } = formatNotebookCellOutputs(updatedCell?.outputs || [])
+
+					// Persist outputs and execution count to disk immediately
+					try {
+						await resolvedRef?.object?.save()
+					} catch {
+						// Best-effort save
+					}
 
 					const executionTime = Date.now() - startTime
 					return {
@@ -5355,48 +5388,79 @@ export class ToolsService implements IToolsService {
 					resolvedRef?.dispose()
 				}
 			},
-			execute_notebook: async ({ uri, kernel_id, cell_indices }) => {
-				// Execute multiple cells or all code cells in the notebook
-				await voidModelService.initializeModel(uri)
-				const { model } = await voidModelService.getModelSafe(uri)
-				if (model === null) { throw new Error(`No contents; Notebook does not exist.`) }
-				const content = model.getValue(EndOfLinePreference.LF)
-				let notebook: any
+			execute_notebook: async ({ uri, kernel_id, cell_indices, restart_kernel, open_in_editor }) => {
+				let resolvedRef: { object: { notebook: any; save(): Promise<boolean> }; dispose(): void } | undefined
+				let restarted = false
+				let saved = false
 				try {
-					notebook = JSON.parse(content)
-				} catch (e) {
-					throw new Error(`Notebook is not valid JSON.`)
-				}
-				if (!notebook.cells || !Array.isArray(notebook.cells)) {
-					throw new Error(`Notebook has no cells.`)
-				}
-				const codeCellIndices = cell_indices ?? notebook.cells
-					.map((cell: any, idx: number) => cell.cell_type === 'code' ? idx : -1)
-					.filter((idx: number) => idx >= 0)
-				const results = []
-				for (const idx of codeCellIndices) {
-					const startTime = Date.now()
-					try {
-						const cellResult = await this.callTool.execute_notebook_cell({ uri, cell_index: idx, kernel_id })
-						const cellResultData = await cellResult.result as { outputs: NotebookCellOutput[]; execution_time: number; success: boolean; error?: string }
-						results.push({
-							cell_index: idx,
-							outputs: cellResultData.outputs,
-							execution_time: cellResultData.execution_time,
-							success: cellResultData.success,
-							error: cellResultData.error
-						})
-					} catch (e: any) {
-						results.push({
-							cell_index: idx,
-							outputs: [],
-							execution_time: Date.now() - startTime,
-							success: false,
-							error: e?.message ?? String(e)
-						})
+					if (open_in_editor !== false) {
+						await openNotebookInEditor(uri)
 					}
+					if (restart_kernel) {
+						await notebookKernelMainService.restartKernel(uri.toString())
+						restarted = true
+					}
+					const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+					resolvedRef = await resolver.resolve(uri, 'jupyter-notebook') as any
+					const notebookModel = resolvedRef?.object?.notebook ?? this.notebookService.getNotebookTextModel(uri)
+					if (!notebookModel) {
+						throw new Error(`Notebook model could not be opened for ${uri.fsPath}. Ensure the file is a valid .ipynb notebook.`)
+					}
+
+					ensureNotebookKernel(notebookModel, kernel_id)
+					const contextKeyService = instantiationService.invokeFunction(a => a.get(IContextKeyService))
+
+					const codeCellIndices: number[] = cell_indices ?? notebookModel.cells
+						.map((cell: any, idx: number) => cell.cellKind === CellKind.Code ? idx : -1)
+						.filter((idx: number) => idx >= 0)
+
+					const results = []
+					for (const idx of codeCellIndices) {
+						const startTime = Date.now()
+						const cellModel = notebookModel.cells[idx]
+						if (!cellModel) {
+							results.push({
+								cell_index: idx,
+								outputs: [],
+								execution_time: 0,
+								success: false,
+								error: `Invalid cell index: ${idx}`,
+							})
+							continue
+						}
+						try {
+							await this.notebookExecutionService.executeNotebookCells(notebookModel, [cellModel], contextKeyService)
+							const updatedCell = notebookModel.cells[idx]
+							const { formattedOutputs, cellError } = formatNotebookCellOutputs(updatedCell?.outputs || [])
+							results.push({
+								cell_index: idx,
+								outputs: formattedOutputs,
+								execution_time: Date.now() - startTime,
+								success: !cellError,
+								...(cellError ? { error: cellError } : {}),
+							})
+						} catch (e: any) {
+							results.push({
+								cell_index: idx,
+								outputs: [],
+								execution_time: Date.now() - startTime,
+								success: false,
+								error: e?.message ?? String(e),
+							})
+						}
+					}
+
+					// Persist all outputs and execution counts cleanly to disk
+					try {
+						saved = await resolvedRef?.object?.save() ?? false
+					} catch {
+						saved = false
+					}
+
+					return { result: { results, restarted, saved } }
+				} finally {
+					resolvedRef?.dispose()
 				}
-				return { result: { results } }
 			},
 			select_notebook_kernel: async ({ uri, kernel_id }): Promise<{ result: { kernel_id: string } }> => {
 				let resolvedRef: { object: { notebook: any }; dispose(): void } | undefined
@@ -6770,10 +6834,18 @@ export class ToolsService implements IToolsService {
 				return `Notebook: ${params.uri.fsPath}\n${lines.join('\n')}`
 			},
 			write_notebook: (params, result) => {
-				return `Notebook written to ${params.uri.fsPath}.`
+				const openNote = result.opened ? ' and opened in native Notebook Editor' : ''
+				if (result.execution_results && result.execution_results.length > 0) {
+					const ok = result.execution_results.filter(r => r.success).length
+					const failed = result.execution_results.length - ok
+					const lines = result.execution_results.map(r => `${r.success ? '✅' : '❌'} Cell ${r.cell_index}: ${r.execution_time}ms${r.error ? ` - ${r.error}` : ''}`)
+					return `Notebook written to ${params.uri.fsPath} (${result.cell_count} cells)${openNote} and executed (${ok} succeeded, ${failed} failed):\n${lines.join('\n')}`
+				}
+				return `Notebook written to ${params.uri.fsPath} (${result.cell_count} cells)${openNote}.`
 			},
 			edit_notebook: (params, result) => {
-				return `Applied ${result.applied} notebook edit operations to ${params.uri.fsPath}.`
+				const warnStr = result.warnings && result.warnings.length > 0 ? `\nWarnings: ${result.warnings.join('; ')}` : ''
+				return `Applied ${result.applied} notebook edit operation(s) to ${params.uri.fsPath} (now ${result.cell_count} cells${result.opened ? ', synced in Notebook Editor' : ''}).${warnStr}`
 			},
 			execute_notebook_cell: (params, result) => {
 				const { cell_index, outputs, execution_time, success, error } = result
@@ -6789,14 +6861,23 @@ export class ToolsService implements IToolsService {
 				return `Cell ${cell_index} executed in ${execution_time}ms:\n${outputStr}`
 			},
 			execute_notebook: (params, result) => {
-				const { results } = result
+				const { results, restarted, saved } = result
 				const successful = results.filter((r: any) => r.success).length
 				const failed = results.filter((r: any) => !r.success).length
 				const lines = results.map((r: any) => {
 					const status = r.success ? '✅' : '❌'
-					return `${status} Cell ${r.cell_index}: ${r.execution_time}ms${r.error ? ` - ${r.error}` : ''}`
+					const preview = r.outputs && r.outputs.length > 0
+						? ' → ' + r.outputs.map((o: any) => {
+							if (o.output_type === 'stream') return String(Array.isArray(o.text) ? o.text.join('') : o.text).trim().slice(0, 80)
+							if (o.output_type === 'display_data') return Object.keys(o.data || {}).join(', ')
+							if (o.output_type === 'error') return `${o.ename}: ${o.evalue}`
+							return ''
+						}).filter(Boolean).join(' | ')
+						: ''
+					return `${status} Cell ${r.cell_index}: ${r.execution_time}ms${r.error ? ` - ${r.error}` : preview}`
 				})
-				return `Notebook execution complete: ${successful} succeeded, ${failed} failed.\n${lines.join('\n')}`
+				const meta = [restarted ? 'kernel restarted' : '', saved ? 'saved to disk' : ''].filter(Boolean).join(', ')
+				return `Notebook execution complete${meta ? ` (${meta})` : ''}: ${successful} succeeded, ${failed} failed.\n${lines.join('\n')}`
 			},
 			select_notebook_kernel: (params, result) => {
 				return `Kernel set to ${result.kernel_id} for ${params.uri.fsPath}.`

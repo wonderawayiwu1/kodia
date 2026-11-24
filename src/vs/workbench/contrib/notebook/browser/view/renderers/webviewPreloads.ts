@@ -1975,8 +1975,106 @@ async function webviewPreloads(ctx: PreloadContext) {
 		}
 
 		private load(): Promise<rendererApi.RendererApi | undefined> {
-			this._loadPromise ??= this._load();
+			if (!this._loadPromise) {
+				this._loadPromise = this._load().catch(err => {
+					// Never permanently poison future cells if a transient fetch/SW error occurred.
+					this._loadPromise = undefined;
+					throw err;
+				});
+			}
 			return this._loadPromise;
+		}
+
+		private createFallbackMarkdownApi(): rendererApi.RendererApi {
+			const escapeHtml = (s: string) => s
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;');
+			const renderInline = (s: string) => {
+				let out = escapeHtml(s);
+				out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+				out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+				out = out.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+				out = out.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+				out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2">$1</a>');
+				return out;
+			};
+			const renderMarkdownFallback = (md: string) => {
+				const lines = md.replace(/\r\n/g, '\n').split('\n');
+				const html: string[] = [];
+				let inCode = false;
+				let codeLines: string[] = [];
+				let inList = false;
+				const closeList = () => { if (inList) { html.push('</ul>'); inList = false; } };
+				for (const line of lines) {
+					if (line.trim().startsWith('```')) {
+						closeList();
+						if (!inCode) {
+							inCode = true;
+							codeLines = [];
+						} else {
+							html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+							inCode = false;
+						}
+						continue;
+					}
+					if (inCode) {
+						codeLines.push(line);
+						continue;
+					}
+					const trimmed = line.trim();
+					if (!trimmed) {
+						closeList();
+						continue;
+					}
+					const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+					if (heading) {
+						closeList();
+						const level = heading[1].length;
+						html.push(`<h${level}>${renderInline(heading[2])}</h${level}>`);
+						continue;
+					}
+					if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+						closeList();
+						html.push('<hr>');
+						continue;
+					}
+					const listItem = trimmed.match(/^[-*+]\s+(.*)$/) || trimmed.match(/^\d+\.\s+(.*)$/);
+					if (listItem) {
+						if (!inList) {
+							html.push('<ul>');
+							inList = true;
+						}
+						html.push(`<li>${renderInline(listItem[1])}</li>`);
+						continue;
+					}
+					closeList();
+					html.push(`<p>${renderInline(line)}</p>`);
+				}
+				closeList();
+				if (inCode) {
+					html.push(`<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`);
+				}
+				return html.join('\n');
+			};
+			return {
+				renderOutputItem: (outputInfo, element) => {
+					const text = outputInfo.text();
+					let previewNode = element.shadowRoot?.getElementById('preview') as HTMLElement | null;
+					if (!previewNode) {
+						const root = element.shadowRoot ?? element.attachShadow({ mode: 'open' });
+						const defaultStyles = document.getElementById('_defaultStyles') as HTMLStyleElement | null;
+						if (defaultStyles && !root.querySelector('#_defaultStyles')) {
+							root.appendChild(defaultStyles.cloneNode(true));
+						}
+						previewNode = document.createElement('div');
+						previewNode.id = 'preview';
+						root.appendChild(previewNode);
+					}
+					previewNode.innerHTML = text.trim().length === 0 ? '' : renderMarkdownFallback(text);
+				}
+			};
 		}
 
 		/** Inner function cached in the _loadPromise(). */
@@ -1988,7 +2086,34 @@ async function webviewPreloads(ctx: PreloadContext) {
 				await kernelPreloads.waitForAllCurrent();
 
 				const importStart = performance.now();
-				const module: RendererModule = await __import(this.data.entrypoint.path);
+				let module: RendererModule | undefined;
+				let lastImportError: unknown;
+				for (let attempt = 0; attempt < 3; attempt++) {
+					const targetUrl = attempt === 0
+						? this.data.entrypoint.path
+						: `${this.data.entrypoint.path}${this.data.entrypoint.path.includes('?') ? '&' : '?'}kodia_retry=${attempt}&t=${Date.now()}`;
+					try {
+						module = await __import(targetUrl);
+						lastImportError = undefined;
+						break;
+					} catch (importErr) {
+						lastImportError = importErr;
+						if (attempt < 2) {
+							await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 150 : 350));
+						}
+					}
+				}
+
+				if (lastImportError !== undefined) {
+					// If the built-in markdown renderer fails to import due to a transient SW/module error,
+					// degrade gracefully to a built-in safe Markdown renderer instead of showing a broken cell error.
+					if (this.data.id === 'vscode.markdown-it-renderer') {
+						this.postDebugMessage('Using built-in fallback markdown renderer after import failure');
+						this._api = this.createFallbackMarkdownApi();
+						return this._api;
+					}
+					throw lastImportError;
+				}
 				this.postDebugMessage('Imported renderer', { duration: `${performance.now() - importStart}ms` });
 
 				if (!module) {

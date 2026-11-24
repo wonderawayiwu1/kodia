@@ -487,10 +487,10 @@ export type BuiltinToolCallParams = {
 	'subagent': { agent: string, description: string, prompt: string, model?: string, sessionID?: string },
 	// Notebook operations
 	'read_notebook': { uri: URI, start_cell?: number, end_cell?: number },
-	'write_notebook': { uri: URI, cells: NotebookCellData[] },
-	'edit_notebook': { uri: URI, operations: NotebookEditOperation[] },
-	'execute_notebook_cell': { uri: URI, cell_index: number, kernel_id?: string },
-	'execute_notebook': { uri: URI, kernel_id?: string, cell_indices?: number[] },
+	'write_notebook': { uri: URI, cells: NotebookCellData[], open_in_editor?: boolean, execute?: boolean, kernel_id?: string },
+	'edit_notebook': { uri: URI, operations: NotebookEditOperation[], open_in_editor?: boolean },
+	'execute_notebook_cell': { uri: URI, cell_index: number, kernel_id?: string, open_in_editor?: boolean },
+	'execute_notebook': { uri: URI, kernel_id?: string, cell_indices?: number[], restart_kernel?: boolean, open_in_editor?: boolean },
 	'select_notebook_kernel': { uri: URI, kernel_id: string },
 	'list_notebook_kernels': { uri?: URI },
 	// Git operations (Stage 2)
@@ -827,10 +827,10 @@ export type BuiltinToolResultType = {
 		'subagent': SubagentReport,
 	// Notebook operations
 	'read_notebook': { cells: NotebookCellOutput[] },
-	'write_notebook': { uri: URI },
-	'edit_notebook': { uri: URI, applied: number },
+	'write_notebook': { uri: URI, cell_count: number, opened: boolean, execution_results?: NotebookExecutionResult[] },
+	'edit_notebook': { uri: URI, applied: number, cell_count: number, opened: boolean, warnings?: string[] },
 	'execute_notebook_cell': { cell_index: number, outputs: NotebookCellOutput[], execution_time: number, success: boolean, error?: string },
-	'execute_notebook': { results: NotebookExecutionResult[] },
+	'execute_notebook': { results: NotebookExecutionResult[], restarted?: boolean, saved: boolean },
 	'select_notebook_kernel': { kernel_id: string },
 	'list_notebook_kernels': { kernels: NotebookKernelInfo[] },
 	'project_health_scan': ProjectHealthReport,
@@ -962,8 +962,10 @@ export type ToolParamName<T extends ToolName> = T extends BuiltinToolName ? Buil
 
 // Notebook types
 export interface NotebookCellData {
-	cell_type: 'code' | 'markdown';
-	source: string;
+	cell_type?: 'code' | 'markdown' | 'raw';
+	type?: 'code' | 'markdown' | 'raw';
+	source?: string | string[];
+	content?: string;
 	metadata?: Record<string, any>;
 	outputs?: NotebookCellOutput[];
 	execution_count?: number | null;
@@ -981,13 +983,16 @@ export interface NotebookCellOutput {
 }
 
 export type NotebookEditOperation =
-	| { type: 'add_cell'; index: number; cell: NotebookCellData }
+	| { type: 'add_cell'; index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
 	| { type: 'remove_cell'; index: number }
-	| { type: 'replace_cell'; index: number; cell: NotebookCellData }
+	| { type: 'replace_cell'; index: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
 	| { type: 'move_cell'; from_index: number; to_index: number }
-	| { type: 'update_cell_source'; index: number; source: string }
+	| { type: 'update_cell_source'; index: number; source: string | string[] }
+	| { type: 'duplicate_cell'; index: number }
+	| { type: 'change_cell_type'; index: number; cell_type: 'code' | 'markdown' | 'raw' }
 	| { type: 'update_cell_outputs'; index: number; outputs: NotebookCellOutput[] }
-	| { type: 'clear_cell_outputs'; index: number };
+	| { type: 'clear_cell_outputs'; index: number }
+	| { type: 'clear_all_outputs' };
 
 export interface NotebookExecutionResult {
 	cell_index: number;
