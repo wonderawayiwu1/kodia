@@ -83,6 +83,8 @@ import { IMobileEngineeringService } from '../../../mobileEngineeringService.js'
 import { IKodiaMobileMainService } from '../../../../common/mobileEngineeringTypes.js';
 import { ILiveIntelligenceService } from '../../../liveIntelligenceService.js';
 import { IKodiaLiveIntelligenceMainService } from '../../../../common/liveIntelligenceTypes.js';
+import { IDiagnosticReliabilityService } from '../../../diagnosticReliabilityService.js';
+import { IKodiaDiagnosticReliabilityMainService } from '../../../../common/diagnosticReliabilityTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -287,6 +289,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaMobileMainService: (() => { try { return accessor.get(IKodiaMobileMainService) } catch { return undefined } })(),
 		ILiveIntelligenceService: accessor.get(ILiveIntelligenceService),
 		IKodiaLiveIntelligenceMainService: (() => { try { return accessor.get(IKodiaLiveIntelligenceMainService) } catch { return undefined } })(),
+		IDiagnosticReliabilityService: accessor.get(IDiagnosticReliabilityService),
+		IKodiaDiagnosticReliabilityMainService: (() => { try { return accessor.get(IKodiaDiagnosticReliabilityMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

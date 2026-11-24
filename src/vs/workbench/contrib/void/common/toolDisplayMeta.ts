@@ -343,6 +343,13 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	lei_diagnose_error: { done: 'Diagnosed failure with live docs', proposed: 'Research failure root cause', running: 'Researching current docs for failure migration' },
 	lei_inspect_evidence: { done: 'Loaded verified research evidence', proposed: 'Inspect research evidence', running: 'Loading persisted verification evidence' },
 	lei_refresh_knowledge: { done: 'Refreshed stale knowledge cache', proposed: 'Refresh stale engineering cache', running: 'Refreshing expired engineering intelligence' },
+	kdre_inspect_config: { done: 'Inspected project configuration', proposed: 'Inspect project configuration', running: 'Scanning tsconfig, package, Python & build configs' },
+	kdre_check_dependencies: { done: 'Verified dependency resolution', proposed: 'Verify dependency resolution', running: 'Checking node_modules, @types, venv & autoload' },
+	kdre_probe_servers: { done: 'Probed language server health', proposed: 'Probe language server health', running: 'Checking language server versions & status' },
+	kdre_verify_compilers: { done: 'Ran independent compiler check', proposed: 'Run independent compiler check', running: 'Running workspace compiler & type checkers' },
+	kdre_evaluate_diagnostics: { done: 'Classified & cross-checked diagnostics', proposed: 'Classify editor diagnostics', running: 'Cross-checking editor diagnostics against compilers' },
+	kdre_investigate_diagnostic: { done: 'Investigated suspicious diagnostic', proposed: 'Investigate suspicious diagnostic', running: 'Investigating potential false positive with evidence' },
+	kdre_recover: { done: 'Executed diagnostic recovery action', proposed: 'Recover language server / diagnostics', running: 'Executing safe diagnostic recovery action' },
 };
 
 function humanizeToolName(toolName: string): string {

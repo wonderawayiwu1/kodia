@@ -160,6 +160,9 @@ export class MarkerService implements IMarkerService {
 	private readonly _data = new DoubleResourceMap<IMarker[]>();
 	private readonly _stats = new MarkerStats(this);
 	private readonly _filteredResources = new ResourceMap<string[]>();
+	// Kodia KDRE: track highest accepted modelVersionId per (resource, owner) so out-of-order
+	// async LSP diagnostics for an older document version never overwrite newer diagnostics.
+	private readonly _latestModelVersion = new DoubleResourceMap<number>();
 
 	dispose(): void {
 		this._stats.dispose();
@@ -179,13 +182,34 @@ export class MarkerService implements IMarkerService {
 	changeOne(owner: string, resource: URI, markerData: IMarkerData[]): void {
 
 		if (isFalsyOrEmpty(markerData)) {
-			// remove marker for this (owner,resource)-tuple
+			// remove marker for this (owner,resource)-tuple and reset version watermark
+			this._latestModelVersion.delete(resource, owner);
 			const removed = this._data.delete(resource, owner);
 			if (removed) {
 				this._onMarkerChanged.fire([resource]);
 			}
 
 		} else {
+			// Kodia KDRE: reject strictly older out-of-order diagnostic batches when every incoming
+			// marker carries a modelVersionId older than the version already published by this owner.
+			let incomingMaxVersion: number | undefined;
+			let allHaveVersion = true;
+			for (const data of markerData) {
+				if (typeof data.modelVersionId === 'number' && data.modelVersionId > 0) {
+					incomingMaxVersion = incomingMaxVersion === undefined ? data.modelVersionId : Math.max(incomingMaxVersion, data.modelVersionId);
+				} else {
+					allHaveVersion = false;
+				}
+			}
+			const prevVersion = this._latestModelVersion.get(resource, owner);
+			if (allHaveVersion && incomingMaxVersion !== undefined && prevVersion !== undefined && incomingMaxVersion < prevVersion) {
+				// Ignore strictly stale diagnostic batch from an outdated document version
+				return;
+			}
+			if (incomingMaxVersion !== undefined && (prevVersion === undefined || incomingMaxVersion >= prevVersion)) {
+				this._latestModelVersion.set(resource, owner, incomingMaxVersion);
+			}
+
 			// insert marker for this (owner,resource)-tuple
 			const markers: IMarker[] = [];
 			for (const data of markerData) {
@@ -274,6 +298,7 @@ export class MarkerService implements IMarkerService {
 				if (first) {
 					changes.push(first.resource);
 					this._data.delete(first.resource, owner);
+					this._latestModelVersion.delete(first.resource, owner);
 				}
 			}
 		}

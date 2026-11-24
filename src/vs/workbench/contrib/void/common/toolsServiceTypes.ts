@@ -159,6 +159,18 @@ import type {
 	LeiResearchResult,
 	LeiSecurityAuditReport,
 } from './liveIntelligenceTypes.js';
+import type {
+	KdreClassifiedDiagnostic,
+	KdreCompilerVerificationReport,
+	KdreCrossEditorComparisonReport,
+	KdreDependencyHealthReport,
+	KdreDiagnosticConflict,
+	KdreInvestigationReport,
+	KdreLanguageServerHealth,
+	KdreProjectConfigReport,
+	KdreRecoveryActionKind,
+	KdreRecoveryResult,
+} from './diagnosticReliabilityTypes.js';
 
 
 
@@ -722,6 +734,14 @@ export type BuiltinToolCallParams = {
 	'lei_diagnose_error': { error_message: string, technology?: string, current_version?: string },
 	'lei_inspect_evidence': { technology?: string, domain?: LeiDomain, include_stale?: boolean },
 	'lei_refresh_knowledge': { technology?: string, reason?: string },
+	// Kodia Diagnostic Reliability Engine (KDRE)
+	'kdre_inspect_config': {},
+	'kdre_check_dependencies': {},
+	'kdre_probe_servers': {},
+	'kdre_verify_compilers': { target_files?: string[], languages?: string[] },
+	'kdre_evaluate_diagnostics': { run_compiler?: boolean },
+	'kdre_investigate_diagnostic': { file: string, line: number, message: string, code?: string, source?: string, run_compiler?: boolean },
+	'kdre_recover': { action: KdreRecoveryActionKind, target_language?: string },
 }
 
 // RESULT OF TOOL CALL
@@ -1040,6 +1060,14 @@ export type BuiltinToolResultType = {
 	'lei_diagnose_error': LeiFailureDiagnosisReport,
 	'lei_inspect_evidence': { records: LeiEvidenceRecord[] },
 	'lei_refresh_knowledge': { refreshed: number, failed: number, invalidated: number },
+	// Kodia Diagnostic Reliability Engine (KDRE)
+	'kdre_inspect_config': KdreProjectConfigReport,
+	'kdre_check_dependencies': KdreDependencyHealthReport,
+	'kdre_probe_servers': { servers: KdreLanguageServerHealth[] },
+	'kdre_verify_compilers': KdreCompilerVerificationReport,
+	'kdre_evaluate_diagnostics': { classified: KdreClassifiedDiagnostic[], conflicts: KdreDiagnosticConflict[], comparison: KdreCrossEditorComparisonReport },
+	'kdre_investigate_diagnostic': KdreInvestigationReport,
+	'kdre_recover': KdreRecoveryResult,
 }
 
 

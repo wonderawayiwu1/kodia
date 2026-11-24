@@ -45,6 +45,21 @@ export class TypeScriptVersionManager extends Disposable {
 					}
 				}));
 			}
+
+			// Kodia KDRE: when dependencies are installed after opening a workspace (e.g. npm/pnpm/yarn install),
+			// automatically detect and switch to the workspace's exact TypeScript version.
+			const tsPkgWatcher = vscode.workspace.createFileSystemWatcher('**/node_modules/typescript/package.json');
+			this._disposables.push(tsPkgWatcher);
+			const trySwitchToWorkspaceTs = () => {
+				if (vscode.workspace.isTrusted && this.useWorkspaceTsdkSetting) {
+					const local = this.versionProvider.localVersion;
+					if (local && !this._currentVersion.eq(local)) {
+						this.updateActiveVersion(local);
+					}
+				}
+			};
+			this._disposables.push(tsPkgWatcher.onDidCreate(trySwitchToWorkspaceTs));
+			this._disposables.push(tsPkgWatcher.onDidChange(trySwitchToWorkspaceTs));
 		}
 
 		if (this.isInPromptWorkspaceTsdkState(configuration)) {

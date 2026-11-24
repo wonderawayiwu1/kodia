@@ -689,6 +689,13 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'lei_diagnose_error':
 		case 'lei_inspect_evidence':
 		case 'lei_refresh_knowledge':
+		case 'kdre_inspect_config':
+		case 'kdre_check_dependencies':
+		case 'kdre_probe_servers':
+		case 'kdre_verify_compilers':
+		case 'kdre_evaluate_diagnostics':
+		case 'kdre_investigate_diagnostic':
+		case 'kdre_recover':
 			return 'low';
 
 		// Mobile scaffolding, device actions, and builds/tests

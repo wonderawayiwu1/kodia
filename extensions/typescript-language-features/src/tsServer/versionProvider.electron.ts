@@ -43,7 +43,8 @@ export class DiskTypeScriptVersionProvider implements ITypeScriptVersionProvider
 		}
 
 		const nodeVersions = this.localNodeModulesVersions;
-		if (nodeVersions?.length === 1) {
+		if (nodeVersions?.length >= 1) {
+			// Kodia KDRE: prefer root workspace TypeScript, then highest valid workspace version in multi-root/monorepo projects
 			return nodeVersions[0];
 		}
 		return undefined;
@@ -123,8 +124,39 @@ export class DiskTypeScriptVersionProvider implements ITypeScriptVersionProvider
 	}
 
 	private get localNodeModulesVersions(): TypeScriptVersion[] {
-		return this.loadTypeScriptVersionsFromPath(TypeScriptVersionSource.NodeModules, path.join('node_modules', 'typescript', 'lib'))
+		const direct = this.loadTypeScriptVersionsFromPath(TypeScriptVersionSource.NodeModules, path.join('node_modules', 'typescript', 'lib'))
 			.filter(x => x.isValid);
+		if (direct.length > 0 || !vscode.workspace.workspaceFolders) {
+			return direct;
+		}
+		// Kodia KDRE: discover workspace TypeScript in common monorepo / subproject layouts
+		const found: TypeScriptVersion[] = [];
+		const seen = new Set<string>();
+		const subRoots = ['apps', 'packages', 'services', 'frontend', 'backend', 'client', 'server', 'web', 'mobile', 'api'];
+		for (const root of vscode.workspace.workspaceFolders) {
+			for (const sub of subRoots) {
+				const candidateDir = path.join(root.uri.fsPath, sub);
+				if (!fs.existsSync(candidateDir)) { continue; }
+				const directSub = path.join(candidateDir, 'node_modules', 'typescript', 'lib', 'tsserver.js');
+				if (fs.existsSync(directSub) && !seen.has(directSub)) {
+					const ver = new TypeScriptVersion(TypeScriptVersionSource.NodeModules, directSub, DiskTypeScriptVersionProvider.getApiVersion(directSub), path.join(sub, 'node_modules', 'typescript', 'lib'));
+					if (ver.isValid) { seen.add(directSub); found.push(ver); }
+				}
+				if (sub === 'apps' || sub === 'packages' || sub === 'services') {
+					try {
+						for (const entry of fs.readdirSync(candidateDir, { withFileTypes: true })) {
+							if (!entry.isDirectory()) { continue; }
+							const nested = path.join(candidateDir, entry.name, 'node_modules', 'typescript', 'lib', 'tsserver.js');
+							if (fs.existsSync(nested) && !seen.has(nested)) {
+								const ver = new TypeScriptVersion(TypeScriptVersionSource.NodeModules, nested, DiskTypeScriptVersionProvider.getApiVersion(nested), path.join(sub, entry.name, 'node_modules', 'typescript', 'lib'));
+								if (ver.isValid) { seen.add(nested); found.push(ver); }
+							}
+						}
+					} catch { /* ignore unreadable subdirs */ }
+				}
+			}
+		}
+		return found;
 	}
 
 	private loadTypeScriptVersionsFromPath(source: TypeScriptVersionSource, relativePath: string): TypeScriptVersion[] {

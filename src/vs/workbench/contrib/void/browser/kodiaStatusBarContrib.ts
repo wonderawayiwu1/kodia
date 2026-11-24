@@ -8,6 +8,8 @@ import { IWorkbenchContribution, registerWorkbenchContribution2, WorkbenchPhase 
 import { IStatusbarEntryAccessor, IStatusbarService, StatusbarAlignment } from '../../../services/statusbar/browser/statusbar.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 import { IChatThreadService } from './chatThreadService.js';
+import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from './correctnessService.js';
+import { IDiagnosticReliabilityService } from './diagnosticReliabilityService.js';
 import { KODIA_CYCLE_AUTONOMY_ACTION_ID } from './kodiaEditorActions.js';
 import { VOID_OPEN_SETTINGS_ACTION_ID } from './voidSettingsPane.js';
 
@@ -16,11 +18,13 @@ export class KodiaStatusBarContribution extends Disposable implements IWorkbench
 
 	private readonly _modelEntry: IStatusbarEntryAccessor;
 	private readonly _autonomyEntry: IStatusbarEntryAccessor;
+	private readonly _kdreEntry: IStatusbarEntryAccessor;
 
 	constructor(
 		@IStatusbarService statusbarService: IStatusbarService,
 		@IVoidSettingsService private readonly _settingsService: IVoidSettingsService,
 		@IChatThreadService private readonly _chatThreadService: IChatThreadService,
+		@IDiagnosticReliabilityService private readonly _kdreService: IDiagnosticReliabilityService,
 	) {
 		super();
 
@@ -37,6 +41,17 @@ export class KodiaStatusBarContribution extends Disposable implements IWorkbench
 			StatusbarAlignment.RIGHT,
 			101,
 		));
+
+		this._kdreEntry = this._register(statusbarService.addEntry(
+			this._buildKdreEntry(),
+			'kodia.statusbar.kdre',
+			StatusbarAlignment.LEFT,
+			98,
+		));
+
+		this._register(this._kdreService.onDidChangeSnapshot(() => {
+			this._kdreEntry.update(this._buildKdreEntry());
+		}));
 
 		this._register(this._settingsService.onDidChangeState(() => {
 			this._modelEntry.update(this._buildModelEntry());
@@ -86,6 +101,35 @@ export class KodiaStatusBarContribution extends Disposable implements IWorkbench
 			ariaLabel: `Kodia Autonomy Mode: ${label}`,
 			tooltip: `Kodia Autonomy Mode: ${label} — Click to cycle Assist / Agent / Auto`,
 			command: KODIA_CYCLE_AUTONOMY_ACTION_ID,
+		};
+	}
+
+	private _buildKdreEntry() {
+		const snap = this._kdreService.getCachedSnapshot();
+		const icon = snap.systemState === 'verifying' || snap.systemState === 'initializing' || snap.systemState === 'updating'
+			? '$(sync~spin)'
+			: snap.systemState === 'unavailable'
+				? '$(error)'
+				: snap.systemState === 'degraded' || snap.systemState === 'stale'
+					? '$(warning)'
+					: '$(verified)';
+		const detail = snap.conflictCount > 0
+			? `KDRE: ${snap.conflictCount} conflict(s)`
+			: snap.staleCount > 0
+				? `KDRE: ${snap.staleCount} stale`
+				: snap.systemState === 'verifying'
+					? 'KDRE: Verifying…'
+					: snap.systemState === 'degraded'
+						? 'KDRE: Degraded'
+						: snap.systemState === 'unavailable'
+							? 'KDRE: Unavailable'
+							: 'KDRE: Ready';
+		return {
+			name: 'Kodia Diagnostic Reliability',
+			text: `${icon} ${detail}`,
+			ariaLabel: `Kodia Diagnostic Reliability: ${snap.statusLabel}`,
+			tooltip: `Kodia Diagnostic Reliability Engine — ${snap.statusLabel} (Editor: ${snap.totalEditorDiagnostics}, Confirmed: ${snap.confirmedErrorCount}, Conflicts: ${snap.conflictCount}, Stale: ${snap.staleCount}). Click to open Diagnostics & Correctness Hub.`,
+			command: KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID,
 		};
 	}
 }

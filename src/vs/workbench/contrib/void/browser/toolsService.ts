@@ -186,6 +186,13 @@ import {
 import { IEvolutionService } from './evolutionService.js'
 import { IMobileEngineeringService } from './mobileEngineeringService.js'
 import { ILiveIntelligenceService, LeiDashboardTab } from './liveIntelligenceService.js'
+import { IDiagnosticReliabilityService } from './diagnosticReliabilityService.js'
+import { IKodiaDiagnosticReliabilityMainService, KODIA_KDRE_CHANNEL, KdreRecoveryActionKind } from '../common/diagnosticReliabilityTypes.js'
+import {
+	formatCompilerVerificationForLLM,
+	formatInvestigationForLLM as formatKdreInvestigationForLLM,
+	formatProjectConfigForLLM,
+} from '../common/diagnosticReliabilityEngine.js'
 import { IKodiaLiveIntelligenceMainService, KODIA_LEI_CHANNEL, LeiDomain, LeiModelTaskRequirements, LeiPackageEcosystem } from '../common/liveIntelligenceTypes.js'
 import {
 	formatDependencyReportForLLM,
@@ -532,6 +539,7 @@ export class ToolsService implements IToolsService {
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
 		const mobileMainService = ProxyChannel.toService<IKodiaMobileMainService>(mainProcessService.getChannel(KODIA_MOBILE_CHANNEL))
 		const leiMainService = ProxyChannel.toService<IKodiaLiveIntelligenceMainService>(mainProcessService.getChannel(KODIA_LEI_CHANNEL))
+		const kdreMainService = ProxyChannel.toService<IKodiaDiagnosticReliabilityMainService>(mainProcessService.getChannel(KODIA_KDRE_CHANNEL))
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
 		const getNotebookEditHistory = (uri: URI): NotebookEditHistoryState => {
@@ -650,6 +658,9 @@ export class ToolsService implements IToolsService {
 		}
 		const getLeiService = (): ILiveIntelligenceService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(ILiveIntelligenceService)) } catch { return undefined }
+		}
+		const getKdreService = (): IDiagnosticReliabilityService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IDiagnosticReliabilityService)) } catch { return undefined }
 		}
 		const getWorkflowsService = (): IKodiaWorkflowsService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IKodiaWorkflowsService)) } catch { return undefined }
@@ -2699,6 +2710,35 @@ export class ToolsService implements IToolsService {
 				technology: validateOptionalStr('technology', params.technology) ?? undefined,
 				reason: validateOptionalStr('reason', params.reason) ?? undefined,
 			}),
+			// Kodia Diagnostic Reliability Engine (KDRE)
+			kdre_inspect_config: () => ({}),
+			kdre_check_dependencies: () => ({}),
+			kdre_probe_servers: () => ({}),
+			kdre_verify_compilers: (params: RawToolParamsObj) => {
+				const toList = (v: unknown): string[] | undefined => {
+					if (Array.isArray(v)) return v.map(String).filter(Boolean)
+					if (typeof v === 'string' && v.trim()) return v.split(',').map(s => s.trim()).filter(Boolean)
+					return undefined
+				}
+				return { target_files: toList(params.target_files), languages: toList(params.languages) }
+			},
+			kdre_evaluate_diagnostics: (params: RawToolParamsObj) => ({
+				run_compiler: validateBoolean(params.run_compiler, { default: true }) ?? true,
+			}),
+			kdre_investigate_diagnostic: (params: RawToolParamsObj) => ({
+				file: validateStr('file', params.file),
+				line: Math.max(1, validateNumber(params.line, { default: 1 }) ?? 1),
+				message: validateStr('message', params.message),
+				code: validateOptionalStr('code', params.code) ?? undefined,
+				source: validateOptionalStr('source', params.source) ?? undefined,
+				run_compiler: validateBoolean(params.run_compiler, { default: true }) ?? true,
+			}),
+			kdre_recover: (params: RawToolParamsObj) => {
+				const raw = validateStr('action', params.action)
+				const allowed: readonly KdreRecoveryActionKind[] = ['restart_language_server', 'reload_project_config', 'refresh_document_sync', 'purge_stale_markers', 'recheck_dependencies', 'run_compiler_verify']
+				const action: KdreRecoveryActionKind = (allowed as readonly string[]).includes(raw) ? raw as KdreRecoveryActionKind : 'reload_project_config'
+				return { action, target_language: validateOptionalStr('target_language', params.target_language) ?? undefined }
+			},
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -5708,6 +5748,62 @@ export class ToolsService implements IToolsService {
 				const ref = await leiMainService.refreshStaleKnowledge(root)
 				return { result: { refreshed: ref.refreshed, failed: ref.failed, invalidated } }
 			},
+			// Kodia Diagnostic Reliability Engine (KDRE)
+			kdre_inspect_config: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await kdreMainService.inspectProjectConfiguration(root)
+				return { result: res }
+			},
+			kdre_check_dependencies: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await kdreMainService.verifyDependencyResolution(root)
+				return { result: res }
+			},
+			kdre_probe_servers: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const servers = [...await kdreMainService.probeLanguageServerHealth(root)]
+				return { result: { servers } }
+			},
+			kdre_verify_compilers: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await kdreMainService.runIndependentVerification(root, {
+					targetFiles: p.target_files,
+					languages: p.languages,
+				})
+				return { result: res }
+			},
+			kdre_evaluate_diagnostics: async (p) => {
+				const kdre = getKdreService()
+				if (kdre) {
+					const res = await kdre.refreshAndEvaluate({ runCompiler: p.run_compiler })
+					return { result: { classified: [...res.classified], conflicts: [...res.conflicts], comparison: res.comparison } }
+				}
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await kdreMainService.evaluateDiagnostics(root, [], { runCompiler: p.run_compiler })
+				return { result: { classified: [...res.classified], conflicts: [...res.conflicts], comparison: res.comparison } }
+			},
+			kdre_investigate_diagnostic: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await kdreMainService.investigateDiagnostic(root, {
+					owner: p.source ?? 'editor',
+					source: p.source ?? 'editor',
+					code: p.code,
+					severity: 'error',
+					message: p.message,
+					file: p.file,
+					line: p.line,
+					column: 1,
+				}, { runCompiler: p.run_compiler })
+				return { result: res }
+			},
+			kdre_recover: async (p) => {
+				const kdre = getKdreService()
+				if (kdre) {
+					const res = await kdre.executeRecoveryAction(p.action, p.target_language)
+					return { result: res }
+				}
+				return { result: { action: p.action, targetLanguage: p.target_language, executed: false, summary: 'Workbench KDRE service unavailable', affectedCount: 0, timestampMs: Date.now() } }
+			},
 
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
@@ -7539,6 +7635,27 @@ export class ToolsService implements IToolsService {
 				? 'No persisted verified evidence records matched the query.'
 				: r.records.slice(0, 10).map(rec => `- **${rec.technology}** (\`${rec.exactIdentifierOrVersion}\`) — ${formatVerificationBadge(rec.verificationStatus)} [${rec.researchDate}]: ${rec.finding}${rec.sources[0] ? ` (Source: ${rec.sources[0].url})` : ''}`).join('\n'),
 			lei_refresh_knowledge: (_params, r) => `Knowledge refresh complete: refreshed=${r.refreshed}, failed=${r.failed}, invalidated=${r.invalidated}.`,
+			// Kodia Diagnostic Reliability Engine (KDRE)
+			kdre_inspect_config: (_params, r) => formatProjectConfigForLLM(r),
+			kdre_check_dependencies: (_params, r) => [
+				`## Dependency Resolution Health (${r.healthy ? 'HEALTHY' : 'WARNINGS'})`,
+				`- node_modules: ${r.nodeModulesPresent} | @types: ${r.hasTypesPackages} | pnpm: ${r.pnpmWorkspaceDetected} | Yarn PnP: ${r.yarnPnpDetected}`,
+				`- Python site-packages: ${r.pythonSitePackagesPresent} | PHP vendor/autoload: ${r.phpVendorAutoloadPresent}`,
+				r.missingDeclaredDeps.length ? `- Missing declared deps: ${r.missingDeclaredDeps.join(', ')}` : '',
+				r.resolutionWarnings.length ? `- Warnings:\n${r.resolutionWarnings.map(w => `  - ${w}`).join('\n')}` : '',
+			].filter(Boolean).join('\n'),
+			kdre_probe_servers: (_params, r) => r.servers.length === 0
+				? 'No workspace language servers detected.'
+				: r.servers.map(s => `- **${s.language}** (${s.serverName}): \`${s.status}\`${s.version ? ` v${s.version}` : ''}${s.issue ? ` — ${s.issue}` : ''}`).join('\n'),
+			kdre_verify_compilers: (_params, r) => formatCompilerVerificationForLLM(r),
+			kdre_evaluate_diagnostics: (_params, r) => [
+				`## KDRE Diagnostic Evaluation & Cross-Check`,
+				`- ${r.comparison.summary} (Parity: ${r.comparison.parityPercent}%)`,
+				...r.classified.slice(0, 15).map(c => `  - [${c.classification} | ${c.confidence}] ${c.raw.file}:${c.raw.line} (${c.raw.source}${c.raw.code ? ' ' + c.raw.code : ''}): ${c.raw.message}`),
+				r.conflicts.length ? `\n### Conflicts (${r.conflicts.length}):\n${r.conflicts.slice(0, 8).map(cf => `  - [${cf.kind}] ${cf.file}:${cf.line}: ${cf.explanation}`).join('\n')}` : '',
+			].filter(Boolean).join('\n'),
+			kdre_investigate_diagnostic: (_params, r) => formatKdreInvestigationForLLM(r),
+			kdre_recover: (_params, r) => `KDRE Recovery (${r.action}): ${r.executed ? 'EXECUTED' : 'FAILED'} — ${r.summary}`,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

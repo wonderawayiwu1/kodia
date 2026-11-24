@@ -26,6 +26,7 @@ import './evolutionPane.js'
 import './mobileStudioPane.js'
 import './liveIntelligencePane.js'
 import './liveIntelligenceService.js'
+import './diagnosticReliabilityService.js'
 
 // register css
 import './media/void.css'
