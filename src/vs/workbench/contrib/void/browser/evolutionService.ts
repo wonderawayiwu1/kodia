@@ -181,4 +181,4 @@ export class EvolutionService extends Disposable implements IEvolutionService {
 	clearLiveEvents(): void { this._seenIds.clear(); this._update({ liveEvents: [] }); }
 }
 
-registerSingleton(IEvolutionService, EvolutionService, InstantiationType.Eager);
+registerSingleton(IEvolutionService, EvolutionService, InstantiationType.Delayed);

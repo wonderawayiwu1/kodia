@@ -1545,38 +1545,68 @@ const normalizeIndentation = (code: string): string => {
 
 const modelOfEditorId: { [id: string]: ITextModel | undefined } = {}
 export type BlockCodeProps = { initValue: string, language?: string, maxHeight?: number, showScrollbars?: boolean }
-export const BlockCode = ({ initValue, language, maxHeight, showScrollbars }: BlockCodeProps) => {
+export const BlockCode = React.memo(({ initValue, language, maxHeight, showScrollbars }: BlockCodeProps) => {
 
-	initValue = normalizeIndentation(initValue)
+	const normalizedValue = useMemo(() => normalizeIndentation(initValue), [initValue])
 
 	// default settings
 	const MAX_HEIGHT = maxHeight ?? Infinity;
 	const SHOW_SCROLLBARS = showScrollbars ?? false;
 
 	const divRef = useRef<HTMLDivElement | null>(null)
+	// Lazily upgrade from a lightweight <pre><code> to a Monaco CodeEditorWidget ONLY when scrolled near the viewport.
+	// This prevents opening a long chat thread from synchronously instantiating dozens of Monaco editors off-screen.
+	const [isNearViewport, setIsNearViewport] = useState(false)
+
+	useEffect(() => {
+		if (isNearViewport) return
+		const el = divRef.current
+		if (!el || typeof IntersectionObserver === 'undefined') {
+			setIsNearViewport(true)
+			return
+		}
+		const observer = new IntersectionObserver((entries) => {
+			if (entries.some(e => e.isIntersecting)) {
+				setIsNearViewport(true)
+				observer.disconnect()
+			}
+		}, { rootMargin: '250px 0px' })
+		observer.observe(el)
+		return () => observer.disconnect()
+	}, [isNearViewport])
 
 	const accessor = useAccessor()
 	const instantiationService = accessor.get('IInstantiationService')
-	// const languageDetectionService = accessor.get('ILanguageDetectionService')
 	const modelService = accessor.get('IModelService')
 
 	const id = useId()
 
 	// these are used to pass to the model creation of modelRef
-	const initValueRef = useRef(initValue)
+	const initValueRef = useRef(normalizedValue)
 	const languageRef = useRef(language)
 
 	const modelRef = useRef<ITextModel | null>(null)
 
 	// if we change the initial value, don't re-render the whole thing, just set it here. same for language
 	useEffect(() => {
-		initValueRef.current = initValue
-		modelRef.current?.setValue(initValue)
-	}, [initValue])
+		initValueRef.current = normalizedValue
+		modelRef.current?.setValue(normalizedValue)
+	}, [normalizedValue])
 	useEffect(() => {
 		languageRef.current = language
 		if (language) modelRef.current?.setLanguage(language)
 	}, [language])
+
+	if (!isNearViewport) {
+		return <div ref={divRef} className='relative z-0 px-2 py-1 bg-void-bg-3'>
+			<pre
+				className='font-mono text-xs leading-[19px] text-void-fg-2 overflow-x-auto m-0 p-0 whitespace-pre'
+				style={Number.isFinite(MAX_HEIGHT) ? { maxHeight: `${MAX_HEIGHT}px`, overflowY: SHOW_SCROLLBARS ? 'auto' : 'hidden' } : undefined}
+			>
+				<code>{normalizedValue}</code>
+			</pre>
+		</div>
+	}
 
 	return <div ref={divRef} className='relative z-0 px-2 py-1 bg-void-bg-3'>
 		<WidgetComponent
@@ -1676,7 +1706,7 @@ export const BlockCode = ({ initValue, language, maxHeight, showScrollbars }: Bl
 		/>
 	</div>
 
-}
+})
 
 
 export const VoidButtonBgDarken = ({ children, disabled, onClick, className }: { children: React.ReactNode; disabled?: boolean; onClick: () => void; className?: string }) => {

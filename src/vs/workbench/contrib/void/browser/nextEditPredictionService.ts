@@ -37,7 +37,8 @@ export class NextEditPredictionService extends Disposable implements INextEditPr
 	readonly _serviceBrand: undefined;
 
 	private readonly _recentEdits: RecentEditRecord[] = [];
-	private readonly _lastLineSnapshot = new Map<string, string[]>();
+	private readonly _trackedModels = new Set<string>();
+	private readonly _lineCache = new Map<string, Map<number, string>>();
 
 	constructor(
 		@ICodeEditorService private readonly _codeEditorService: ICodeEditorService,
@@ -50,21 +51,32 @@ export class NextEditPredictionService extends Disposable implements INextEditPr
 	}
 
 	private _attachActiveEditorTracking(): void {
-		const attach = () => {
-			const editor = this._codeEditorService.getActiveCodeEditor();
-			const model = editor?.getModel();
-			if (!model) { return; }
+		const attach = (editor?: import('../../../../editor/browser/editorBrowser.js').ICodeEditor | null) => {
+			const target = editor ?? this._codeEditorService.getActiveCodeEditor();
+			if (!target || target.isSimpleWidget) { return; }
+			const model = target.getModel();
+			if (!model || model.uri.scheme !== 'file') { return; }
 			const key = model.uri.toString();
-			if (this._lastLineSnapshot.has(key)) { return; }
-			this._lastLineSnapshot.set(key, model.getLinesContent());
-			this._register(model.onDidChangeContent(e => {
-				const prevLines = this._lastLineSnapshot.get(key) ?? [];
-				const currLines = model.getLinesContent();
+			if (this._trackedModels.has(key)) { return; }
+			this._trackedModels.add(key);
+
+			const fileLineCache = new Map<number, string>();
+			this._lineCache.set(key, fileLineCache);
+
+			const contentDisp = model.onDidChangeContent(e => {
+				// O(1) per edited line instead of copying the entire file with getLinesContent() on every keystroke
+				const maxLine = model.getLineCount();
 				for (const change of e.changes) {
 					const ln = change.range.startLineNumber;
-					const beforeLine = prevLines[ln - 1] ?? '';
-					const afterLine = currLines[ln - 1] ?? '';
+					if (ln < 1 || ln > maxLine) { continue; }
+					const afterLine = model.getLineContent(ln);
+					const beforeLine = fileLineCache.get(ln) ?? '';
 					if (beforeLine !== afterLine) {
+						fileLineCache.set(ln, afterLine);
+						if (fileLineCache.size > 200) {
+							const oldestKey = fileLineCache.keys().next().value;
+							if (oldestKey !== undefined) { fileLineCache.delete(oldestKey); }
+						}
 						this.recordEdit({
 							uri: key,
 							lineNumber: ln,
@@ -74,12 +86,19 @@ export class NextEditPredictionService extends Disposable implements INextEditPr
 						});
 					}
 				}
-				this._lastLineSnapshot.set(key, currLines);
-			}));
+			});
+			const disposeDisp = model.onWillDispose(() => {
+				this._trackedModels.delete(key);
+				this._lineCache.delete(key);
+				contentDisp.dispose();
+				disposeDisp.dispose();
+			});
+			this._register(contentDisp);
+			this._register(disposeDisp);
 		};
 
 		attach();
-		this._register(this._codeEditorService.onCodeEditorAdd(() => attach()));
+		this._register(this._codeEditorService.onCodeEditorAdd(ed => attach(ed)));
 	}
 
 	recordEdit(edit: RecentEditRecord): void {

@@ -49,8 +49,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '==> [4/5] Syncing bundles and stamping build metadata into VSCode-win32-x64...' -ForegroundColor Cyan
 $gitCommit = (git rev-parse HEAD).Trim()
-$buildIsoDate = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
-$buildTimestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$buildNowUtc = [DateTimeOffset]::UtcNow
+$buildIsoDate = $buildNowUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
+$buildTimestamp = $buildNowUtc.ToUnixTimeMilliseconds()
 
 $syncScript = @"
 const fs = require('fs');

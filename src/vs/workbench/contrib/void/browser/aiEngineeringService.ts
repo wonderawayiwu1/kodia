@@ -183,4 +183,4 @@ export class AIEngineeringService extends Disposable implements IAIEngineeringSe
 	}
 }
 
-registerSingleton(IAIEngineeringService, AIEngineeringService, InstantiationType.Eager);
+registerSingleton(IAIEngineeringService, AIEngineeringService, InstantiationType.Delayed);

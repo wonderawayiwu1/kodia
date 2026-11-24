@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import React, { JSX, useState } from 'react'
+import React, { JSX, useEffect, useMemo, useState } from 'react'
 import { marked, MarkedToken, Token } from 'marked'
 
 import { convertToVscodeLang, detectLanguage } from '../../../../common/helpers/languageHelpers.js'
@@ -55,50 +55,77 @@ const Codespan = ({ text, className, onClick, tooltip }: { text: string, classNa
 
 }
 
-const CodespanWithLink = ({ text, rawText, chatMessageLocation }: { text: string, rawText: string, chatMessageLocation: ChatMessageLocation }) => {
+// Concurrency limiter for background codespan link resolution so opening long threads never floods IPC / LSP
+const MAX_CONCURRENT_LINK_LOOKUPS = 2
+let activeLinkLookups = 0
+const pendingLinkLookupQueue: Array<() => void> = []
+function enqueueLinkLookup(fn: () => Promise<void>) {
+	const run = () => {
+		activeLinkLookups += 1
+		fn().finally(() => {
+			activeLinkLookups -= 1
+			const next = pendingLinkLookupQueue.shift()
+			if (next) next()
+		})
+	}
+	if (activeLinkLookups < MAX_CONCURRENT_LINK_LOOKUPS) {
+		run()
+	} else if (pendingLinkLookupQueue.length < 60) {
+		pendingLinkLookupQueue.push(run)
+	}
+}
+
+const CodespanWithLink = React.memo(({ text, rawText, chatMessageLocation }: { text: string, rawText: string, chatMessageLocation: ChatMessageLocation }) => {
 
 	const accessor = useAccessor()
-
 	const chatThreadService = accessor.get('IChatThreadService')
-	const commandService = accessor.get('ICommandService')
-	const editorService = accessor.get('ICodeEditorService')
-
 	const { messageIdx, threadId } = chatMessageLocation
 
-	const [didComputeCodespanLink, setDidComputeCodespanLink] = useState<boolean>(false)
+	const isClosed = rawText.endsWith('`')
+	const initialCached = isClosed ? chatThreadService.getCodespanLink({ codespanStr: text, messageIdx, threadId }) : undefined
+	const [resolvedLink, setResolvedLink] = useState<CodespanLocationLink | undefined>(initialCached)
 
-	let link: CodespanLocationLink | undefined = undefined
+	useEffect(() => {
+		if (!isClosed) return
+		// If already cached (including negative `null` cache), skip any lookup
+		const cached = chatThreadService.getCodespanLink({ codespanStr: text, messageIdx, threadId })
+		if (cached !== undefined) {
+			setResolvedLink(cached)
+			return
+		}
+		// Only resolve likely file paths or concise symbol names; skip long commands/JSON/prose
+		const trimmed = text.trim()
+		if (!trimmed || trimmed.length > 80 || /\s/.test(trimmed)) {
+			void chatThreadService.addCodespanLink({ newLinkText: text, newLinkLocation: null, messageIdx, threadId })
+			return
+		}
+		let cancelled = false
+		enqueueLinkLookup(async () => {
+			if (cancelled) return
+			try {
+				const found = await chatThreadService.generateCodespanLink({ codespanStr: text, threadId })
+				await chatThreadService.addCodespanLink({ newLinkText: text, newLinkLocation: found, messageIdx, threadId })
+				if (!cancelled && found) {
+					setResolvedLink(found)
+				}
+			} catch {
+				// ignore lookup failure
+			}
+		})
+		return () => { cancelled = true }
+	}, [isClosed, text, messageIdx, threadId, chatThreadService])
+
+	const link = resolvedLink
 	let tooltip: string | undefined = undefined
-	let displayText = text
+	let displayText = link?.displayText || text
 
-
-	if (rawText.endsWith('`')) {
-		// get link from cache
-		link = chatThreadService.getCodespanLink({ codespanStr: text, messageIdx, threadId })
-
-		if (link === undefined) {
-			// if no link, generate link and add to cache
-			chatThreadService.generateCodespanLink({ codespanStr: text, threadId })
-				.then(link => {
-					chatThreadService.addCodespanLink({ newLinkText: text, newLinkLocation: link, messageIdx, threadId })
-					setDidComputeCodespanLink(true) // rerender
-				})
-		}
-
-		if (link?.displayText) {
-			displayText = link.displayText
-		}
-
-		if (isValidUri(displayText)) {
-			tooltip = getRelative(URI.file(displayText), accessor)  // Full path as tooltip
-			displayText = getBasename(displayText)
-		}
+	if (isClosed && isValidUri(displayText)) {
+		tooltip = getRelative(URI.file(displayText), accessor)
+		displayText = getBasename(displayText)
 	}
-
 
 	const onClick = () => {
 		if (!link) return;
-		// Use the updated voidOpenFileFn to open the file and handle selection
 		if (link.selection)
 			voidOpenFileFn(link.uri, accessor, [link.selection.startLineNumber, link.selection.endLineNumber]);
 		else
@@ -111,7 +138,7 @@ const CodespanWithLink = ({ text, rawText, chatMessageLocation }: { text: string
 		className={link ? 'underline hover:brightness-90 transition-all duration-200 cursor-pointer' : ''}
 		tooltip={tooltip || undefined}
 	/>
-}
+})
 
 
 const paragraphToLatexSegments = (paragraphText: string) => {
@@ -457,14 +484,25 @@ const RenderToken = ({ token, inPTag, codeURI, chatMessageLocation, tokenIdx, ..
 }
 
 
-export const ChatMarkdownRender = ({ string, inPTag = false, chatMessageLocation, ...options }: { string: string, inPTag?: boolean, codeURI?: URI, chatMessageLocation: ChatMessageLocation | undefined } & RenderTokenOptions) => {
-	string = string.replaceAll('\n•', '\n\n•')
-	const tokens = marked.lexer(string); // https://marked.js.org/using_pro#renderer
+export const ChatMarkdownRender = React.memo(({ string, inPTag = false, chatMessageLocation, codeURI, isApplyEnabled, isLinkDetectionEnabled }: { string: string, inPTag?: boolean, codeURI?: URI, chatMessageLocation: ChatMessageLocation | undefined } & RenderTokenOptions) => {
+	const tokens = useMemo(() => {
+		const normalized = string.replaceAll('\n•', '\n\n•')
+		return marked.lexer(normalized)
+	}, [string])
 	return (
 		<>
 			{tokens.map((token, index) => (
-				<RenderToken key={index} token={token} inPTag={inPTag} chatMessageLocation={chatMessageLocation} tokenIdx={index + ''} {...options} />
+				<RenderToken
+					key={index}
+					token={token}
+					inPTag={inPTag}
+					codeURI={codeURI}
+					chatMessageLocation={chatMessageLocation}
+					tokenIdx={index + ''}
+					isApplyEnabled={isApplyEnabled}
+					isLinkDetectionEnabled={isLinkDetectionEnabled}
+				/>
 			))}
 		</>
 	)
-}
+})

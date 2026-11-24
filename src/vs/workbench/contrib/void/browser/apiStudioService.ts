@@ -301,4 +301,4 @@ export class ApiStudioService extends Disposable implements IApiStudioService {
 	}
 }
 
-registerSingleton(IApiStudioService, ApiStudioService, InstantiationType.Eager);
+registerSingleton(IApiStudioService, ApiStudioService, InstantiationType.Delayed);

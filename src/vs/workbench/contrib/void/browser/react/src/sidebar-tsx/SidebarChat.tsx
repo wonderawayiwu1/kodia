@@ -6,7 +6,7 @@
 import React, { ButtonHTMLAttributes, Fragment, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 
-import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useSettingsState, useActiveURI, useCommandBarState, useFullChatThreadsStreamState } from '../util/services.js';
+import { useAccessor, useChatThreadsState, useChatThreadsStreamState, useSettingsState, useActiveURI, useCommandBarState, useAnyThreadRunning } from '../util/services.js';
 import { ScrollType } from '../../../../../../../editor/common/editorCommon.js';
 
 import { ChatMarkdownRender, ChatMessageLocation, getApplyBoxId } from '../markdown/ChatMarkdownRender.js';
@@ -316,22 +316,27 @@ const formatDollars = (d: number): string => d >= 0.01 ? `$${d.toFixed(2)}` : d 
 
 // Totals for every LLM request made in the thread, shown in the bar above the input. Each message is priced
 // with the model that produced it, so switching models mid-thread stays accurate. Free (local) models show tokens only.
-const ThreadUsageSummary = ({ messages }: { messages: ChatMessage[] }) => {
+const ThreadUsageSummary = React.memo(({ messages }: { messages: ChatMessage[] }) => {
 	const { overridesOfModel } = useSettingsState()
 
-	let input = 0, output = 0, cacheRead = 0, dollars = 0
-	let nRequests = 0
-	for (const m of messages) {
-		if (m.role !== 'assistant' || !m.usage) continue
-		nRequests += 1
-		input += m.usage.input + (m.usage.cacheWrite ?? 0)
-		cacheRead += m.usage.cacheRead ?? 0
-		output += m.usage.output
-		if (m.modelSelection) {
-			const { cost } = getModelCapabilities(m.modelSelection.providerName, m.modelSelection.modelName, overridesOfModel)
-			dollars += getUsageCost(m.usage, cost)
+	const summary = useMemo(() => {
+		let input = 0, output = 0, cacheRead = 0, dollars = 0
+		let nRequests = 0
+		for (const m of messages) {
+			if (m.role !== 'assistant' || !m.usage) continue
+			nRequests += 1
+			input += m.usage.input + (m.usage.cacheWrite ?? 0)
+			cacheRead += m.usage.cacheRead ?? 0
+			output += m.usage.output
+			if (m.modelSelection) {
+				const { cost } = getModelCapabilities(m.modelSelection.providerName, m.modelSelection.modelName, overridesOfModel)
+				dollars += getUsageCost(m.usage, cost)
+			}
 		}
-	}
+		return { input, output, cacheRead, dollars, nRequests }
+	}, [messages, overridesOfModel])
+
+	const { input, output, cacheRead, dollars, nRequests } = summary
 	if (nRequests === 0) return null
 
 	// most important first: when the bar is too narrow, the last parts drop out whole instead of being cut
@@ -359,7 +364,7 @@ const ThreadUsageSummary = ({ messages }: { messages: ChatMessage[] }) => {
 	>
 		{parts.map((part, i) => <span key={i} className='whitespace-pre'>{i === 0 ? part : ` · ${part}`}</span>)}
 	</div>
-}
+})
 
 interface VoidChatAreaProps {
 	// Required
@@ -1086,12 +1091,9 @@ const ToolHeaderWrapper = ({
 					</div>
 				</div>
 			</div>
-			{/* children */}
-			{<div
-				className={`overflow-hidden transition-all duration-200 ease-in-out ${isExpanded ? 'opacity-100 py-1' : 'max-h-0 opacity-0'}
-					text-void-fg-4 rounded-sm overflow-x-auto
-				  `}
-			//    bg-black bg-opacity-10 border border-void-border-4 border-opacity-50
+			{/* children — lazily mounted ONLY when expanded so collapsed tool cards do NOT instantiate Monaco CodeEditor/DiffEditor widgets */}
+			{isExpanded && children && <div
+				className='overflow-hidden py-1 text-void-fg-4 rounded-sm overflow-x-auto'
 			>
 				{children}
 			</div>}
@@ -1487,13 +1489,11 @@ const AssistantMessageComponent = ({ chatMessage, isCheckpointGhost, isCommitted
 	const reasoningStr = chatMessage.reasoning?.trim() || null
 	const hasReasoning = !!reasoningStr
 	const isDoneReasoning = !!chatMessage.displayContent
-	const thread = chatThreadsService.getCurrentThread()
-
-
-	const chatMessageLocation: ChatMessageLocation = {
-		threadId: thread.id,
-		messageIdx: messageIdx,
-	}
+	const threadId = chatThreadsService.state.currentThreadId
+	const chatMessageLocation = useMemo<ChatMessageLocation>(() => ({
+		threadId,
+		messageIdx,
+	}), [threadId, messageIdx])
 
 	const isEmpty = !chatMessage.displayContent && !chatMessage.reasoning
 	if (isEmpty) return null
@@ -1919,13 +1919,13 @@ const BottomChildren = ({ children, title }: { children: React.ReactNode, title:
 				/>
 				<span className="font-medium text-void-fg-4 group-hover:text-void-fg-3 text-xs">{title}</span>
 			</div>
-			<div
-				className={`overflow-hidden transition-all duration-200 ease-in-out ${isOpen ? 'opacity-100' : 'max-h-0 opacity-0'} text-xs pl-4`}
-			>
-				<div className="overflow-x-auto text-void-fg-4 opacity-90 border-l-2 border-void-warning px-2 py-0.5">
-					{children}
+			{isOpen && (
+				<div className='overflow-hidden text-xs pl-4'>
+					<div className='overflow-x-auto text-void-fg-4 opacity-90 border-l-2 border-void-warning px-2 py-0.5'>
+						{children}
+					</div>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }
@@ -3162,16 +3162,11 @@ const GenericBuiltinToolCard = ({ toolMessage }: { toolMessage: Exclude<ToolMess
 	return <ToolHeaderWrapper {...componentParams} />
 }
 
-const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
+const Checkpoint = React.memo(({ message, threadId, messageIdx, isCheckpointGhost, threadIsRunning }: { message: CheckpointEntry, threadId: string; messageIdx: number, isCheckpointGhost: boolean, threadIsRunning: boolean }) => {
 	const accessor = useAccessor()
 	const chatThreadService = accessor.get('IChatThreadService')
-	const streamState = useFullChatThreadsStreamState()
-
-	const isRunning = useChatThreadsStreamState(threadId)?.isRunning
-	const isDisabled = useMemo(() => {
-		if (isRunning) return true
-		return !!Object.keys(streamState).find((threadId2) => streamState[threadId2]?.isRunning)
-	}, [isRunning, streamState])
+	const anyThreadRunning = useAnyThreadRunning()
+	const isDisabled = threadIsRunning || anyThreadRunning
 
 	return <div
 		className={`flex items-center justify-center px-2 `}
@@ -3196,14 +3191,14 @@ const Checkpoint = ({ message, threadId, messageIdx, isCheckpointGhost, threadIs
 			}}
 			{...isDisabled ? {
 				'data-tooltip-id': 'void-tooltip',
-				'data-tooltip-content': `Disabled ${isRunning ? 'when running' : 'because another thread is running'}`,
+				'data-tooltip-content': `Disabled ${threadIsRunning ? 'when running' : 'because another thread is running'}`,
 				'data-tooltip-place': 'top',
 			} : {}}
 		>
 			Checkpoint
 		</div>
 	</div>
-}
+})
 
 
 type ChatBubbleMode = 'display' | 'edit'
@@ -3217,11 +3212,11 @@ type ChatBubbleProps = {
 	_scrollToBottom: (() => void) | null,
 }
 
-const ChatBubble = (props: ChatBubbleProps) => {
+const ChatBubble = React.memo((props: ChatBubbleProps) => {
 	return <ErrorBoundary>
 		<_ChatBubble {...props} />
 	</ErrorBoundary>
-}
+})
 
 const _ChatBubble = ({ threadId, chatMessage, currCheckpointIdx, isCommitted, messageIdx, chatIsRunning, _scrollToBottom }: ChatBubbleProps) => {
 	const role = chatMessage.role
@@ -3976,24 +3971,40 @@ export const SidebarChat = () => {
 
 
 
+	// Window long conversations to the most recent N messages so switching to a 150-500+ message thread
+	// mounts instantaneously without freezing the renderer main thread.
+	const INITIAL_VISIBLE_MESSAGES = 40
+	const LOAD_MORE_MESSAGES_STEP = 40
+	const [visibleMessageCount, setVisibleMessageCount] = useState(INITIAL_VISIBLE_MESSAGES)
+	useEffect(() => {
+		setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES)
+	}, [threadId])
+
+	const stableScrollToBottom = useCallback(() => {
+		scrollToBottom(scrollContainerRef)
+	}, [])
+
+	const hiddenMessageCount = Math.max(0, previousMessages.length - visibleMessageCount)
+	const visibleStartIdx = hiddenMessageCount
+
 	const previousMessagesHTML = useMemo(() => {
-		// const lastMessageIdx = previousMessages.findLastIndex(v => v.role !== 'checkpoint')
-		// tool request shows up as Editing... if in progress
-		return previousMessages.map((message, i) => {
+		const slice = visibleStartIdx > 0 ? previousMessages.slice(visibleStartIdx) : previousMessages
+		return slice.map((message, offset) => {
+			const realIdx = visibleStartIdx + offset
 			return <ChatBubble
-				key={i}
+				key={`${threadId}-${realIdx}`}
 				currCheckpointIdx={currCheckpointIdx}
 				chatMessage={message}
-				messageIdx={i}
+				messageIdx={realIdx}
 				isCommitted={true}
 				chatIsRunning={isRunning}
 				threadId={threadId}
-				_scrollToBottom={() => scrollToBottom(scrollContainerRef)}
+				_scrollToBottom={stableScrollToBottom}
 			/>
 		})
-	}, [previousMessages, threadId, currCheckpointIdx, isRunning])
+	}, [previousMessages, visibleStartIdx, threadId, currCheckpointIdx, isRunning, stableScrollToBottom])
 
-	const streamingChatIdx = previousMessagesHTML.length
+	const streamingChatIdx = previousMessages.length
 	const currStreamingMessageHTML = reasoningSoFar || displayContentSoFar || isRunning ?
 		<ChatBubble
 			key={'curr-streaming-msg'}
@@ -4034,6 +4045,26 @@ export const SidebarChat = () => {
 			${previousMessagesHTML.length === 0 && !displayContentSoFar ? 'hidden' : ''}
 		`}
 	>
+		{/* windowing bar for long sessions */}
+		{hiddenMessageCount > 0 && (
+			<div className='flex items-center justify-center gap-2 py-1.5 px-2 rounded-lg bg-void-bg-1/80 border border-void-border-2 text-[11px] text-void-fg-3 select-none'>
+				<span>{hiddenMessageCount} earlier message{hiddenMessageCount === 1 ? '' : 's'} hidden for speed</span>
+				<button
+					type='button'
+					onClick={() => setVisibleMessageCount(c => c + LOAD_MORE_MESSAGES_STEP)}
+					className='px-2 py-0.5 rounded bg-void-bg-2 hover:bg-void-bg-3 border border-void-border-2 text-void-fg-1 cursor-pointer'
+				>
+					Load {Math.min(LOAD_MORE_MESSAGES_STEP, hiddenMessageCount)} more
+				</button>
+				<button
+					type='button'
+					onClick={() => setVisibleMessageCount(previousMessages.length)}
+					className='px-2 py-0.5 rounded bg-void-bg-2 hover:bg-void-bg-3 border border-void-border-2 text-void-fg-2 cursor-pointer'
+				>
+					Show all ({previousMessages.length})
+				</button>
+			</div>
+		)}
 		{/* previous messages */}
 		{previousMessagesHTML}
 		{currStreamingMessageHTML}
@@ -4068,9 +4099,20 @@ export const SidebarChat = () => {
 	const [slashMatches, setSlashMatches] = useState<CustomSlashCommand[]>([])
 	const [slashPrefix, setSlashPrefix] = useState<string | null>(null)
 
+	const tokenEstimateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	useEffect(() => () => {
+		if (tokenEstimateTimerRef.current) clearTimeout(tokenEstimateTimerRef.current)
+	}, [])
+
 	const onChangeText = useCallback((newStr: string) => {
-		setInstructionsAreEmpty(!newStr)
-		setTokenEstimate(estimateTokens(newStr))
+		setInstructionsAreEmpty(prev => {
+			const next = !newStr
+			return prev === next ? prev : next
+		})
+		if (tokenEstimateTimerRef.current) clearTimeout(tokenEstimateTimerRef.current)
+		tokenEstimateTimerRef.current = setTimeout(() => {
+			setTokenEstimate(estimateTokens(newStr))
+		}, 250)
 		const m = /^\/([a-zA-Z0-9_:-]*)$/.exec(newStr)
 		if (m && customCommandsService) {
 			const prefix = m[1].toLowerCase()
@@ -4079,8 +4121,8 @@ export const SidebarChat = () => {
 				setSlashMatches(cmds.filter(c => c.name.includes(prefix)).slice(0, 8))
 			})
 		} else {
-			setSlashPrefix(null)
-			setSlashMatches([])
+			setSlashPrefix(prev => (prev === null ? prev : null))
+			setSlashMatches(prev => (prev.length === 0 ? prev : []))
 		}
 	}, [setInstructionsAreEmpty, setTokenEstimate, customCommandsService])
 

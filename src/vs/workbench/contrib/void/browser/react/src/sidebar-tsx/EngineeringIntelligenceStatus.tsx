@@ -85,7 +85,7 @@ export interface EngineeringIntelligenceStatusProps {
 	contextTopic?: string;
 }
 
-export const EngineeringIntelligenceStatus: React.FC<EngineeringIntelligenceStatusProps> = ({ variant, contextTopic }) => {
+export const EngineeringIntelligenceStatus: React.FC<EngineeringIntelligenceStatusProps> = React.memo(({ variant, contextTopic }) => {
 	const accessor = useAccessor();
 	const leiService = accessor.get('ILiveIntelligenceService');
 	const [snapshot, setSnapshot] = useState<LeiLiveSnapshot>(() => leiService.getCachedSnapshot());
@@ -381,4 +381,4 @@ export const EngineeringIntelligenceStatus: React.FC<EngineeringIntelligenceStat
 			)}
 		</div>
 	);
-};
+});

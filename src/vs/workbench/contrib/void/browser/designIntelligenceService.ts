@@ -313,4 +313,4 @@ export class DesignIntelligenceService extends Disposable implements IDesignInte
 	}
 }
 
-registerSingleton(IDesignIntelligenceService, DesignIntelligenceService, InstantiationType.Eager);
+registerSingleton(IDesignIntelligenceService, DesignIntelligenceService, InstantiationType.Delayed);

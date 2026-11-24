@@ -31,9 +31,11 @@ export class SelectionHelperContribution extends Disposable implements IEditorCo
 	public static readonly ID = 'editor.contrib.voidSelectionHelper';
 	// react
 	private _rootHTML: HTMLElement;
+	private _contentHTML: HTMLElement;
 	private _rerender: (props?: any) => void = () => { };
 	private _rerenderKey: number = 0;
 	private _reactComponentDisposable: IDisposable | null = null;
+	private _isReactMounted = false;
 
 	// internal
 	private _isVisible = false;
@@ -47,7 +49,7 @@ export class SelectionHelperContribution extends Disposable implements IEditorCo
 	) {
 		super();
 
-		// Create the container element for React component
+		// Create lightweight placeholder DOM; do NOT mount React root until the user actually selects text in a real file editor.
 		const { root, content } = dom.h('div@root', [
 			dom.h('div@content', [])
 		]);
@@ -58,33 +60,23 @@ export class SelectionHelperContribution extends Disposable implements IEditorCo
 		root.style.pointerEvents = 'none';
 		root.style.marginLeft = '16px';
 
-		// Initialize React component
-		this._instantiationService.invokeFunction(accessor => {
-			if (this._reactComponentDisposable) {
-				this._reactComponentDisposable.dispose();
-			}
-			const res = mountVoidSelectionHelper(content, accessor);
-			if (!res) return;
-
-			this._reactComponentDisposable = res;
-			this._rerender = res.rerender;
-
-			this._register(this._reactComponentDisposable!);
-
-
-		});
-
 		this._rootHTML = root;
-
-		// Register as overlay widget
-		this._editor.addOverlayWidget(this);
+		this._contentHTML = content;
 
 		// Use scheduler to debounce showing widget
-		this._showScheduler = new RunOnceScheduler(() => {
+		this._showScheduler = this._register(new RunOnceScheduler(() => {
 			if (this._lastSelection) {
 				this._showHelperForSelection(this._lastSelection);
 			}
-		}, 50);
+		}, 50));
+
+		// Skip simple embedded widgets (chat BlockCode, inputs, peek widgets) completely
+		if (this._editor.isSimpleWidget) {
+			return;
+		}
+
+		// Register as overlay widget
+		this._editor.addOverlayWidget(this);
 
 		// Register event listeners
 		this._register(this._editor.onDidChangeCursorSelection(e => this._onSelectionChange(e)));
@@ -107,6 +99,23 @@ export class SelectionHelperContribution extends Disposable implements IEditorCo
 
 		this._register(this._editor.onDidScrollChange(() => this._updatePositionIfVisible()));
 		this._register(this._editor.onDidLayoutChange(() => this._updatePositionIfVisible()));
+	}
+
+	private _ensureReactMounted(): void {
+		if (this._isReactMounted) return;
+		this._isReactMounted = true;
+		this._instantiationService.invokeFunction(accessor => {
+			if (this._reactComponentDisposable) {
+				this._reactComponentDisposable.dispose();
+			}
+			const res = mountVoidSelectionHelper(this._contentHTML, accessor);
+			if (!res) return;
+
+			this._reactComponentDisposable = res;
+			this._rerender = res.rerender;
+
+			this._register(this._reactComponentDisposable);
+		});
 	}
 
 	// IOverlayWidget implementation
@@ -161,6 +170,7 @@ export class SelectionHelperContribution extends Disposable implements IEditorCo
 		if (!this._editor.hasModel()) {
 			return;
 		}
+		this._ensureReactMounted();
 
 		const model = this._editor.getModel()!;
 

@@ -268,8 +268,11 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 				? manifest.buildTimestamp
 				: (manifest.date ? Date.parse(manifest.date) : 0);
 
+			const sameCommit = Boolean(manifest.commit && currentCommit && manifest.commit === currentCommit);
 			const newerTag = manifestTag ? isNewerRelease(manifestTag, currentTag) : false;
-			const newerDate = manifestDateMs > 0 && currentDateMs > 0 && manifestDateMs > currentDateMs + 5000;
+			// Ignore post-compile timestamp skew (e.g. Inno Setup taking 15-20 min after product.json was stamped)
+			// when both the running app and the manifest are the exact same git commit.
+			const newerDate = !sameCommit && manifestDateMs > 0 && currentDateMs > 0 && manifestDateMs > currentDateMs + 5000;
 			const newerWithoutCurrentDate = manifestDateMs > 0 && currentDateMs === 0 && Boolean(manifest.commit && manifest.commit !== currentCommit);
 			const diffCommitNotOlder = Boolean(manifest.commit && currentCommit && manifest.commit !== currentCommit && (manifestDateMs === 0 || manifestDateMs >= currentDateMs));
 
@@ -291,6 +294,10 @@ export class VoidMainUpdateService extends Disposable implements IVoidUpdateServ
 		}
 
 		if (!isNewer) {
+			if (this._readyUpdate?.source === 'local') {
+				this._readyUpdate = undefined;
+				this._status = { state: 'idle' };
+			}
 			return undefined;
 		}
 

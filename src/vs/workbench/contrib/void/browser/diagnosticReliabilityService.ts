@@ -127,11 +127,16 @@ export class DiagnosticReliabilityService extends Disposable implements IDiagnos
 		}));
 
 		// Debounced evaluation when markers change (keeps large projects completely responsive)
+		let lastMarkerFingerprint = '';
 		this._register(this.markerService.onMarkerChanged(() => {
 			if (this._debounceTimer) clearTimeout(this._debounceTimer);
 			this._debounceTimer = setTimeout(() => {
+				const markers = this.markerService.read({});
+				const fp = `${markers.length}:${markers.slice(0, 20).map(m => `${m.resource.path}:${m.startLineNumber}:${m.severity}:${m.code}`).join('|')}`;
+				if (fp === lastMarkerFingerprint) return;
+				lastMarkerFingerprint = fp;
 				void this.refreshAndEvaluate({ runCompiler: false });
-			}, 750);
+			}, 2500);
 		}));
 
 		// Initial lightweight scan

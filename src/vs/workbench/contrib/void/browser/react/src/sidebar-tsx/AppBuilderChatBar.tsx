@@ -27,7 +27,7 @@ const MODE_CYCLE: Record<UabeBuildMode, { next: UabeBuildMode; label: string; ti
 	},
 };
 
-export const AppBuilderChatBar: React.FC = () => {
+export const AppBuilderChatBar: React.FC = React.memo(() => {
 	const accessor = useAccessor();
 	const uabe = accessor.get('IUniversalAppBuilderService');
 	const commandService = accessor.get('ICommandService');
@@ -122,4 +122,4 @@ export const AppBuilderChatBar: React.FC = () => {
 			</div>
 		</div>
 	);
-};
+});

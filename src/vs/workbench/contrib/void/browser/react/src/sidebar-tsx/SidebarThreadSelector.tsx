@@ -3,9 +3,9 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { IconShell1 } from '../markdown/ApplyBlockHoverButtons.js';
-import { useAccessor, useChatThreadsState, useFullChatThreadsStreamState } from '../util/services.js';
+import { useAccessor, useChatThreadsState } from '../util/services.js';
 import { Check, Copy, Download, LoaderCircle, MessageCircleQuestion, Search, Trash2, X } from 'lucide-react';
 import { IsRunningType, ThreadType } from '../../../chatThreadService.js';
 import { exportThreadToMarkdown, filterThreadsByQuery } from '../../../../common/threadExport.js';
@@ -13,35 +13,68 @@ import { exportThreadToMarkdown, filterThreadsByQuery } from '../../../../common
 
 const numInitialThreads = 5
 
-export const PastThreadsList = ({ className = '' }: { className?: string }) => {
+export const PastThreadsList = React.memo(({ className = '' }: { className?: string }) => {
 	const [showAll, setShowAll] = useState(false);
 	const [searchQuery, setSearchQuery] = useState('');
 
 	const [hoveredIdx, setHoveredIdx] = useState<number | null>(null)
 
+	const accessor = useAccessor()
+	const chatThreadService = accessor.get('IChatThreadService')
 	const threadsState = useChatThreadsState()
 	const { allThreads } = threadsState
 
-	const streamState = useFullChatThreadsStreamState()
+	// Only re-render when a thread's coarse running state changes (NOT on every streamed token)
+	const [runningThreadIds, setRunningThreadIds] = useState<{ [threadId: string]: IsRunningType | undefined }>(() => {
+		const out: { [threadId: string]: IsRunningType | undefined } = {}
+		const ss = chatThreadService.streamState
+		for (const id in ss) {
+			if (ss[id]?.isRunning) out[id] = ss[id]!.isRunning
+		}
+		return out
+	})
+	useEffect(() => {
+		const sync = () => {
+			const ss = chatThreadService.streamState
+			setRunningThreadIds(prev => {
+				const next: { [threadId: string]: IsRunningType | undefined } = {}
+				let changed = false
+				let nextCount = 0
+				for (const id in ss) {
+					const r = ss[id]?.isRunning
+					if (r) {
+						next[id] = r
+						nextCount++
+						if (prev[id] !== r) changed = true
+					}
+				}
+				if (!changed && Object.keys(prev).length === nextCount) return prev
+				return next
+			})
+		}
+		sync()
+		const d = chatThreadService.onDidChangeStreamState(sync)
+		return () => d.dispose()
+	}, [chatThreadService])
 
-	const runningThreadIds: { [threadId: string]: IsRunningType | undefined } = {}
-	for (const threadId in streamState) {
-		const isRunning = streamState[threadId]?.isRunning
-		if (isRunning) { runningThreadIds[threadId] = isRunning }
-	}
+	// Memoize sorting & filtering before any early return (Rules of Hooks)
+	const allVisibleThreads = useMemo(() => {
+		if (!allThreads) return []
+		return Object.keys(allThreads)
+			.sort((threadId1, threadId2) => (allThreads[threadId1]?.lastModified ?? 0) > (allThreads[threadId2]?.lastModified ?? 0) ? -1 : 1)
+			.map(threadId => allThreads[threadId])
+			.filter((t): t is ThreadType => !!t && (t.messages.length ?? 0) !== 0 && !t.subagentOf)
+	}, [allThreads])
+
+	const filteredThreads = useMemo(() => {
+		return searchQuery.trim() ? filterThreadsByQuery(allVisibleThreads, searchQuery) : allVisibleThreads
+	}, [allVisibleThreads, searchQuery])
+
+	const sortedThreadIds = useMemo(() => filteredThreads.map(t => t.id), [filteredThreads])
 
 	if (!allThreads) {
 		return <div key="error" className="p-1">{`Error accessing chat history.`}</div>;
 	}
-
-	// sorted by most recent to least recent (subagent threads are managed in the Agents tab)
-	const allVisibleThreads = Object.keys(allThreads ?? {})
-		.sort((threadId1, threadId2) => (allThreads[threadId1]?.lastModified ?? 0) > (allThreads[threadId2]?.lastModified ?? 0) ? -1 : 1)
-		.map(threadId => allThreads![threadId])
-		.filter((t): t is ThreadType => !!t && (t.messages.length ?? 0) !== 0 && !t.subagentOf)
-
-	const filteredThreads = searchQuery.trim() ? filterThreadsByQuery(allVisibleThreads, searchQuery) : allVisibleThreads;
-	const sortedThreadIds = filteredThreads.map(t => t.id);
 
 	// Get only first N threads if not showing all and not actively searching
 	const hasMoreThreads = !searchQuery.trim() && sortedThreadIds.length > numInitialThreads;
@@ -106,7 +139,7 @@ export const PastThreadsList = ({ className = '' }: { className?: string }) => {
 			)}
 		</div>
 	);
-};
+});
 
 
 

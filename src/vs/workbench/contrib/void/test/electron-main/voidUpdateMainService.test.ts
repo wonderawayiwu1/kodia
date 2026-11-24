@@ -153,6 +153,18 @@ suite('Kodia - update checks', () => {
 			assert.strictEqual((await sSame.checkLocalOnly())?.message, null);
 			assert.strictEqual((await sSame.restartAndApplyUpdate()).launched, false);
 
+			// 1b. Matching commit even with later manifest timestamp (Inno Setup compile skew) -> must NOT loop
+			fs.writeFileSync(path.join(tmpDir, 'kodia-update.json'), JSON.stringify({
+				version: '1.141.0',
+				voidVersion: '2.5.5',
+				commit: 'aaaaaaa1111111',
+				date: newerDate,
+				buildTimestamp: Date.parse(newerDate),
+			}));
+			const sSameSkew = service({ localInstallerPath: tmpDir, commit: 'aaaaaaa1111111', date: currentDate });
+			assert.strictEqual((await sSameSkew.checkLocalOnly())?.message, null);
+			assert.strictEqual((await sSameSkew.restartAndApplyUpdate()).launched, false);
+
 			// 2. Newer build timestamp & different commit -> triggers Restart to Update without network
 			fs.writeFileSync(path.join(tmpDir, 'kodia-update.json'), JSON.stringify({
 				version: '1.141.0',

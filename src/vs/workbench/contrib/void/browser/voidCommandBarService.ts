@@ -92,6 +92,8 @@ export class VoidCommandBarService extends Disposable implements IVoidCommandBar
 		// for every new editor, add the floating widget and update active URI
 		const disposablesOfEditorId: { [editorId: string]: IDisposable[] } = {};
 		const onCodeEditorAdd = (editor: ICodeEditor) => {
+			// Skip simple embedded widgets (chat BlockCode, inputs, peek widgets) so we don't mount redundant React roots
+			if (editor.isSimpleWidget) return
 			const id = editor.getId();
 			disposablesOfEditorId[id] = [];
 

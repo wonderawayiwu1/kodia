@@ -217,109 +217,134 @@ export const _registerServices = (accessor: ServicesAccessor) => {
 
 
 
-const getReactAccessor = (accessor: ServicesAccessor) => {
-	const reactAccessor = {
-		IModelService: accessor.get(IModelService),
-		IClipboardService: accessor.get(IClipboardService),
-		IContextViewService: accessor.get(IContextViewService),
-		IContextMenuService: accessor.get(IContextMenuService),
-		IFileService: accessor.get(IFileService),
-		IHoverService: accessor.get(IHoverService),
-		IThemeService: accessor.get(IThemeService),
-		ILLMMessageService: accessor.get(ILLMMessageService),
-		IRefreshModelService: accessor.get(IRefreshModelService),
-		IVoidSettingsService: accessor.get(IVoidSettingsService),
-		IEditCodeService: accessor.get(IEditCodeService),
-		IChatThreadService: accessor.get(IChatThreadService),
+const SERVICE_ID_MAP = {
+	IModelService,
+	IClipboardService,
+	IContextViewService,
+	IContextMenuService,
+	IFileService,
+	IHoverService,
+	IThemeService,
+	ILLMMessageService,
+	IRefreshModelService,
+	IVoidSettingsService,
+	IEditCodeService,
+	IChatThreadService,
+	IInstantiationService,
+	ICodeEditorService,
+	ICommandService,
+	IContextKeyService,
+	INotificationService,
+	IAccessibilityService,
+	ILanguageConfigurationService,
+	ILanguageDetectionService,
+	ILanguageFeaturesService,
+	IKeybindingService,
+	ISearchService,
+	IExplorerService,
+	IEnvironmentService,
+	IConfigurationService,
+	IPathService,
+	IMetricsService,
+	ITerminalToolService,
+	ILanguageService,
+	IVoidModelService,
+	IWorkspaceContextService,
+	IVoidCommandBarService,
+	INativeHostService,
+	IToolsService,
+	IDebuggerActivityService,
+	IConvertToLLMMessageService,
+	ITerminalService,
+	IExtensionManagementService,
+	IExtensionTransferService,
+	IMCPService,
+	ITaskPlanService,
+	IStorageService,
+	IProjectMemoryService,
+	IRequestService,
+	IWorkbenchThemeService,
+	IPromptsService,
+	IWebSearchService,
+	IMainProcessService,
+	IExecutionObservabilityService,
+	ICustomCommandsService,
+	IKodiaWorkflowsService,
+	IVerificationLedgerService,
+	ISoftwareFactoryService,
+	IDesignIntelligenceService,
+	IAIEngineeringService,
+	IApiStudioService,
+	ICorrectnessService,
+	IEvolutionService,
+	IMobileEngineeringService,
+	ILiveIntelligenceService,
+	IDiagnosticReliabilityService,
+	IFirstPassReliabilityService,
+	IUniversalAppBuilderService,
+	IUniversalAutomationService,
+} as const
 
-		IInstantiationService: accessor.get(IInstantiationService),
-		ICodeEditorService: accessor.get(ICodeEditorService),
-		ICommandService: accessor.get(ICommandService),
-		IContextKeyService: accessor.get(IContextKeyService),
-		INotificationService: accessor.get(INotificationService),
-		IAccessibilityService: accessor.get(IAccessibilityService),
-		ILanguageConfigurationService: accessor.get(ILanguageConfigurationService),
-		ILanguageDetectionService: accessor.get(ILanguageDetectionService),
-		ILanguageFeaturesService: accessor.get(ILanguageFeaturesService),
-		IKeybindingService: accessor.get(IKeybindingService),
-		ISearchService: accessor.get(ISearchService),
+const OPTIONAL_SERVICE_ID_MAP = {
+	IKodiaHooksMainService,
+	IKodiaOpsMainService,
+	IDesignAssetMainService,
+	IKodiaAIEngineMainService,
+	IKodiaApiStudioMainService,
+	IKodiaCorrectnessMainService,
+	IKodiaEvolutionMainService,
+	IKodiaMobileMainService,
+	IKodiaLiveIntelligenceMainService,
+	IKodiaDiagnosticReliabilityMainService,
+	IKodiaFirstPassReliabilityMainService,
+} as const
 
-		IExplorerService: accessor.get(IExplorerService),
-		IEnvironmentService: accessor.get(IEnvironmentService),
-		IConfigurationService: accessor.get(IConfigurationService),
-		IPathService: accessor.get(IPathService),
-		IMetricsService: accessor.get(IMetricsService),
-		ITerminalToolService: accessor.get(ITerminalToolService),
-		ILanguageService: accessor.get(ILanguageService),
-		IVoidModelService: accessor.get(IVoidModelService),
-		IWorkspaceContextService: accessor.get(IWorkspaceContextService),
-
-		IVoidCommandBarService: accessor.get(IVoidCommandBarService),
-		INativeHostService: accessor.get(INativeHostService),
-		IToolsService: accessor.get(IToolsService),
-		IDebuggerActivityService: accessor.get(IDebuggerActivityService),
-		IConvertToLLMMessageService: accessor.get(IConvertToLLMMessageService),
-		ITerminalService: accessor.get(ITerminalService),
-		IExtensionManagementService: accessor.get(IExtensionManagementService),
-		IExtensionTransferService: accessor.get(IExtensionTransferService),
-		IMCPService: accessor.get(IMCPService),
-		ITaskPlanService: accessor.get(ITaskPlanService),
-
-		IStorageService: accessor.get(IStorageService),
-		IProjectMemoryService: accessor.get(IProjectMemoryService),
-		IRequestService: accessor.get(IRequestService),
-		IWorkbenchThemeService: accessor.get(IWorkbenchThemeService),
-		IPromptsService: accessor.get(IPromptsService),
-		IWebSearchService: accessor.get(IWebSearchService),
-		IMainProcessService: accessor.get(IMainProcessService),
-		IExecutionObservabilityService: accessor.get(IExecutionObservabilityService),
-		ICustomCommandsService: accessor.get(ICustomCommandsService),
-		IKodiaWorkflowsService: accessor.get(IKodiaWorkflowsService),
-		IKodiaHooksMainService: (() => { try { return accessor.get(IKodiaHooksMainService) } catch { return undefined } })(),
-		IKodiaOpsMainService: (() => { try { return accessor.get(IKodiaOpsMainService) } catch { return undefined } })(),
-		IVerificationLedgerService: accessor.get(IVerificationLedgerService),
-		ISoftwareFactoryService: accessor.get(ISoftwareFactoryService),
-		IDesignIntelligenceService: accessor.get(IDesignIntelligenceService),
-		IDesignAssetMainService: (() => { try { return accessor.get(IDesignAssetMainService) } catch { return undefined } })(),
-		IAIEngineeringService: accessor.get(IAIEngineeringService),
-		IKodiaAIEngineMainService: (() => { try { return accessor.get(IKodiaAIEngineMainService) } catch { return undefined } })(),
-		IApiStudioService: accessor.get(IApiStudioService),
-		IKodiaApiStudioMainService: (() => { try { return accessor.get(IKodiaApiStudioMainService) } catch { return undefined } })(),
-		ICorrectnessService: accessor.get(ICorrectnessService),
-		IKodiaCorrectnessMainService: (() => { try { return accessor.get(IKodiaCorrectnessMainService) } catch { return undefined } })(),
-		IEvolutionService: accessor.get(IEvolutionService),
-		IKodiaEvolutionMainService: (() => { try { return accessor.get(IKodiaEvolutionMainService) } catch { return undefined } })(),
-		IMobileEngineeringService: accessor.get(IMobileEngineeringService),
-		IKodiaMobileMainService: (() => { try { return accessor.get(IKodiaMobileMainService) } catch { return undefined } })(),
-		ILiveIntelligenceService: accessor.get(ILiveIntelligenceService),
-		IKodiaLiveIntelligenceMainService: (() => { try { return accessor.get(IKodiaLiveIntelligenceMainService) } catch { return undefined } })(),
-		IDiagnosticReliabilityService: accessor.get(IDiagnosticReliabilityService),
-		IKodiaDiagnosticReliabilityMainService: (() => { try { return accessor.get(IKodiaDiagnosticReliabilityMainService) } catch { return undefined } })(),
-		IFirstPassReliabilityService: accessor.get(IFirstPassReliabilityService),
-		IKodiaFirstPassReliabilityMainService: (() => { try { return accessor.get(IKodiaFirstPassReliabilityMainService) } catch { return undefined } })(),
-		IUniversalAppBuilderService: accessor.get(IUniversalAppBuilderService),
-		IUniversalAutomationService: accessor.get(IUniversalAutomationService),
-
-	} as const
-	return reactAccessor
+type ServiceInstanceOf<T> = T extends { _serviceBrand: unknown } ? T : never
+type ReactAccessor = {
+	[K in keyof typeof SERVICE_ID_MAP]: ServiceInstanceOf<typeof SERVICE_ID_MAP[K] extends import('../../../../../../../platform/instantiation/common/instantiation.js').ServiceIdentifier<infer S> ? S : never>
+} & {
+	[K in keyof typeof OPTIONAL_SERVICE_ID_MAP]: (typeof OPTIONAL_SERVICE_ID_MAP[K] extends import('../../../../../../../platform/instantiation/common/instantiation.js').ServiceIdentifier<infer S> ? S : never) | undefined
 }
 
-type ReactAccessor = ReturnType<typeof getReactAccessor>
+let rawAccessor_: ServicesAccessor | null = null
+const resolvedServicesCache: Partial<Record<keyof ReactAccessor, unknown>> = {}
 
-
-let reactAccessor_: ReactAccessor | null = null
 const _registerAccessor = (accessor: ServicesAccessor) => {
-	const reactAccessor = getReactAccessor(accessor)
-	reactAccessor_ = reactAccessor
+	rawAccessor_ = accessor
+}
+
+const lazyAccessorHandle = {
+	get: <S extends keyof ReactAccessor,>(service: S): ReactAccessor[S] => {
+		if (service in resolvedServicesCache) {
+			return resolvedServicesCache[service] as ReactAccessor[S]
+		}
+		if (!rawAccessor_) {
+			throw new Error('Kodia useAccessor was called before _registerServices!')
+		}
+		if (service in SERVICE_ID_MAP) {
+			const id = SERVICE_ID_MAP[service as keyof typeof SERVICE_ID_MAP]
+			const instance = rawAccessor_.get(id as any)
+			resolvedServicesCache[service] = instance
+			return instance as ReactAccessor[S]
+		}
+		const optId = OPTIONAL_SERVICE_ID_MAP[service as keyof typeof OPTIONAL_SERVICE_ID_MAP]
+		let instance: unknown = undefined
+		try {
+			instance = rawAccessor_.get(optId as any)
+		} catch {
+			instance = undefined
+		}
+		resolvedServicesCache[service] = instance
+		return instance as ReactAccessor[S]
+	}
 }
 
 // -- services --
 export const useAccessor = () => {
-	if (!reactAccessor_) {
+	if (!rawAccessor_) {
 		throw new Error('Kodia useAccessor was called before _registerServices!')
 	}
-
-	return { get: <S extends keyof ReactAccessor,>(service: S): ReactAccessor[S] => reactAccessor_![service] }
+	return lazyAccessorHandle
 }
 
 
@@ -371,6 +396,30 @@ export const useFullChatThreadsStreamState = () => {
 		return () => { chatThreadsStreamStateListeners.delete(listener) }
 	}, [ss])
 	return s
+}
+
+const isAnyThreadStreamRunning = (ss: ThreadStreamState | undefined): boolean => {
+	if (!ss) return false
+	for (const tid in ss) {
+		if (ss[tid]?.isRunning) return true
+	}
+	return false
+}
+
+// Lightweight boolean subscription that only triggers a React re-render when running state flips,
+// preventing hundreds of Checkpoint / status components from re-rendering on every streamed token.
+export const useAnyThreadRunning = () => {
+	const [running, setRunning] = useState(() => isAnyThreadStreamRunning(chatThreadsStreamState))
+	useEffect(() => {
+		const sync = () => {
+			const next = isAnyThreadStreamRunning(chatThreadsStreamState)
+			setRunning(prev => (prev === next ? prev : next))
+		}
+		sync()
+		chatThreadsStreamStateListeners.add(sync)
+		return () => { chatThreadsStreamStateListeners.delete(sync) }
+	}, [])
+	return running
 }
 
 

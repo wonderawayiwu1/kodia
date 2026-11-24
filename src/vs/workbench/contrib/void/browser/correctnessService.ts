@@ -225,4 +225,4 @@ export class CorrectnessService extends Disposable implements ICorrectnessServic
 	clearLiveEvents(): void { this._seenIds.clear(); this._update({ liveEvents: [] }); }
 }
 
-registerSingleton(ICorrectnessService, CorrectnessService, InstantiationType.Eager);
+registerSingleton(ICorrectnessService, CorrectnessService, InstantiationType.Delayed);

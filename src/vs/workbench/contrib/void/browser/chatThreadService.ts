@@ -45,7 +45,7 @@ import { IEditCodeService } from './editCodeServiceInterface.js';
 import { VoidFileSnapshot } from '../common/editCodeServiceTypes.js';
 import { INotificationService, Severity } from '../../../../platform/notification/common/notification.js';
 import { truncate } from '../../../../base/common/strings.js';
-import { THREAD_STORAGE_KEY } from '../common/storageKeys.js';
+import { LAST_ACTIVE_THREAD_STORAGE_KEY, THREAD_STORAGE_KEY } from '../common/storageKeys.js';
 import { IConvertToLLMMessageService } from './convertToLLMMessageService.js';
 import { timeout } from '../../../../base/common/async.js';
 import { deepClone } from '../../../../base/common/objects.js';
@@ -81,9 +81,11 @@ const MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN = 2
 // Recovery snapshots are kept in the thread: bounded per file and per change (a bigger file cannot be rewound).
 const MAX_SNAPSHOT_FILE_BYTES = 2 * 1024 * 1024
 const MAX_SNAPSHOT_FILES_PER_CHANGE = 500
-const MAX_SNAPSHOT_CHARS_PER_THREAD = 20_000_000 // ~20 MB of file contents kept for rewinding, per conversation
+const MAX_SNAPSHOT_CHARS_PER_THREAD = 4_000_000 // ~4 MB of file contents kept for rewinding, per conversation (keeps JSON persistence fast)
 // conversations are written to disk this soon after a change (and at once after a file change or a tool start)
 const THREADS_FLUSH_DELAY_MS = 1_000
+const THREADS_STORE_DEBOUNCE_MS = 400
+const STREAM_UI_THROTTLE_MS = 60
 
 // Stuck detection disabled - agent runs until work is complete.
 const MAX_STUCK_STEPS = 999999
@@ -526,8 +528,33 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			}
 		}
 
-		// always be in a thread
-		this.openNewThread()
+		// Resume the last active session for this workspace if it still exists;
+		// otherwise resume the most recently active non-subagent thread with messages,
+		// and only open a brand-new empty thread when no prior conversation exists.
+		const savedLastThreadId = this._storageService.get(LAST_ACTIVE_THREAD_STORAGE_KEY, StorageScope.WORKSPACE)
+		const savedThread = savedLastThreadId ? allThreads[savedLastThreadId] : undefined
+		if (savedThread && !savedThread.subagentOf) {
+			this.switchToThread(savedThread.id)
+		} else {
+			let mostRecentThread: ThreadType | undefined
+			for (const threadId in allThreads) {
+				const t = allThreads[threadId]
+				if (!t || t.subagentOf || t.messages.length === 0) continue
+				if (!mostRecentThread || (t.lastModified ?? '') > (mostRecentThread.lastModified ?? '')) {
+					mostRecentThread = t
+				}
+			}
+			if (mostRecentThread) {
+				this.switchToThread(mostRecentThread.id)
+			} else {
+				this.openNewThread()
+			}
+		}
+
+		// Shrink any legacy threads that previously accumulated up to 20 MB of file snapshots
+		for (const threadId in this.state.allThreads) {
+			this._pruneOldSnapshots(threadId)
+		}
 
 
 
@@ -650,15 +677,53 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		return threads
 	}
 
-	private _storeAllThreads(threads: ChatThreads) {
-		const serializedThreads = JSON.stringify(threads);
+	private _pendingThreadsToStore: ChatThreads | undefined
+	private _storeDebounceTimer: ReturnType<typeof setTimeout> | undefined
+
+	private _serializeThreadsForStorage(threads: ChatThreads): string {
+		// Strip non-persistent runtime fields (mountedInfo, ephemeral codespan link cache) to keep serialization lean & fast
+		const lean: Record<string, unknown> = {}
+		for (const id in threads) {
+			const t = threads[id]
+			if (!t) continue
+			lean[id] = {
+				...t,
+				state: {
+					currCheckpointIdx: t.state?.currCheckpointIdx ?? null,
+					stagingSelections: t.state?.stagingSelections ?? [],
+					focusedMessageIdx: t.state?.focusedMessageIdx,
+					linksOfMessageIdx: {},
+				},
+			}
+		}
+		return JSON.stringify(lean)
+	}
+
+	private _flushPendingStore() {
+		if (this._storeDebounceTimer) {
+			clearTimeout(this._storeDebounceTimer)
+			this._storeDebounceTimer = undefined
+		}
+		if (!this._pendingThreadsToStore) return
+		const toStore = this._pendingThreadsToStore
+		this._pendingThreadsToStore = undefined
+		const serializedThreads = this._serializeThreadsForStorage(toStore)
 		this._storageService.store(
 			THREAD_STORAGE_KEY,
 			serializedThreads,
 			StorageScope.APPLICATION,
 			StorageTarget.USER
-		);
-		this._scheduleThreadsFlush()
+		)
+	}
+
+	private _storeAllThreads(threads: ChatThreads) {
+		this._pendingThreadsToStore = threads
+		if (!this._storeDebounceTimer) {
+			this._storeDebounceTimer = setTimeout(() => {
+				this._flushPendingStore()
+				this._scheduleThreadsFlush()
+			}, THREADS_STORE_DEBOUNCE_MS)
+		}
 	}
 
 	// Session recovery: the storage service writes to disk only about once a minute, but an agent changes files on
@@ -670,10 +735,12 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		this._flushTimer = setTimeout(() => { this._flushTimer = undefined; void this._flushThreads() }, THREADS_FLUSH_DELAY_MS)
 	}
 	private async _flushThreads() {
+		this._flushPendingStore()
 		if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = undefined }
 		try { await this._storageService.flush() } catch { /* the next flush retries */ }
 	}
 	override dispose() {
+		this._flushPendingStore()
 		if (this._flushTimer) { clearTimeout(this._flushTimer); this._flushTimer = undefined }
 		super.dispose()
 	}
@@ -1890,6 +1957,22 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 					detail: `step ${nMessagesSent}`,
 					modelName: activeModelSelection?.modelName,
 				})
+				let streamThrottleTimer: ReturnType<typeof setTimeout> | undefined
+				let lastStreamEmitAt = 0
+				let latestStreamPayload: { fullText: string; fullReasoning: string; toolCall?: RawToolCallObj } | undefined
+				const flushStreamUI = () => {
+					if (streamThrottleTimer) { clearTimeout(streamThrottleTimer); streamThrottleTimer = undefined }
+					if (!latestStreamPayload) return
+					const { fullText, fullReasoning, toolCall } = latestStreamPayload
+					latestStreamPayload = undefined
+					lastStreamEmitAt = Date.now()
+					this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
+				}
+				const clearStreamThrottle = () => {
+					if (streamThrottleTimer) { clearTimeout(streamThrottleTimer); streamThrottleTimer = undefined }
+					latestStreamPayload = undefined
+				}
+
 				llmCancelToken = this._llmMessageService.sendLLMMessage({
 					messagesType: 'chatMessages',
 					chatMode,
@@ -1904,9 +1987,16 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 					separateSystemMessage: separateSystemMessage,
 					onText: ({ fullText, fullReasoning, toolCall }) => {
 						armInactivityTimer() // the stream is alive
-						this._setStreamState(threadId, { isRunning: 'LLM', llmInfo: { displayContentSoFar: fullText, reasoningSoFar: fullReasoning, toolCallSoFar: toolCall ?? null }, interrupt: Promise.resolve(() => { if (llmCancelToken) this._llmMessageService.abort(llmCancelToken) }) })
+						latestStreamPayload = { fullText, fullReasoning, toolCall }
+						const elapsed = Date.now() - lastStreamEmitAt
+						if (elapsed >= STREAM_UI_THROTTLE_MS) {
+							flushStreamUI()
+						} else if (!streamThrottleTimer) {
+							streamThrottleTimer = setTimeout(flushStreamUI, STREAM_UI_THROTTLE_MS - elapsed)
+						}
 					},
 					onFinalMessage: async ({ fullText, fullReasoning, toolCalls, anthropicReasoning, usage, finishReason }) => {
+						clearStreamThrottle()
 						if (usage && activeModelSelection) this._convertToLLMMessagesService.recordInputTokens(activeModelSelection, estimatedInputTokens, usage.input + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0))
 						if (llmSpanId) {
 							this._observabilityService?.endSpan(llmSpanId, {
@@ -1919,10 +2009,12 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 						resMessageIsDonePromise({ type: 'llmDone', toolCalls, info: { fullText, fullReasoning, anthropicReasoning, usage, finishReason } }) // resolve with tool calls
 					},
 					onError: async (error) => {
+						flushStreamUI()
 						if (llmSpanId) { this._observabilityService?.endSpan(llmSpanId, { status: 'failed', errorMessage: error?.message }) }
 						resMessageIsDonePromise({ type: 'llmError', error: error })
 					},
 					onAbort: () => {
+						clearStreamThrottle()
 						if (llmSpanId) { this._observabilityService?.endSpan(llmSpanId, { status: 'cancelled' }) }
 						// stop the loop to free up the promise, but don't modify state (already handled by whatever stopped it)
 						resMessageIsDonePromise({ type: 'llmAborted' })
@@ -2975,8 +3067,8 @@ We only need to do it for files that were edited since `from`, ie files between 
 		if (codespanType === 'function-or-class') {
 
 
-			// check all prevUris for the target
-			for (const uri of prevUris) {
+			// Cap recent file scans to avoid loading dozens of Monaco models + LSP definitions simultaneously on long threads
+			for (const uri of prevUris.slice(0, 6)) {
 
 				const modelRef = await this._voidModelService.getModelSafe(uri)
 				const { model } = modelRef
@@ -3047,27 +3139,16 @@ We only need to do it for files that were edited since `from`, ie files between 
 	async addCodespanLink({ newLinkText, newLinkLocation, messageIdx, threadId }: { newLinkText: string, newLinkLocation: CodespanLocationLink, messageIdx: number, threadId: string }) {
 		const thread = this.state.allThreads[threadId]
 		if (!thread) return
-
-		this._setState({
-
-			allThreads: {
-				...this.state.allThreads,
-				[threadId]: {
-					...thread,
-					state: {
-						...thread.state,
-						linksOfMessageIdx: {
-							...thread.state.linksOfMessageIdx,
-							[messageIdx]: {
-								...thread.state.linksOfMessageIdx?.[messageIdx],
-								[newLinkText]: newLinkLocation
-							}
-						}
-					}
-
-				}
-			}
-		})
+		// Cache link in-place WITHOUT calling _setState(): firing _onDidChangeCurrentThread on every
+		// codespan caused hundreds of cascading full-sidebar re-renders when opening long threads.
+		// The individual CodespanWithLink component updates its own local state once resolved.
+		if (!thread.state.linksOfMessageIdx) {
+			thread.state.linksOfMessageIdx = {}
+		}
+		if (!thread.state.linksOfMessageIdx[messageIdx]) {
+			thread.state.linksOfMessageIdx[messageIdx] = {}
+		}
+		thread.state.linksOfMessageIdx[messageIdx][newLinkText] = newLinkLocation
 	}
 
 
@@ -3097,8 +3178,18 @@ We only need to do it for files that were edited since `from`, ie files between 
 		return this.getCurrentFocusedMessageIdx() !== undefined
 	}
 
+	private _persistLastActiveThread(threadId: string) {
+		const t = this.state.allThreads[threadId]
+		if (t && !t.subagentOf) {
+			try {
+				this._storageService.store(LAST_ACTIVE_THREAD_STORAGE_KEY, threadId, StorageScope.WORKSPACE, StorageTarget.MACHINE)
+			} catch { /* ignore */ }
+		}
+	}
+
 	switchToThread(threadId: string) {
 		this._setState({ currentThreadId: threadId })
+		this._persistLastActiveThread(threadId)
 	}
 
 
@@ -3122,6 +3213,7 @@ We only need to do it for files that were edited since `from`, ie files between 
 		}
 		this._storeAllThreads(newThreads)
 		this._setState({ allThreads: newThreads, currentThreadId: newThread.id })
+		this._persistLastActiveThread(newThread.id)
 	}
 
 
