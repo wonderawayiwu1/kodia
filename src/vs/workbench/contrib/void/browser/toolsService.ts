@@ -57,7 +57,17 @@ import { INotebookEditorModelResolverService } from '../../notebook/common/noteb
 import { CellKind } from '../../notebook/common/notebookCommon.js'
 import { IEditorService } from '../../../services/editor/common/editorService.js'
 import { IKodiaNotebookKernelMainService, KODIA_NOTEBOOK_KERNEL_CHANNEL } from '../common/kodiaNotebookKernelTypes.js'
-import { applyNotebookEditOperations, buildNbformatDocument, NbformatDocument, parseNotebookArrayParam } from '../common/notebookToolUtils.js'
+import {
+	applyNotebookEditOperations,
+	buildNbformatDocument,
+	compactBase64BlobsPreservingLines,
+	createNotebookEditHistoryState,
+	NbformatDocument,
+	NotebookEditHistoryState,
+	parseNotebookArrayParam,
+	searchNotebookDocument,
+	validateNotebookDocument,
+} from '../common/notebookToolUtils.js'
 import { IContextKeyService } from '../../../../platform/contextkey/common/contextkey.js'
 import { VSBuffer } from '../../../../base/common/buffer.js'
 import type { GitStepResult } from '../common/gitOperations.js'
@@ -487,6 +497,16 @@ export class ToolsService implements IToolsService {
 		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
+		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
+		const getNotebookEditHistory = (uri: URI): NotebookEditHistoryState => {
+			const key = uri.toString().toLowerCase()
+			let state = notebookEditHistoryByUri.get(key)
+			if (!state) {
+				state = createNotebookEditHistoryState()
+				notebookEditHistoryByUri.set(key, state)
+			}
+			return state
+		}
 		const openNotebookInEditor = async (uri: URI): Promise<boolean> => {
 			try {
 				const editorService = instantiationService.invokeFunction(a => a.get(IEditorService))
@@ -1341,30 +1361,44 @@ export class ToolsService implements IToolsService {
 
 			// Task plan management (Stage 5A Day 2)
 			create_task_plan: (params: RawToolParamsObj) => {
-				const { title: titleUnknown, description: descriptionUnknown } = params
-				const title = validateStr('title', titleUnknown)
-				const description = validateStr('description', descriptionUnknown)
-				let tasksUnknown: unknown = params.tasks
+				const rawTitle = params.title ?? (params as any).name ?? (params as any).plan_title ?? (params as any).goal
+				const title = typeof rawTitle === 'string' && rawTitle.trim()
+					? rawTitle.trim()
+					: (typeof params.description === 'string' && params.description.trim() ? params.description.trim().slice(0, 80) : 'Task Plan')
+				const rawDesc = params.description ?? (params as any).summary ?? title
+				const description = typeof rawDesc === 'string' && rawDesc.trim() ? rawDesc.trim() : title
+				let tasksUnknown: unknown = params.tasks ?? (params as any).steps
 				if (typeof tasksUnknown === 'string') {
 					try { tasksUnknown = JSON.parse(tasksUnknown) } catch { /* leave as string */ }
 				}
 				let tasks: { title: string, description: string, dependencies: string[], priority?: 'high' | 'medium' | 'low', assignedAgent?: string, acceptanceCriteria?: string[] }[] = []
 				if (Array.isArray(tasksUnknown)) {
-					tasks = tasksUnknown.map((t: any) => ({
-						title: validateStr('title', t.title),
-						description: validateStr('description', t.description ?? t.title),
-						dependencies: Array.isArray(t.dependencies) ? t.dependencies.map((d: any) => String(d)) : [],
-						...(t.priority === 'high' || t.priority === 'medium' || t.priority === 'low' ? { priority: t.priority } : {}),
-						...(typeof t.assignedAgent === 'string' && t.assignedAgent.trim() ? { assignedAgent: t.assignedAgent.trim() } : typeof t.assigned_agent === 'string' && t.assigned_agent.trim() ? { assignedAgent: t.assigned_agent.trim() } : {}),
-						...(Array.isArray(t.acceptanceCriteria) ? { acceptanceCriteria: t.acceptanceCriteria.map((c: any) => String(c)) } : Array.isArray(t.acceptance_criteria) ? { acceptanceCriteria: t.acceptance_criteria.map((c: any) => String(c)) } : {}),
-					}))
+					tasks = tasksUnknown.map((t: any, idx: number) => {
+						if (typeof t === 'string') {
+							return { title: t.trim() || `Task ${idx + 1}`, description: t.trim() || `Task ${idx + 1}`, dependencies: [] }
+						}
+						const itemTitle = String(t?.title ?? t?.name ?? t?.content ?? t?.description ?? `Task ${idx + 1}`).trim()
+						const itemDesc = String(t?.description ?? t?.details ?? itemTitle).trim()
+						return {
+							title: itemTitle,
+							description: itemDesc,
+							dependencies: Array.isArray(t?.dependencies) ? t.dependencies.map((d: any) => String(d)) : [],
+							...(t?.priority === 'high' || t?.priority === 'medium' || t?.priority === 'low' ? { priority: t.priority } : {}),
+							...(typeof t?.assignedAgent === 'string' && t.assignedAgent.trim() ? { assignedAgent: t.assignedAgent.trim() } : typeof t?.assigned_agent === 'string' && t.assigned_agent.trim() ? { assignedAgent: t.assigned_agent.trim() } : {}),
+							...(Array.isArray(t?.acceptanceCriteria) ? { acceptanceCriteria: t.acceptanceCriteria.map((c: any) => String(c)) } : Array.isArray(t?.acceptance_criteria) ? { acceptanceCriteria: t.acceptance_criteria.map((c: any) => String(c)) } : {}),
+						}
+					})
 				}
 				return { title, description, tasks }
 			},
 			update_task_plan: (params: RawToolParamsObj) => {
-				const { task_id: taskIdUnknown, status: statusUnknown } = params
-				const taskId = validateProposedTerminalId(taskIdUnknown)
-				const status = validateStr('status', statusUnknown) as TaskStatus
+				const rawTaskId = params.task_id ?? (params as any).taskId ?? (params as any).id ?? (params as any).step_id
+				if (rawTaskId === undefined || rawTaskId === null || String(rawTaskId).trim() === '') {
+					throw new Error(`Invalid LLM output: task_id must be specified (got "${String(rawTaskId)}").`)
+				}
+				const taskId = String(rawTaskId).trim()
+				const rawStatus = params.status ?? 'completed'
+				const status = validateStr('status', rawStatus) as TaskStatus
 				const result = validateOptionalStr('result', params.result)
 				const error = validateOptionalStr('error', params.error)
 				return { taskId, status, result, error }
@@ -2478,7 +2512,7 @@ export class ToolsService implements IToolsService {
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, start_cell: startCellUnknown, end_cell: endCellUnknown } = params
+				const { uri: uriUnknown, start_cell: startCellUnknown, end_cell: endCellUnknown, cell_index: cellIndexUnknown, summary_only: summaryOnlyUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
 				let start_cell: number | undefined
 				if (startCellUnknown !== undefined && startCellUnknown !== null) {
@@ -2490,7 +2524,14 @@ export class ToolsService implements IToolsService {
 					const validated = validateNumber(endCellUnknown, { default: null })
 					if (validated !== null) end_cell = validated as number
 				}
-				return { uri, start_cell, end_cell }
+				let cell_index: number | undefined
+				const rawCellIdx = cellIndexUnknown ?? (params as any).index
+				if (rawCellIdx !== undefined && rawCellIdx !== null) {
+					const validated = validateNumber(rawCellIdx, { default: null })
+					if (validated !== null) cell_index = validated as number
+				}
+				const summary_only = summaryOnlyUnknown !== undefined ? validateBoolean(summaryOnlyUnknown, { default: false }) : false
+				return { uri, start_cell, end_cell, cell_index, summary_only }
 			},
 			write_notebook: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, cells: cellsUnknown, open_in_editor: openUnknown, execute: executeUnknown, kernel_id: kernelIdUnknown } = params
@@ -2511,13 +2552,14 @@ export class ToolsService implements IToolsService {
 			execute_notebook_cell: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, cell_index: cellIndexUnknown, kernel_id: kernelIdUnknown, open_in_editor: openUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
-				const cell_index = validateNumber(cellIndexUnknown, { default: 0 }) as number
+				const rawIdx = cellIndexUnknown ?? (params as any).index
+				const cell_index = validateNumber(rawIdx, { default: 0 }) as number
 				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
 				const open_in_editor = openUnknown !== undefined ? validateBoolean(openUnknown, { default: true }) : true
 				return { uri, cell_index, kernel_id, open_in_editor }
 			},
 			execute_notebook: (params: RawToolParamsObj) => {
-				const { uri: uriUnknown, kernel_id: kernelIdUnknown, cell_indices: cellIndicesUnknown, restart_kernel: restartUnknown, open_in_editor: openUnknown } = params
+				const { uri: uriUnknown, kernel_id: kernelIdUnknown, cell_indices: cellIndicesUnknown, start_cell: startCellUnknown, end_cell: endCellUnknown, restart_kernel: restartUnknown, open_in_editor: openUnknown } = params
 				const uri = validateURI(uriUnknown, workspaceContextService)
 				const kernel_id = validateOptionalStr('kernel_id', kernelIdUnknown) ?? undefined
 				const restart_kernel = restartUnknown !== undefined ? validateBoolean(restartUnknown, { default: false }) : false
@@ -2527,7 +2569,37 @@ export class ToolsService implements IToolsService {
 					const parsed = parseNotebookArrayParam('cell_indices', cellIndicesUnknown)
 					cell_indices = parsed.map(Number).filter(n => Number.isInteger(n))
 				}
-				return { uri, kernel_id, cell_indices, restart_kernel, open_in_editor }
+				const start_cell = startCellUnknown !== undefined && startCellUnknown !== null ? (validateNumber(startCellUnknown, { default: null }) ?? undefined) : undefined
+				const end_cell = endCellUnknown !== undefined && endCellUnknown !== null ? (validateNumber(endCellUnknown, { default: null }) ?? undefined) : undefined
+				return { uri, kernel_id, cell_indices, start_cell, end_cell, restart_kernel, open_in_editor }
+			},
+			restart_notebook_kernel: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				const run_all = params.run_all !== undefined ? validateBoolean(params.run_all, { default: false }) : false
+				const kernel_id = validateOptionalStr('kernel_id', params.kernel_id) ?? undefined
+				return { uri, run_all, kernel_id }
+			},
+			interrupt_notebook_kernel: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				return { uri }
+			},
+			search_notebook: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				const query = validateStr('query', params.query)
+				const is_regex = params.is_regex !== undefined ? validateBoolean(params.is_regex, { default: false }) : false
+				const case_sensitive = params.case_sensitive !== undefined ? validateBoolean(params.case_sensitive, { default: false }) : false
+				const rawCellType = validateOptionalStr('cell_type', params.cell_type)?.toLowerCase()
+				const cell_type: 'all' | 'code' | 'markdown' = rawCellType === 'code' || rawCellType === 'markdown' ? rawCellType : 'all'
+				const include_outputs = params.include_outputs !== undefined ? validateBoolean(params.include_outputs, { default: true }) : true
+				const from_cell_index = params.from_cell_index !== undefined && params.from_cell_index !== null ? (validateNumber(params.from_cell_index, { default: null }) ?? undefined) : undefined
+				const rawDir = validateOptionalStr('direction', params.direction)?.toLowerCase()
+				const direction: 'forward' | 'backward' = rawDir === 'backward' ? 'backward' : 'forward'
+				const select_match_index = params.select_match_index !== undefined && params.select_match_index !== null ? (validateNumber(params.select_match_index, { default: null }) ?? undefined) : undefined
+				return { uri, query, is_regex, case_sensitive, cell_type, include_outputs, from_cell_index, direction, select_match_index }
+			},
+			validate_notebook: (params: RawToolParamsObj) => {
+				const uri = validateURI(params.uri, workspaceContextService)
+				return { uri }
 			},
 			select_notebook_kernel: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, kernel_id: kernelIdUnknown } = params
@@ -2562,11 +2634,18 @@ export class ToolsService implements IToolsService {
 
 				const totalNumLines = model.getLineCount()
 
-				const fromIdx = MAX_FILE_CHARS_PAGE * (pageNumber - 1)
-				const toIdx = MAX_FILE_CHARS_PAGE * pageNumber - 1
-				const fileContents = contents.slice(fromIdx, toIdx + 1) // paginate
-				const hasNextPage = (contents.length - 1) - toIdx >= 1
-				const totalFileLen = contents.length
+				// Compact giant inline base64 blobs (e.g. PNG charts inside .ipynb files) while preserving
+				// exact line breaks and line numbering so read_file never truncates a 204-line notebook at line 17.
+				const displayContents = (uri.path.toLowerCase().endsWith('.ipynb') || contents.includes(';base64,') || contents.includes('"image/png"'))
+					? compactBase64BlobsPreservingLines(contents)
+					: contents
+
+				const isFinitePage = Number.isFinite(MAX_FILE_CHARS_PAGE)
+				const fromIdx = isFinitePage ? MAX_FILE_CHARS_PAGE * (pageNumber - 1) : 0
+				const toIdx = isFinitePage ? MAX_FILE_CHARS_PAGE * pageNumber - 1 : displayContents.length - 1
+				const fileContents = displayContents.slice(fromIdx, toIdx + 1) // paginate
+				const hasNextPage = isFinitePage && (displayContents.length - 1) - toIdx >= 1
+				const totalFileLen = displayContents.length
 				return { result: { fileContents, totalFileLen, hasNextPage, totalNumLines } }
 			},
 
@@ -5219,15 +5298,30 @@ export class ToolsService implements IToolsService {
 			},
 
 			// Notebook operations
-			read_notebook: async ({ uri, start_cell, end_cell }) => {
+			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
+				const compactOutputForRead = (out: any) => {
+					if (!out || typeof out !== 'object') return out
+					if (out.data && typeof out.data === 'object') {
+						const cleanData: Record<string, unknown> = {}
+						for (const [mime, val] of Object.entries(out.data)) {
+							if (mime.startsWith('image/') && typeof val === 'string') {
+								cleanData[mime] = `<${mime} base64 ${val.length} chars>`
+							} else if (mime.startsWith('image/') && Array.isArray(val)) {
+								cleanData[mime] = `<${mime} base64 ${val.join('').length} chars>`
+							} else {
+								cleanData[mime] = val
+							}
+						}
+						return { ...out, data: cleanData }
+					}
+					return out
+				}
 				const openModel = this.notebookService.getNotebookTextModel(uri)
 				if (openModel) {
-					const start = start_cell ?? 0
-					const end = end_cell !== undefined ? end_cell : openModel.cells.length
-					const outputCells = openModel.cells.slice(start, end).map((cell: any, offset: number) => {
+					const allCells = openModel.cells.map((cell: any, idx: number) => {
 						const { formattedOutputs } = formatNotebookCellOutputs(cell.outputs || [])
 						return {
-							index: start + offset,
+							index: idx,
 							cell_type: cell.cellKind === CellKind.Markup ? 'markdown' : 'code',
 							source: cell.getValue(),
 							outputs: formattedOutputs,
@@ -5235,7 +5329,18 @@ export class ToolsService implements IToolsService {
 							metadata: cell.metadata || {},
 						}
 					})
-					return { result: { cells: outputCells as any } }
+					const total_cells = allCells.length
+					const ks = (openModel.metadata as any)?.kernelspec
+					const kernelspec = ks ? String(ks.display_name ?? ks.name ?? '') || null : null
+					if (cell_index !== undefined) {
+						if (cell_index < 0 || cell_index >= total_cells) {
+							throw new Error(`cell_index ${cell_index} is out of range (valid: 0..${Math.max(0, total_cells - 1)}; notebook has ${total_cells} cells).`)
+						}
+						return { result: { cells: [allCells[cell_index]] as any, summary_only, total_cells, kernelspec, nbformat: '4.5' } }
+					}
+					const start = start_cell ?? 0
+					const end = end_cell !== undefined ? end_cell : total_cells
+					return { result: { cells: allCells.slice(start, end) as any, summary_only, total_cells, kernelspec, nbformat: '4.5' } }
 				}
 				const fileContent = await fileService.readFile(uri)
 				let notebook: any
@@ -5247,18 +5352,44 @@ export class ToolsService implements IToolsService {
 				if (!notebook.cells || !Array.isArray(notebook.cells)) {
 					throw new Error(`Notebook has no cells.`)
 				}
+				const total_cells = notebook.cells.length
+				const ks = notebook.metadata?.kernelspec
+				const kernelspec = ks ? String(ks.display_name ?? ks.name ?? '') || null : null
+				const nbformat = notebook.nbformat !== undefined ? `${notebook.nbformat}.${notebook.nbformat_minor ?? 0}` : '4.5'
+				if (cell_index !== undefined) {
+					if (cell_index < 0 || cell_index >= total_cells) {
+						throw new Error(`cell_index ${cell_index} is out of range (valid: 0..${Math.max(0, total_cells - 1)}; notebook has ${total_cells} cells).`)
+					}
+					const cell = notebook.cells[cell_index]
+					return {
+						result: {
+							cells: [{
+								index: cell_index,
+								cell_type: cell.cell_type,
+								source: Array.isArray(cell.source) ? cell.source.join('') : cell.source,
+								outputs: (cell.outputs || []).map(compactOutputForRead),
+								execution_count: cell.execution_count ?? null,
+								metadata: cell.metadata || {},
+							}] as any,
+							summary_only,
+							total_cells,
+							kernelspec,
+							nbformat,
+						}
+					}
+				}
 				const start = start_cell ?? 0
-				const end = end_cell !== undefined ? end_cell : notebook.cells.length
+				const end = end_cell !== undefined ? end_cell : total_cells
 				const sliced = notebook.cells.slice(start, end)
 				const outputCells = sliced.map((cell: any, offset: number) => ({
 					index: start + offset,
 					cell_type: cell.cell_type,
 					source: Array.isArray(cell.source) ? cell.source.join('') : cell.source,
-					outputs: cell.outputs || [],
+					outputs: (cell.outputs || []).map(compactOutputForRead),
 					execution_count: cell.execution_count ?? null,
 					metadata: cell.metadata || {},
 				}))
-				return { result: { cells: outputCells } }
+				return { result: { cells: outputCells, summary_only, total_cells, kernelspec, nbformat } }
 			},
 			write_notebook: async ({ uri, cells, open_in_editor, execute, kernel_id }) => {
 				let pythonVersion = '3.11.0'
@@ -5324,7 +5455,11 @@ export class ToolsService implements IToolsService {
 				} catch (e) {
 					throw new Error(`Notebook is not valid JSON.`)
 				}
-				const summary = applyNotebookEditOperations(notebook, operations)
+				const history = getNotebookEditHistory(uri)
+				const summary = applyNotebookEditOperations(notebook, operations, history)
+				if (summary.applied === 0 && summary.failed.length > 0) {
+					throw new Error(`edit_notebook failed (${summary.failed.map(f => `[op ${f.op_index} ${f.type}] ${f.error}`).join('; ')})`)
+				}
 				await fileService.writeFile(uri, VSBuffer.fromString(JSON.stringify(notebook, null, 2)))
 				await syncOpenNotebookFromDisk(uri)
 				const opened = open_in_editor !== false ? await openNotebookInEditor(uri) : false
@@ -5334,6 +5469,8 @@ export class ToolsService implements IToolsService {
 						applied: summary.applied,
 						cell_count: summary.cellCount,
 						opened,
+						cells_summary: summary.cellsSummary,
+						...(summary.failed.length > 0 ? { failed: summary.failed } : {}),
 						...(summary.warnings.length > 0 ? { warnings: summary.warnings } : {}),
 					}
 				}
@@ -5352,7 +5489,7 @@ export class ToolsService implements IToolsService {
 						throw new Error(`Notebook model could not be opened for ${uri.fsPath}. Ensure the file is a valid .ipynb notebook.`)
 					}
 					if (cell_index < 0 || cell_index >= notebookModel.cells.length) {
-						throw new Error(`Invalid cell index: ${cell_index} (notebook has ${notebookModel.cells.length} cells)`)
+						throw new Error(`cell_index ${cell_index} is out of range (valid: 0..${Math.max(0, notebookModel.cells.length - 1)}; notebook has ${notebookModel.cells.length} cells).`)
 					}
 					const cellModel = notebookModel.cells[cell_index]
 					if (!cellModel) throw new Error(`Cell ${cell_index} not found`)
@@ -5364,6 +5501,7 @@ export class ToolsService implements IToolsService {
 
 					const updatedCell = notebookModel.cells[cell_index]
 					const { formattedOutputs, cellError } = formatNotebookCellOutputs(updatedCell?.outputs || [])
+					const execution_count = updatedCell?.internalMetadata?.executionOrder ?? null
 
 					// Persist outputs and execution count to disk immediately
 					try {
@@ -5378,6 +5516,7 @@ export class ToolsService implements IToolsService {
 							cell_index,
 							outputs: formattedOutputs,
 							execution_time: executionTime,
+							execution_count,
 							success: !cellError,
 							...(cellError ? { error: cellError } : {}),
 						}
@@ -5388,7 +5527,7 @@ export class ToolsService implements IToolsService {
 					resolvedRef?.dispose()
 				}
 			},
-			execute_notebook: async ({ uri, kernel_id, cell_indices, restart_kernel, open_in_editor }) => {
+			execute_notebook: async ({ uri, kernel_id, cell_indices, start_cell, end_cell, restart_kernel, open_in_editor }) => {
 				let resolvedRef: { object: { notebook: any; save(): Promise<boolean> }; dispose(): void } | undefined
 				let restarted = false
 				let saved = false
@@ -5410,9 +5549,19 @@ export class ToolsService implements IToolsService {
 					ensureNotebookKernel(notebookModel, kernel_id)
 					const contextKeyService = instantiationService.invokeFunction(a => a.get(IContextKeyService))
 
-					const codeCellIndices: number[] = cell_indices ?? notebookModel.cells
-						.map((cell: any, idx: number) => cell.cellKind === CellKind.Code ? idx : -1)
-						.filter((idx: number) => idx >= 0)
+					let codeCellIndices: number[]
+					if (cell_indices && cell_indices.length > 0) {
+						codeCellIndices = cell_indices
+					} else {
+						const rangeStart = start_cell !== undefined ? Math.max(0, start_cell) : 0
+						const rangeEnd = end_cell !== undefined ? Math.min(notebookModel.cells.length, end_cell) : notebookModel.cells.length
+						codeCellIndices = []
+						for (let i = rangeStart; i < rangeEnd; i++) {
+							if (notebookModel.cells[i]?.cellKind === CellKind.Code) {
+								codeCellIndices.push(i)
+							}
+						}
+					}
 
 					const results = []
 					for (const idx of codeCellIndices) {
@@ -5424,7 +5573,7 @@ export class ToolsService implements IToolsService {
 								outputs: [],
 								execution_time: 0,
 								success: false,
-								error: `Invalid cell index: ${idx}`,
+								error: `cell_index ${idx} is out of range (valid: 0..${Math.max(0, notebookModel.cells.length - 1)}; notebook has ${notebookModel.cells.length} cells).`,
 							})
 							continue
 						}
@@ -5461,6 +5610,119 @@ export class ToolsService implements IToolsService {
 				} finally {
 					resolvedRef?.dispose()
 				}
+			},
+			restart_notebook_kernel: async ({ uri, run_all, kernel_id }) => {
+				await notebookKernelMainService.restartKernel(uri.toString())
+				if (run_all) {
+					const execCall = await this.callTool.execute_notebook({
+						uri,
+						kernel_id,
+						restart_kernel: false,
+						open_in_editor: true,
+					})
+					const execData = await execCall.result
+					return { result: { restarted: true, execution_results: execData.results, saved: execData.saved } }
+				}
+				return { result: { restarted: true } }
+			},
+			interrupt_notebook_kernel: async ({ uri }) => {
+				await notebookKernelMainService.interruptKernel(uri.toString())
+				return { result: { interrupted: true } }
+			},
+			search_notebook: async ({ uri, query, is_regex, case_sensitive, cell_type, include_outputs, from_cell_index, direction, select_match_index }) => {
+				const openModel = this.notebookService.getNotebookTextModel(uri)
+				let notebookDoc: NbformatDocument
+				if (openModel) {
+					notebookDoc = {
+						nbformat: 4,
+						nbformat_minor: 5,
+						metadata: openModel.metadata || {},
+						cells: openModel.cells.map((cell: any) => {
+							const { formattedOutputs } = formatNotebookCellOutputs(cell.outputs || [])
+							return {
+								cell_type: cell.cellKind === CellKind.Markup ? 'markdown' : 'code',
+								metadata: cell.metadata || {},
+								source: cell.getValue().split('\n'),
+								...(cell.cellKind === CellKind.Code ? { outputs: formattedOutputs, execution_count: cell.internalMetadata?.executionOrder ?? null } : {}),
+							}
+						}),
+					}
+				} else {
+					const fileContent = await fileService.readFile(uri)
+					notebookDoc = JSON.parse(fileContent.value.toString()) as NbformatDocument
+				}
+				const searchRes = searchNotebookDocument(notebookDoc, {
+					query,
+					isRegex: is_regex,
+					caseSensitive: case_sensitive,
+					cellType: cell_type,
+					includeOutputs: include_outputs,
+					fromCellIndex: from_cell_index,
+					direction,
+				})
+				let selected_cell_index: number | undefined
+				if (select_match_index !== undefined && searchRes.matches[select_match_index]) {
+					selected_cell_index = searchRes.matches[select_match_index].cell_index
+					try {
+						const editorService = instantiationService.invokeFunction(a => a.get(IEditorService))
+						const pane = await editorService.openEditor({
+							resource: uri,
+							options: { override: 'jupyter-notebook', preserveFocus: true, pinned: true },
+						}) as any
+						const nbEditor = pane?.getControl?.()
+						const targetCell = nbEditor?.cellAt?.(selected_cell_index)
+						if (targetCell && nbEditor?.focusElement) {
+							nbEditor.focusElement(targetCell)
+							nbEditor.revealInCenterIfOutsideViewport?.(targetCell)
+						}
+					} catch {
+						// Best-effort cell focus in UI
+					}
+				}
+				return {
+					result: {
+						matches: searchRes.matches,
+						total_matches: searchRes.total_matches,
+						...(selected_cell_index !== undefined ? { selected_cell_index } : {}),
+					}
+				}
+			},
+			validate_notebook: async ({ uri }) => {
+				if (this.notebookService.getNotebookTextModel(uri)) {
+					try {
+						const resolver = instantiationService.invokeFunction(a => a.get(INotebookEditorModelResolverService))
+						const ref = await resolver.resolve(uri, 'jupyter-notebook')
+						try {
+							if (ref.object.isDirty()) {
+								await ref.object.save()
+							}
+						} finally {
+							ref.dispose()
+						}
+					} catch {
+						// best effort
+					}
+				}
+				const fileContent = await fileService.readFile(uri)
+				let parsed: unknown
+				try {
+					parsed = JSON.parse(fileContent.value.toString())
+				} catch (e) {
+					return {
+						result: {
+							valid: false,
+							nbformat: 'invalid-json',
+							has_kernelspec: false,
+							kernelspec_name: null,
+							cell_count: 0,
+							code_cells: 0,
+							markdown_cells: 0,
+							executed_cells: 0,
+							issues: [{ severity: 'error' as const, message: `Invalid JSON: ${e instanceof Error ? e.message : String(e)}` }],
+						}
+					}
+				}
+				return { result: validateNotebookDocument(parsed) }
 			},
 			select_notebook_kernel: async ({ uri, kernel_id }): Promise<{ result: { kernel_id: string } }> => {
 				let resolvedRef: { object: { notebook: any }; dispose(): void } | undefined
@@ -6815,23 +7077,36 @@ export class ToolsService implements IToolsService {
 
 			// Notebook operations
 			read_notebook: (params, result) => {
-				const { cells } = result
+				const { cells, summary_only, total_cells, kernelspec, nbformat } = result
 				if (!cells || cells.length === 0) return 'Notebook is empty.'
+				const metaParts = [
+					total_cells !== undefined ? `${total_cells} cells` : `${cells.length} cells`,
+					nbformat ? `nbformat ${nbformat}` : '',
+					kernelspec ? `kernel: ${kernelspec}` : '',
+				].filter(Boolean).join(' | ')
 				const lines = cells.map((cell: any) => {
 					const typeIcon = cell.cell_type === 'code' ? '▶' : '📝'
 					const execCount = cell.execution_count !== null && cell.execution_count !== undefined ? ` [${cell.execution_count}]` : ''
-					const source = Array.isArray(cell.source) ? cell.source.join('') : cell.source
+					const source = Array.isArray(cell.source) ? cell.source.join('') : String(cell.source ?? '')
+					if (summary_only) {
+						const firstLine = (source.split('\n').find((l: string) => l.trim().length > 0) ?? '').trim().slice(0, 90)
+						const outSummary = cell.outputs && cell.outputs.length > 0
+							? ` (${cell.outputs.length} output${cell.outputs.length === 1 ? '' : 's'}: ${cell.outputs.map((o: any) => o.output_type === 'display_data' || o.output_type === 'execute_result' ? Object.keys(o.data || {}).join(',') : o.output_type).join(', ')})`
+							: ''
+						return `${typeIcon} [${cell.index}] ${cell.cell_type}${execCount}: ${firstLine}${outSummary}`
+					}
 					const outputStr = cell.outputs && cell.outputs.length > 0
 						? '\n  Outputs: ' + cell.outputs.map((o: any) => {
 							if (o.output_type === 'stream') return `${o.name}: ${Array.isArray(o.text) ? o.text.join('') : o.text}`
-							if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 100)}`
+							if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 220)}`
 							if (o.output_type === 'error') return `Error: ${o.ename}: ${o.evalue}`
 							return ''
 						}).join('; ')
 						: ''
-					return `${typeIcon} Cell ${cell.index}${execCount}: ${source.slice(0, 200)}${source.length > 200 ? '...' : ''}${outputStr}`
+					const maxSourceChars = params.cell_index !== undefined ? 4000 : 400
+					return `${typeIcon} Cell ${cell.index} (${cell.cell_type})${execCount}:\n${source.slice(0, maxSourceChars)}${source.length > maxSourceChars ? '...' : ''}${outputStr}`
 				})
-				return `Notebook: ${params.uri.fsPath}\n${lines.join('\n')}`
+				return `Notebook: ${params.uri.fsPath} (${metaParts})\n${lines.join('\n')}`
 			},
 			write_notebook: (params, result) => {
 				const openNote = result.opened ? ' and opened in native Notebook Editor' : ''
@@ -6844,21 +7119,27 @@ export class ToolsService implements IToolsService {
 				return `Notebook written to ${params.uri.fsPath} (${result.cell_count} cells)${openNote}.`
 			},
 			edit_notebook: (params, result) => {
-				const warnStr = result.warnings && result.warnings.length > 0 ? `\nWarnings: ${result.warnings.join('; ')}` : ''
-				return `Applied ${result.applied} notebook edit operation(s) to ${params.uri.fsPath} (now ${result.cell_count} cells${result.opened ? ', synced in Notebook Editor' : ''}).${warnStr}`
+				const failStr = result.failed && result.failed.length > 0
+					? `\nFailed operations:\n${result.failed.map(f => `  - op ${f.op_index} (${f.type}): ${f.error}`).join('\n')}`
+					: ''
+				const outline = result.cells_summary && result.cells_summary.length > 0
+					? `\nUpdated cells:\n${result.cells_summary.map(c => `  [${c.index}] ${c.cell_type}${c.execution_count !== null ? ` [${c.execution_count}]` : ''}: ${c.preview || '(empty)'}${c.output_count > 0 ? ` (${c.output_types.join(', ')})` : ''}`).join('\n')}`
+					: ''
+				return `Applied ${result.applied} notebook edit operation(s) to ${params.uri.fsPath} (now ${result.cell_count} cells${result.opened ? ', synced in Notebook Editor' : ''}).${failStr}${outline}`
 			},
 			execute_notebook_cell: (params, result) => {
-				const { cell_index, outputs, execution_time, success, error } = result
-				if (!success) return `Cell ${cell_index} execution failed: ${error}`
+				const { cell_index, outputs, execution_time, execution_count, success, error } = result
+				const countTag = execution_count !== null && execution_count !== undefined ? ` [${execution_count}]` : ''
+				if (!success) return `Cell ${cell_index}${countTag} execution failed (${execution_time}ms): ${error}`
 				const outputStr = outputs && outputs.length > 0
 					? outputs.map((o: any) => {
 						if (o.output_type === 'stream') return `${o.name}: ${Array.isArray(o.text) ? o.text.join('') : o.text}`
-						if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 200)}`
+						if (o.output_type === 'execute_result' || o.output_type === 'display_data') return `display: ${JSON.stringify(o.data).slice(0, 220)}`
 						if (o.output_type === 'error') return `Error: ${o.ename}: ${o.evalue}\n${o.traceback?.join('\n') || ''}`
 						return ''
 					}).join('\n')
 					: '(no output)'
-				return `Cell ${cell_index} executed in ${execution_time}ms:\n${outputStr}`
+				return `Cell ${cell_index}${countTag} executed in ${execution_time}ms:\n${outputStr}`
 			},
 			execute_notebook: (params, result) => {
 				const { results, restarted, saved } = result
@@ -6878,6 +7159,33 @@ export class ToolsService implements IToolsService {
 				})
 				const meta = [restarted ? 'kernel restarted' : '', saved ? 'saved to disk' : ''].filter(Boolean).join(', ')
 				return `Notebook execution complete${meta ? ` (${meta})` : ''}: ${successful} succeeded, ${failed} failed.\n${lines.join('\n')}`
+			},
+			restart_notebook_kernel: (params, result) => {
+				if (result.execution_results) {
+					const ok = result.execution_results.filter(r => r.success).length
+					const failed = result.execution_results.length - ok
+					return `Kernel restarted for ${params.uri.fsPath} and re-ran all cells (${ok} succeeded, ${failed} failed${result.saved ? ', saved to disk' : ''}).`
+				}
+				return `Kernel restarted for ${params.uri.fsPath} (variables cleared, execution count reset).`
+			},
+			interrupt_notebook_kernel: (params) => {
+				return `Interrupted running kernel for ${params.uri.fsPath}.`
+			},
+			search_notebook: (params, result) => {
+				if (result.total_matches === 0) {
+					return `No matches for "${params.query}" in ${params.uri.fsPath}.`
+				}
+				const lines = result.matches.slice(0, 50).map((m, idx) =>
+					`  #${idx} Cell ${m.cell_index} (${m.cell_type}${m.in_output ? ' output' : ''}) L${m.line}:${m.column} — ${m.preview}`
+				)
+				const selectedNote = result.selected_cell_index !== undefined ? `\nFocused cell ${result.selected_cell_index} in Notebook Editor.` : ''
+				return `Found ${result.total_matches} match(es) for "${params.query}" in ${params.uri.fsPath}:\n${lines.join('\n')}${selectedNote}`
+			},
+			validate_notebook: (params, result) => {
+				const header = `${result.valid ? '✅ Valid' : '❌ Invalid'} notebook: ${params.uri.fsPath} (nbformat ${result.nbformat}, ${result.cell_count} cells: ${result.code_cells} code, ${result.markdown_cells} markdown, ${result.executed_cells} executed, kernelspec: ${result.kernelspec_name ?? 'missing'})`
+				if (result.issues.length === 0) return `${header}\nNo issues found.`
+				const issueLines = result.issues.map(i => `  - [${i.severity.toUpperCase()}]${i.cell_index !== undefined ? ` Cell ${i.cell_index}:` : ''} ${i.message}`)
+				return `${header}\nIssues:\n${issueLines.join('\n')}`
 			},
 			select_notebook_kernel: (params, result) => {
 				return `Kernel set to ${result.kernel_id} for ${params.uri.fsPath}.`

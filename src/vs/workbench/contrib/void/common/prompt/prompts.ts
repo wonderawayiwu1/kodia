@@ -1204,11 +1204,13 @@ export const builtinTools: {
 	// Notebook operations (Jupyter)
 	read_notebook: {
 		name: 'read_notebook',
-		description: `Read a Jupyter notebook (.ipynb) file. Returns all cells with their source, outputs, and execution counts. Optionally specify a cell range to read part of a large notebook.`,
+		description: `Read a Jupyter notebook (.ipynb) file (read-only). Returns cells with source, execution counts, and clean output summaries (never dumps raw base64 images). Use summary_only=true for a lightweight structural overview, or cell_index to inspect one specific cell and its full outputs without re-executing.`,
 		params: {
 			...uriParam('notebook'),
 			start_cell: { description: 'Optional. Start reading from this cell index (0-based).' },
 			end_cell: { description: 'Optional. Read up to this cell index (exclusive).' },
+			cell_index: { description: 'Optional. Read only this specific 0-based cell index with full source and output details.' },
+			summary_only: { description: 'Optional boolean (default false). If true, returns a compact notebook structure (cell count, types, first lines, execution counts, output types).' },
 		},
 	},
 
@@ -1226,20 +1228,20 @@ export const builtinTools: {
 
 	edit_notebook: {
 		name: 'edit_notebook',
-		description: `Edit an existing Jupyter notebook (.ipynb) cleanly and live-sync the native Notebook Editor — NEVER edit raw .ipynb JSON with edit_file. Supports batching multiple operations in one call.`,
+		description: `Edit an existing Jupyter notebook (.ipynb) cleanly, live-sync the native Notebook Editor, and return the updated cell outline with new indices. Accepts BOTH "index" and "cell_index" consistently on every operation. NEVER edit raw .ipynb JSON with edit_file.`,
 		params: {
 			...uriParam('notebook'),
-			operations: { description: 'Array (or JSON array string) of operations: add_cell, remove_cell, replace_cell, move_cell, update_cell_source, duplicate_cell, change_cell_type (code<->markdown), update_cell_outputs, clear_cell_outputs, clear_all_outputs.' },
+			operations: { description: 'Array (or JSON array string) of operations: add_cell, insert_cell_above, insert_cell_below, remove_cell, replace_cell, move_cell (from_index/to_index), update_cell_source, duplicate_cell, change_cell_type (code<->markdown), cut_cell, paste_cell, undo, redo, update_cell_outputs, clear_cell_outputs, clear_all_outputs.' },
 			open_in_editor: { description: 'Optional boolean (default true). Ensures the notebook is open in Kodia\'s native Notebook Editor.' },
 		},
 	},
 
 	execute_notebook_cell: {
 		name: 'execute_notebook_cell',
-		description: `Execute a specific code cell in a notebook using Kodia's native Python/Jupyter kernel, display outputs/charts live in the Notebook Editor, and persist outputs & execution counts to disk.`,
+		description: `Execute ONE specific code cell in a notebook using Kodia's native Python/Jupyter kernel, display outputs/charts live in the Notebook Editor, and persist outputs & execution count to disk.`,
 		params: {
 			...uriParam('notebook'),
-			cell_index: { description: 'The 0-based index of the cell to execute.' },
+			cell_index: { description: 'The 0-based index of the cell to execute (also accepts "index").' },
 			kernel_id: { description: 'Optional. The kernel ID to use. If omitted, auto-selects the notebook\'s preferred Python kernel.' },
 			open_in_editor: { description: 'Optional boolean (default true). Opens the notebook in Kodia\'s native Notebook Editor so outputs appear live.' },
 		},
@@ -1247,19 +1249,63 @@ export const builtinTools: {
 
 	execute_notebook: {
 		name: 'execute_notebook',
-		description: `Execute all code cells (or a subset) in a notebook in one batch through Kodia's native Python/Jupyter kernel, render outputs/charts live in the Notebook Editor, and persist all outputs & execution counts to disk. Optionally restart the kernel first.`,
+		description: `Execute all code cells, a range (start_cell..end_cell), or a custom out-of-order list (cell_indices, e.g. [4, 2, 0]) in a notebook through Kodia's native Python/Jupyter kernel, render outputs/charts live in the Notebook Editor, and persist all outputs & execution counts to disk.`,
 		params: {
 			...uriParam('notebook'),
 			kernel_id: { description: 'Optional. The kernel ID to use. Auto-selects the preferred Python kernel if omitted.' },
-			cell_indices: { description: 'Optional. Specific cell indices to execute (0-based array or JSON array string). If omitted, executes all code cells in order.' },
-			restart_kernel: { description: 'Optional boolean (default false). If true, restarts the Python kernel (clearing all variables/execution count) before executing cells.' },
+			cell_indices: { description: 'Optional. Specific cell indices to execute in exact given order (0-based array or JSON array string, supports out-of-order execution).' },
+			start_cell: { description: 'Optional. Execute code cells starting from this 0-based index (inclusive).' },
+			end_cell: { description: 'Optional. Execute code cells up to this 0-based index (exclusive).' },
+			restart_kernel: { description: 'Optional boolean (default false). If true, restarts the Python kernel (clearing all variables/execution count) before executing.' },
 			open_in_editor: { description: 'Optional boolean (default true). Opens the notebook in Kodia\'s native Notebook Editor so execution appears live.' },
+		},
+	},
+
+	restart_notebook_kernel: {
+		name: 'restart_notebook_kernel',
+		description: `Restart the live Python/Jupyter kernel for a notebook (clearing all variables and resetting execution count to 1). Optionally set run_all=true to immediately re-run all code cells and save.`,
+		params: {
+			...uriParam('notebook'),
+			run_all: { description: 'Optional boolean (default false). If true, immediately runs all code cells after restarting the kernel.' },
+			kernel_id: { description: 'Optional. Kernel ID to use when run_all=true.' },
+		},
+	},
+
+	interrupt_notebook_kernel: {
+		name: 'interrupt_notebook_kernel',
+		description: `Interrupt a currently executing cell in a notebook's Python/Jupyter kernel.`,
+		params: {
+			...uriParam('notebook'),
+		},
+	},
+
+	search_notebook: {
+		name: 'search_notebook',
+		description: `Search text or regex inside a Jupyter notebook across Markdown cells, code cells, and outputs. Returns matching cell indices, lines, columns, and previews, and can optionally navigate/focus a specific match in the Notebook Editor.`,
+		params: {
+			...uriParam('notebook'),
+			query: { description: 'Text or regex pattern to search for.' },
+			is_regex: { description: 'Optional boolean (default false). Treat query as a regular expression.' },
+			case_sensitive: { description: 'Optional boolean (default false).' },
+			cell_type: { description: 'Optional filter: "all" (default), "code", or "markdown".' },
+			include_outputs: { description: 'Optional boolean (default true). Also search cell stdout/text/error outputs.' },
+			from_cell_index: { description: 'Optional 0-based cell index to start searching from.' },
+			direction: { description: 'Optional: "forward" (default) or "backward".' },
+			select_match_index: { description: 'Optional 0-based match index to focus/select in the open Notebook Editor.' },
+		},
+	},
+
+	validate_notebook: {
+		name: 'validate_notebook',
+		description: `Validate a Jupyter notebook (.ipynb) file against nbformat 4.x schema, kernelspec presence, cell types, execution counts, and output integrity.`,
+		params: {
+			...uriParam('notebook'),
 		},
 	},
 
 	select_notebook_kernel: {
 		name: 'select_notebook_kernel',
-		description: `Select a kernel for a notebook. Use list_notebook_kernels first to see available kernels.`,
+		description: `Select/switch the Python/Jupyter kernel for a notebook. Use list_notebook_kernels first to see available kernels.`,
 		params: {
 			...uriParam('notebook'),
 			kernel_id: { description: 'The kernel ID to select.' },
@@ -2810,7 +2856,7 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 	if (mode === 'agent' || mode === 'debug') {
 		details.push(`Make changes with the tools (edit files, run commands) rather than showing code for the user to apply.`)
 		details.push(`To create a new file with content, use write_file (or create_file_or_folder then write_file). Do not just show code blocks — actually write the file.`)
-		details.push(`NATIVE JUPYTER NOTEBOOK WORKFLOW: For creating, editing, reading, or running .ipynb notebooks, ALWAYS use Kodia's built-in native notebook tools directly (write_notebook, edit_notebook, read_notebook, execute_notebook, execute_notebook_cell, list_notebook_kernels, select_notebook_kernel). NEVER create temporary Python generator scripts (such as create_notebook.py), NEVER execute notebooks via terminal python commands, and NEVER edit raw .ipynb JSON with edit_file. Use write_notebook directly (with execute=true when you want to create, open, run all cells, and save in one fast step), edit_notebook for batched cell edits (add, remove, update, move, duplicate, change_cell_type, clear outputs), and execute_notebook (with restart_kernel=true when testing a clean restart).`)
+		details.push(`NATIVE JUPYTER NOTEBOOK WORKFLOW: For creating, editing, searching, validating, or running .ipynb notebooks, ALWAYS use Kodia's built-in native notebook tools directly (write_notebook, edit_notebook, read_notebook, search_notebook, validate_notebook, execute_notebook_cell, execute_notebook, restart_notebook_kernel, interrupt_notebook_kernel, list_notebook_kernels, select_notebook_kernel). NEVER create temporary Python generator scripts (such as create_notebook.py), NEVER execute notebooks via terminal python commands, and NEVER edit raw .ipynb JSON with edit_file. Use write_notebook (with execute=true to create, open, run all cells, and save in one step), edit_notebook (supports add/insert_above/insert_below/remove/replace/move/update/duplicate/change_cell_type/cut/paste/undo/redo/clear_outputs with unified index/cell_index), execute_notebook_cell (single cell) or execute_notebook (all, range, or custom out-of-order cell_indices), restart_notebook_kernel, search_notebook, and validate_notebook.`)
 		details.push(`Before changing code, look at what it touches and what depends on it, so the change is right the first time.`)
 		details.push(`Don't modify files outside the user's workspace without asking: the user hasn't opened them for this work.`)
 	}

@@ -200,6 +200,10 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	edit_notebook: { done: 'Edited notebook', proposed: 'Edit notebook', running: 'Editing notebook' },
 	execute_notebook_cell: { done: 'Ran notebook cell', proposed: 'Run notebook cell', running: 'Running notebook cell' },
 	execute_notebook: { done: 'Ran notebook', proposed: 'Run notebook', running: 'Running notebook' },
+	restart_notebook_kernel: { done: 'Restarted kernel', proposed: 'Restart kernel', running: 'Restarting kernel' },
+	interrupt_notebook_kernel: { done: 'Interrupted kernel', proposed: 'Interrupt kernel', running: 'Interrupting kernel' },
+	search_notebook: { done: 'Searched notebook', proposed: 'Search notebook', running: 'Searching notebook' },
+	validate_notebook: { done: 'Validated notebook', proposed: 'Validate notebook', running: 'Validating notebook' },
 	select_notebook_kernel: { done: 'Selected kernel', proposed: 'Select kernel', running: 'Selecting kernel' },
 	list_notebook_kernels: { done: 'Listed kernels', proposed: 'List kernels', running: 'Listing kernels' },
 

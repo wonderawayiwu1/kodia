@@ -290,12 +290,13 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'debug_step_into': 'debug',
 	'debug_step_out': 'debug',
 	'debug_evaluate_expression': 'debug',
-	// notebook operations
-	'read_notebook': 'edits',
+	// notebook operations (read_notebook, search_notebook, validate_notebook, list_notebook_kernels are read-only)
 	'write_notebook': 'edits',
 	'edit_notebook': 'edits',
 	'execute_notebook_cell': 'terminal',
 	'execute_notebook': 'terminal',
+	'restart_notebook_kernel': 'terminal',
+	'interrupt_notebook_kernel': 'terminal',
 	'select_notebook_kernel': 'edits',
 	// Autonomous UI/UX Design Intelligence & Visual QA tools
 	'discover_visual_assets': 'web pages',
@@ -486,11 +487,15 @@ export type BuiltinToolCallParams = {
 	// Subagent delegation (OpenCode parity - roadmap Stage 6)
 	'subagent': { agent: string, description: string, prompt: string, model?: string, sessionID?: string },
 	// Notebook operations
-	'read_notebook': { uri: URI, start_cell?: number, end_cell?: number },
+	'read_notebook': { uri: URI, start_cell?: number, end_cell?: number, cell_index?: number, summary_only?: boolean },
 	'write_notebook': { uri: URI, cells: NotebookCellData[], open_in_editor?: boolean, execute?: boolean, kernel_id?: string },
 	'edit_notebook': { uri: URI, operations: NotebookEditOperation[], open_in_editor?: boolean },
 	'execute_notebook_cell': { uri: URI, cell_index: number, kernel_id?: string, open_in_editor?: boolean },
-	'execute_notebook': { uri: URI, kernel_id?: string, cell_indices?: number[], restart_kernel?: boolean, open_in_editor?: boolean },
+	'execute_notebook': { uri: URI, kernel_id?: string, cell_indices?: number[], start_cell?: number, end_cell?: number, restart_kernel?: boolean, open_in_editor?: boolean },
+	'restart_notebook_kernel': { uri: URI, run_all?: boolean, kernel_id?: string },
+	'interrupt_notebook_kernel': { uri: URI },
+	'search_notebook': { uri: URI, query: string, is_regex?: boolean, case_sensitive?: boolean, cell_type?: 'all' | 'code' | 'markdown', include_outputs?: boolean, from_cell_index?: number, direction?: 'forward' | 'backward', select_match_index?: number },
+	'validate_notebook': { uri: URI },
 	'select_notebook_kernel': { uri: URI, kernel_id: string },
 	'list_notebook_kernels': { uri?: URI },
 	// Git operations (Stage 2)
@@ -826,11 +831,15 @@ export type BuiltinToolResultType = {
 		// Subagent delegation (OpenCode parity - roadmap Stage 6)
 		'subagent': SubagentReport,
 	// Notebook operations
-	'read_notebook': { cells: NotebookCellOutput[] },
+	'read_notebook': { cells: NotebookCellOutput[], summary_only?: boolean, total_cells?: number, kernelspec?: string | null, nbformat?: string },
 	'write_notebook': { uri: URI, cell_count: number, opened: boolean, execution_results?: NotebookExecutionResult[] },
-	'edit_notebook': { uri: URI, applied: number, cell_count: number, opened: boolean, warnings?: string[] },
-	'execute_notebook_cell': { cell_index: number, outputs: NotebookCellOutput[], execution_time: number, success: boolean, error?: string },
+	'edit_notebook': { uri: URI, applied: number, cell_count: number, opened: boolean, cells_summary: Array<{ index: number, cell_type: 'code' | 'markdown' | 'raw', preview: string, line_count: number, execution_count: number | null, output_count: number, output_types: string[] }>, failed?: Array<{ op_index: number, type: string, error: string }>, warnings?: string[] },
+	'execute_notebook_cell': { cell_index: number, outputs: NotebookCellOutput[], execution_time: number, execution_count?: number | null, success: boolean, error?: string },
 	'execute_notebook': { results: NotebookExecutionResult[], restarted?: boolean, saved: boolean },
+	'restart_notebook_kernel': { restarted: boolean, execution_results?: NotebookExecutionResult[], saved?: boolean },
+	'interrupt_notebook_kernel': { interrupted: boolean },
+	'search_notebook': { matches: Array<{ cell_index: number, cell_type: 'code' | 'markdown' | 'raw', in_output: boolean, line: number, column: number, preview: string }>, total_matches: number, selected_cell_index?: number },
+	'validate_notebook': { valid: boolean, nbformat: string, has_kernelspec: boolean, kernelspec_name: string | null, cell_count: number, code_cells: number, markdown_cells: number, executed_cells: number, issues: Array<{ severity: 'error' | 'warning', cell_index?: number, message: string }> },
 	'select_notebook_kernel': { kernel_id: string },
 	'list_notebook_kernels': { kernels: NotebookKernelInfo[] },
 	'project_health_scan': ProjectHealthReport,
@@ -983,15 +992,21 @@ export interface NotebookCellOutput {
 }
 
 export type NotebookEditOperation =
-	| { type: 'add_cell'; index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
-	| { type: 'remove_cell'; index: number }
-	| { type: 'replace_cell'; index: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
-	| { type: 'move_cell'; from_index: number; to_index: number }
-	| { type: 'update_cell_source'; index: number; source: string | string[] }
-	| { type: 'duplicate_cell'; index: number }
-	| { type: 'change_cell_type'; index: number; cell_type: 'code' | 'markdown' | 'raw' }
-	| { type: 'update_cell_outputs'; index: number; outputs: NotebookCellOutput[] }
-	| { type: 'clear_cell_outputs'; index: number }
+	| { type: 'add_cell'; index?: number; cell_index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
+	| { type: 'insert_cell_above'; index?: number; cell_index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
+	| { type: 'insert_cell_below'; index?: number; cell_index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
+	| { type: 'remove_cell'; index?: number; cell_index?: number }
+	| { type: 'replace_cell'; index?: number; cell_index?: number; cell?: NotebookCellData; cell_type?: 'code' | 'markdown' | 'raw'; source?: string | string[] }
+	| { type: 'move_cell'; from_index?: number; from_cell_index?: number; to_index?: number; to_cell_index?: number }
+	| { type: 'update_cell_source'; index?: number; cell_index?: number; source: string | string[] }
+	| { type: 'duplicate_cell'; index?: number; cell_index?: number }
+	| { type: 'change_cell_type'; index?: number; cell_index?: number; cell_type: 'code' | 'markdown' | 'raw' }
+	| { type: 'cut_cell'; index?: number; cell_index?: number }
+	| { type: 'paste_cell'; index?: number; cell_index?: number }
+	| { type: 'undo' }
+	| { type: 'redo' }
+	| { type: 'update_cell_outputs'; index?: number; cell_index?: number; outputs: NotebookCellOutput[] }
+	| { type: 'clear_cell_outputs'; index?: number; cell_index?: number }
 	| { type: 'clear_all_outputs' };
 
 export interface NotebookExecutionResult {

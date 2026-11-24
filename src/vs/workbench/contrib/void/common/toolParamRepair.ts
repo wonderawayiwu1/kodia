@@ -14,7 +14,8 @@ const URI_TOOLS = new Set([
 	'read_file', 'write_file', 'rewrite_file', 'edit_file', 'create_file_or_folder',
 	'delete_file_or_folder', 'ls_dir', 'get_dir_tree', 'search_in_file', 'read_lint_errors',
 	'go_to_definition', 'find_references', 'file_metadata',
-	'read_notebook', 'write_notebook', 'edit_notebook', 'execute_notebook', 'execute_notebook_cell', 'select_notebook_kernel',
+	'read_notebook', 'write_notebook', 'edit_notebook', 'execute_notebook', 'execute_notebook_cell',
+	'restart_notebook_kernel', 'interrupt_notebook_kernel', 'search_notebook', 'validate_notebook', 'select_notebook_kernel',
 ]);
 
 const COMMAND_TOOLS = new Set([
@@ -23,7 +24,7 @@ const COMMAND_TOOLS = new Set([
 
 const QUERY_TOOLS = new Set([
 	'search_for_files', 'search_in_file', 'search_pathnames_only', 'search_symbols',
-	'code_search', 'code_search_literal', 'web_search',
+	'code_search', 'code_search_literal', 'web_search', 'search_notebook',
 ]);
 
 const CONTENT_TOOLS = new Set(['write_file', 'rewrite_file']);
@@ -73,11 +74,31 @@ export function repairToolParams(
 
 	// 1. URI / path alias remapping
 	if (URI_TOOLS.has(toolName) && (next.uri === undefined || next.uri === null || next.uri === '')) {
-		const found = pickFirstString(next, ['file_path', 'path', 'filepath', 'file', 'filename', 'target_file', 'dir', 'directory', 'folder', 'folder_path']);
+		const found = pickFirstString(next, ['notebook_path', 'notebook_uri', 'file_path', 'path', 'filepath', 'file', 'filename', 'target_file', 'dir', 'directory', 'folder', 'folder_path']);
 		if (found) {
 			next.uri = found.value;
 			repairs.push(`${found.key}→uri`);
 		}
+	}
+
+	// 1b. Task plan & notebook index alias remapping
+	if (toolName === 'update_task_plan' && (next.task_id === undefined || next.task_id === null || next.task_id === '')) {
+		const found = pickFirstString(next, ['taskId', 'id', 'step_id']);
+		if (found) {
+			next.task_id = found.value;
+			repairs.push(`${found.key}→task_id`);
+		}
+	}
+	if (toolName === 'create_task_plan' && (next.title === undefined || next.title === null || next.title === '')) {
+		const found = pickFirstString(next, ['name', 'plan_title', 'goal', 'summary']);
+		if (found) {
+			next.title = found.value;
+			repairs.push(`${found.key}→title`);
+		}
+	}
+	if ((toolName === 'execute_notebook_cell' || toolName === 'read_notebook') && next.cell_index === undefined && next.index !== undefined) {
+		next.cell_index = next.index;
+		repairs.push('index→cell_index');
 	}
 
 	// 2. move_or_rename_file aliases
