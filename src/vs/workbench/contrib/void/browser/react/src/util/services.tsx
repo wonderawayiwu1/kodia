@@ -306,11 +306,15 @@ type ReactAccessor = {
 	[K in keyof typeof OPTIONAL_SERVICE_ID_MAP]: (typeof OPTIONAL_SERVICE_ID_MAP[K] extends import('../../../../../../../platform/instantiation/common/instantiation.js').ServiceIdentifier<infer S> ? S : never) | undefined
 }
 
-let rawAccessor_: ServicesAccessor | null = null
+let instantiationService_: IInstantiationService | null = null
 const resolvedServicesCache: Partial<Record<keyof ReactAccessor, unknown>> = {}
 
 const _registerAccessor = (accessor: ServicesAccessor) => {
-	rawAccessor_ = accessor
+	// Capture IInstantiationService synchronously while `accessor` is valid:
+	// VS Code invalidates `ServicesAccessor` as soon as invokeFunction returns,
+	// whereas IInstantiationService remains valid for lazy invokeFunction(a => a.get(id)) calls.
+	instantiationService_ = accessor.get(IInstantiationService)
+	resolvedServicesCache['IInstantiationService'] = instantiationService_
 }
 
 const lazyAccessorHandle = {
@@ -318,19 +322,19 @@ const lazyAccessorHandle = {
 		if (service in resolvedServicesCache) {
 			return resolvedServicesCache[service] as ReactAccessor[S]
 		}
-		if (!rawAccessor_) {
+		if (!instantiationService_) {
 			throw new Error('Kodia useAccessor was called before _registerServices!')
 		}
 		if (service in SERVICE_ID_MAP) {
 			const id = SERVICE_ID_MAP[service as keyof typeof SERVICE_ID_MAP]
-			const instance = rawAccessor_.get(id as any)
+			const instance = instantiationService_.invokeFunction(a => a.get(id as any))
 			resolvedServicesCache[service] = instance
 			return instance as ReactAccessor[S]
 		}
 		const optId = OPTIONAL_SERVICE_ID_MAP[service as keyof typeof OPTIONAL_SERVICE_ID_MAP]
 		let instance: unknown = undefined
 		try {
-			instance = rawAccessor_.get(optId as any)
+			instance = instantiationService_.invokeFunction(a => a.get(optId as any))
 		} catch {
 			instance = undefined
 		}
@@ -341,7 +345,7 @@ const lazyAccessorHandle = {
 
 // -- services --
 export const useAccessor = () => {
-	if (!rawAccessor_) {
+	if (!instantiationService_) {
 		throw new Error('Kodia useAccessor was called before _registerServices!')
 	}
 	return lazyAccessorHandle
