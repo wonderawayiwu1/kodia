@@ -100,14 +100,56 @@ export class ContextCompactionService extends Disposable implements IContextComp
 		const recentMessages = messages.slice(-keepRecentMessages);
 
 		let tokensBefore = 0;
+		const filesTouched = new Set<string>();
+		const toolsUsed = new Set<string>();
+		const contractsOrEndpoints = new Set<string>();
+		const recentErrors: string[] = [];
+
 		for (const msg of messagesToSummarize) {
-			const content = (msg as any).content || (msg as any).displayContent || '';
-			tokensBefore += estimateTokens(typeof content === 'string' ? content : String(content));
+			const rawContent = (msg as any).content || (msg as any).displayContent || '';
+			const text = typeof rawContent === 'string' ? rawContent : String(rawContent);
+			tokensBefore += estimateTokens(text);
+
+			// Preserve real architectural continuity across compaction (FPERE Root-Cause Fix #1)
+			const toolName = (msg as any).name;
+			if (typeof toolName === 'string' && toolName) {
+				toolsUsed.add(toolName);
+			}
+			const uriParam = (msg as any).params?.uri?.fsPath ?? (msg as any).params?.uri ?? (msg as any).params?.file;
+			if (typeof uriParam === 'string' && uriParam.trim()) {
+				filesTouched.add(uriParam.trim());
+			}
+			for (const m of text.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_/:.-]+/g)) {
+				if (contractsOrEndpoints.size < 20) contractsOrEndpoints.add(m[0]);
+			}
+			for (const m of text.matchAll(/\bexport\s+(?:interface|type|class|function|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)) {
+				if (contractsOrEndpoints.size < 30) contractsOrEndpoints.add(`export ${m[1]}`);
+			}
+			if ((msg as any).type === 'tool_error' || /\b(error TS\d+|FAILED|SyntaxError|broken_relative_import)\b/i.test(text)) {
+				if (recentErrors.length < 5) recentErrors.push(text.slice(0, 140).replace(/\s+/g, ' '));
+			}
 		}
+
+		const preservedLines: string[] = [
+			`[Kodia FPERE Preserved Engineering Context — ${messagesToSummarize.length} earlier messages compacted]`,
+		];
+		if (filesTouched.size > 0) {
+			preservedLines.push(`Files created/modified: ${[...filesTouched].slice(0, 25).join(', ')}`);
+		}
+		if (contractsOrEndpoints.size > 0) {
+			preservedLines.push(`Key exports/API contracts: ${[...contractsOrEndpoints].slice(0, 20).join('; ')}`);
+		}
+		if (toolsUsed.size > 0) {
+			preservedLines.push(`Tools executed: ${[...toolsUsed].slice(0, 15).join(', ')}`);
+		}
+		if (recentErrors.length > 0) {
+			preservedLines.push(`Prior errors observed: ${recentErrors.join(' | ')}`);
+		}
+		preservedLines.push(`Check .kodia/fpere/blueprint.json or call fpere_get_status if full contract details are needed.`);
 
 		const summaryEntry: any = {
 			role: 'context_summary',
-			summary: `Conversation summarized: ${messagesToSummarize.length} earlier messages compacted. Key decisions and context preserved.`,
+			summary: preservedLines.join('\n'),
 			keepFromIdx: messages.length - keepRecentMessages,
 		};
 

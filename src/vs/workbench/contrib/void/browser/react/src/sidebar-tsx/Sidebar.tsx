@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAccessor, useChatThreadsState, useIsDark } from '../util/services.js';
-import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Radar, Server, Settings, ShieldCheck, Smartphone, Users, Workflow } from 'lucide-react';
+import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Radar, Rocket, Server, Settings, ShieldCheck, Smartphone, Users, Workflow } from 'lucide-react';
 
 import '../styles.css';
 import { SidebarChat } from './SidebarChat.js';
@@ -28,6 +28,7 @@ import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from '../../../correctnessServic
 import { KODIA_OPEN_EVOLUTION_HUB_ACTION_ID } from '../../../evolutionService.js';
 import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
 import { KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID } from '../../../liveIntelligenceService.js';
+import { KODIA_OPEN_APP_BUILDER_ACTION_ID } from '../../../universalAppBuilderService.js';
 
 type SidebarTab = 'chat' | 'ai-engine' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
@@ -143,6 +144,15 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 					);
 				})}
 			</div>
+			<button
+				type='button'
+				title='Open Kodia Universal App Builder Workspace (Ctrl+Alt+U)'
+				aria-label='Open Kodia Universal App Builder'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_APP_BUILDER_ACTION_ID)}
+				className='p-1 rounded-md text-sky-400 hover:text-sky-300 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<Rocket size={13} />
+			</button>
 			<button
 				type='button'
 				title='Open Kodia Live Engineering Intelligence Dashboard (Ctrl+Alt+I)'

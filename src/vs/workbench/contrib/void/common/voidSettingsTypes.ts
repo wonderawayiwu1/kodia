@@ -14,6 +14,7 @@ import { AIEngineSettings, DEFAULT_AI_ENGINE_SETTINGS } from './aiEngineeringTyp
 import { ApiStudioSettings, DEFAULT_API_STUDIO_SETTINGS } from './apiStudioTypes.js';
 import { CorrectnessEngineSettings, DEFAULT_CORRECTNESS_ENGINE_SETTINGS } from './correctnessTypes.js';
 import { DEFAULT_EVOLUTION_ENGINE_SETTINGS, EvolutionEngineSettings } from './evolutionTypes.js';
+import { DEFAULT_UABE_ENGINE_SETTINGS, UabeEngineSettings } from './universalAppBuilderTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -533,6 +534,7 @@ export type GlobalSettings = {
 	apiStudio: ApiStudioSettings;
 	correctness: CorrectnessEngineSettings;
 	evolution: EvolutionEngineSettings;
+	uabe: UabeEngineSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -582,6 +584,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	apiStudio: DEFAULT_API_STUDIO_SETTINGS,
 	correctness: DEFAULT_CORRECTNESS_ENGINE_SETTINGS,
 	evolution: DEFAULT_EVOLUTION_ENGINE_SETTINGS,
+	uabe: DEFAULT_UABE_ENGINE_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

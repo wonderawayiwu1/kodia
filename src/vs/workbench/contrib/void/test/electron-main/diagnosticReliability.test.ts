@@ -104,7 +104,8 @@ suite('Kodia Diagnostic Reliability Engine (KDRE) — LSP, False-Positive & E2E 
 		svc.dispose();
 	});
 
-	test('End-to-End real JS + Python compiler verification: genuine error confirmed, fixed error clears, false-positive LSP error caught as conflict', async () => {
+	test('End-to-End real JS + Python compiler verification: genuine error confirmed, fixed error clears, false-positive LSP error caught as conflict', async function () {
+		this.timeout(15000);
 		const root = mkDir('kodia-kdre-e2e-');
 		const jsFile = path.join(root, 'index.js');
 		const pyFile = path.join(root, 'worker.py');

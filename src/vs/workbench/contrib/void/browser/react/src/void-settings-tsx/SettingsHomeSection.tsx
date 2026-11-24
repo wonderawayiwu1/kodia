@@ -4,10 +4,15 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useMemo } from 'react';
-import { ArrowRight, Bot, Cpu, Palette, Shield, Sliders, Sparkles, Terminal } from 'lucide-react';
+import { ArrowRight, Bot, Cpu, Globe, Palette, Radar, Rocket, Shield, Sliders, Smartphone, Sparkles, Terminal } from 'lucide-react';
 import { useAccessor, useMCPServiceState, useSettingsState } from '../util/services.js';
 import { SettingsSection, SettingGroup } from './SettingsControls.js';
-import { KodiaBadge, KodiaCard, KodiaStatTile } from '../util/KodiaDesignSystem.js';
+import { KodiaBadge, KodiaCard, KodiaSecondaryButton, KodiaStatTile } from '../util/KodiaDesignSystem.js';
+import { KODIA_OPEN_APP_BUILDER_ACTION_ID } from '../../../universalAppBuilderService.js';
+import { KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID } from '../../../liveIntelligenceService.js';
+import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from '../../../correctnessService.js';
+import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
+import { KODIA_OPEN_API_STUDIO_ACTION_ID } from '../../../apiStudioService.js';
 import {
 	detectActiveKodiaAccent,
 	KODIA_ACCENT_PRESETS,
@@ -22,6 +27,7 @@ export type SettingsNavigateTarget =
 	| 'models'
 	| 'features'
 	| 'agent'
+	| 'app_builder'
 	| 'ai_engine'
 	| 'api_studio'
 	| 'correctness'
@@ -68,6 +74,7 @@ export const SettingsHomeSection = ({
 	};
 
 	const quickLinks = useMemo(() => ([
+		{ id: 'app_builder' as const, title: 'Universal App Builder (UABE)', desc: 'Build modes, IRIRE credentials, visual source sync, reliability & client handover', icon: <Rocket size={15} /> },
 		{ id: 'appearance' as const, title: 'Themes & Accent', desc: 'Kodia Obsidian, Midnight, Daylight & accent colors', icon: <Palette size={15} /> },
 		{ id: 'editor' as const, title: 'Editor & Typography', desc: 'Fonts, line height, minimap, sticky scroll, cursor & diff', icon: <Sliders size={15} /> },
 		{ id: 'models' as const, title: 'Models & Fallbacks', desc: 'BYOK API keys, local servers, auto-failover & role routing', icon: <Sparkles size={15} /> },
@@ -116,6 +123,16 @@ export const SettingsHomeSection = ({
 						icon={<Terminal size={14} />}
 						onClick={() => void commandService.executeCommand('workbench.action.openGlobalKeybindings')}
 					/>
+				</div>
+			</SettingGroup>
+
+			<SettingGroup title='Interactive Engineering Studios' description='Launch Kodia native workspaces directly from Settings.'>
+				<div className='flex flex-wrap gap-2'>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_APP_BUILDER_ACTION_ID)}><Rocket size={12} /> Universal App Builder (Ctrl+Alt+U)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID)}><Radar size={12} /> Live Intelligence (Ctrl+Alt+I)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID)}><Shield size={12} /> Correctness &amp; ERIC Hub (Ctrl+Alt+D)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_MOBILE_STUDIO_ACTION_ID)}><Smartphone size={12} /> Mobile Studio (Ctrl+Alt+M)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_API_STUDIO_ACTION_ID)}><Globe size={12} /> API Studio (Ctrl+Alt+A)</KodiaSecondaryButton>
 				</div>
 			</SettingGroup>
 

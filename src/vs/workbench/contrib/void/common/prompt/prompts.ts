@@ -2967,6 +2967,234 @@ export const builtinTools: {
 		},
 	},
 
+	// Kodia First-Pass Engineering Reliability Engine (FPERE) — 8 first-class architecture, contract, integration & quality-gate tools
+	fpere_analyze_architecture: {
+		name: 'fpere_analyze_architecture',
+		description: 'Builds deep repository understanding (layers, languages, frameworks, exported symbols, import graph, API endpoints, DB entities, env vars, naming conventions, circular deps) and persists .kodia/fpere/architecture-memory.json.',
+		params: {},
+	},
+	fpere_create_blueprint: {
+		name: 'fpere_create_blueprint',
+		description: 'Creates or updates a contract-first Engineering Blueprint (.kodia/fpere/blueprint.json) defining module boundaries, shared interfaces, API contracts, DB models, env vars, acceptance criteria, and dependency-ordered Task DAG before generating code.',
+		params: {
+			title: { description: 'Blueprint title.' },
+			objective: { description: 'Engineering objective.' },
+			stack: { description: 'Comma-separated or array of technologies/frameworks.' },
+			module_boundaries: { description: 'Optional JSON array of { name, directory, responsibility }.' },
+			shared_interfaces: { description: 'Optional JSON array of { name, definedIn, exportedSymbols, consumers }.' },
+			api_contracts: { description: 'Optional JSON array of { method, path, requestFields?, responseFields?, requiresAuth?, backendFile? }.' },
+			db_models: { description: 'Optional JSON array of { name, fields, relations?, schemaFile? }.' },
+			required_env_vars: { description: 'Optional array/comma-separated required environment variable names.' },
+			build_command: { description: 'Optional real project build command.' },
+			test_command: { description: 'Optional real project test command.' },
+			acceptance_criteria: { description: 'Optional array of concrete acceptance criteria.' },
+			tasks: { description: 'Optional JSON array of Task DAG nodes { id, title, checkpoint, ownerAgent?, ownedFiles, dependsOn, requiredContracts, status }.' },
+		},
+	},
+	fpere_validate_imports: {
+		name: 'fpere_validate_imports',
+		description: 'Instantly verifies relative import targets, named & default exports, declared manifest packages, circular dependencies, @ts-ignore abuse, and unimplemented stubs across workspace or target files.',
+		params: {
+			target_files: { description: 'Optional array or comma-separated workspace-relative file paths to validate.' },
+		},
+	},
+	fpere_check_integration: {
+		name: 'fpere_check_integration',
+		description: 'Runs a full-stack integration checkpoint verifying Frontend↔Backend API routes/methods, Backend↔DB models, .env.example declarations, Blueprint contracts, and client-side AI secret hygiene.',
+		params: {
+			checkpoint: { description: 'Optional checkpoint kind: project_foundation | database_layer | backend_services | api_layer | frontend_foundation | authentication | ai_integration | background_processing | mobile_integration | full_stack_workflow.' },
+		},
+	},
+	fpere_run_quality_gate: {
+		name: 'fpere_run_quality_gate',
+		description: 'Evaluates the evidence-based First-Pass Quality Gate combining import/export hygiene, full-stack integration contracts, independent compiler checks, and optional real test/build commands, classifying verified stage honestly.',
+		params: {
+			unit_label: { description: 'Name of the module/unit or milestone being gated.' },
+			target_files: { description: 'Optional array or comma-separated files in the unit.' },
+			checkpoint: { description: 'Optional integration checkpoint kind.' },
+			run_compiler: { description: 'Optional boolean (default true) to run independent compiler checks.' },
+			test_command: { description: 'Optional real test command to execute.' },
+			build_command: { description: 'Optional real build command to execute.' },
+		},
+	},
+	fpere_coordinate_agents: {
+		name: 'fpere_coordinate_agents',
+		description: 'Coordinates parallel engineering agents using explicit file-ownership leases and Blueprint Task DAG dependency checks to prevent conflicting edits or premature implementation.',
+		params: {
+			action: { description: 'acquire | release | status.' },
+			agent_id: { description: 'Identifier of the specialist agent.' },
+			task_id: { description: 'Optional Blueprint Task DAG node ID.' },
+			files: { description: 'Optional array or comma-separated files to lease exclusively.' },
+		},
+	},
+	fpere_plan_repair: {
+		name: 'fpere_plan_repair',
+		description: 'Classifies the true root cause of a validation/build failure with bounded retry limits and returns the smallest coherent repair plan without weakening types or tests.',
+		params: {
+			error_summary: { description: 'Actual error or quality-gate failure output.' },
+			files: { description: 'Optional array or comma-separated affected file paths.' },
+			max_retries: { description: 'Optional bounded retry limit (default 3).' },
+		},
+	},
+	fpere_get_status: {
+		name: 'fpere_get_status',
+		description: 'Loads current persisted FPERE blueprint, architecture memory, quality gate stage, active agent file leases, and repair history.',
+		params: {},
+	},
+
+	// Kodia Engineering Reasoning & Technical Correctness Engine (ERIC) — 6 behavioral, API, semantic & independent-review tools
+	eric_specify_behavior: {
+		name: 'eric_specify_behavior',
+		description: 'Persists a structured behavioral specification (.kodia/fpere/behavioral-spec.json) separating explicit user requirements from inferred assumptions, edge cases, failure conditions, security/performance constraints, and testable acceptance criteria.',
+		params: {
+			feature_name: { description: 'Name of the feature or system being specified.' },
+			domain: { description: 'web_backend | frontend | mobile | ai_ml | systems_desktop | games_embedded | general.' },
+			explicit_requirements: { description: 'JSON array or comma-separated explicit requirements stated by the user.' },
+			inferred_assumptions: { description: 'Optional JSON array of assumptions inferred (kept distinct from explicit requirements).' },
+			constraints: { description: 'Optional JSON array of technical/business constraints.' },
+			inputs_and_outputs: { description: 'Optional JSON array of { name, inputShape, outputShape }.' },
+			edge_cases: { description: 'Optional JSON array of boundary and edge cases.' },
+			failure_conditions: { description: 'Optional JSON array of expected failure/error handling behaviors.' },
+			security_requirements: { description: 'Optional JSON array of auth, validation, and security requirements.' },
+			performance_requirements: { description: 'Optional JSON array of latency/scale/memory targets.' },
+			integration_requirements: { description: 'Optional JSON array of external/internal integration requirements.' },
+			acceptance_criteria: { description: 'Optional JSON array of { id, criterion, verificationMethod, verified? }.' },
+			open_ambiguities: { description: 'Optional JSON array of unresolved ambiguities.' },
+		},
+	},
+	eric_evaluate_approaches: {
+		name: 'eric_evaluate_approaches',
+		description: 'Evaluates multiple candidate technical approaches across correctness, reliability, security, maintainability, framework compatibility, performance, and operational simplicity, persisting the decision rationale to .kodia/fpere/decisions.json.',
+		params: {
+			problem: { description: 'Engineering decision or technical problem statement.' },
+			domain: { description: 'web_backend | frontend | mobile | ai_ml | systems_desktop | games_embedded | general.' },
+			options: { description: 'JSON array of candidate options: { name, summary, scores: { correctness, reliability, maintainability, security, performance, frameworkCompatibility, operationalSimplicity }, dependenciesRequired, pros, cons }.' },
+			evidence: { description: 'Optional array of verified doc/benchmark evidence strings.' },
+		},
+	},
+	eric_verify_api_usage: {
+		name: 'eric_verify_api_usage',
+		description: 'Inspects actual installed node_modules/<pkg>/package.json and .d.ts type declarations on disk and verifies imported symbols and method calls in workspace code to catch invented/nonexistent APIs.',
+		params: {},
+	},
+	eric_analyze_semantics: {
+		name: 'eric_analyze_semantics',
+		description: 'Performs multi-domain semantic & behavioral correctness analysis to catch code that compiles yet is wrong: async forEach/Promise races, SQL interpolation, weak password hashes, numeric .sort() bugs, setInterval/listener leaks, React state mutation, Python mutable defaults, ML train/test data leakage, and weak/tautological/skipped test oracles.',
+		params: {},
+	},
+	eric_independent_review: {
+		name: 'eric_independent_review',
+		description: 'Runs an independent evidence-based engineering review combining semantic analysis, installed API verification, optional real test execution, acceptance criteria audit, and relevant past lessons. Honestly separates verified evidence from unverified items and assumptions.',
+		params: {
+			test_command: { description: 'Optional real test command to execute during independent review.' },
+		},
+	},
+	eric_record_failure_lesson: {
+		name: 'eric_record_failure_lesson',
+		description: 'Records a structured root-cause failure lesson into .kodia/fpere/engineering-lessons.json ONLY when verified_fix is true and concrete verification_evidence is provided.',
+		params: {
+			category: { description: 'requirement_misunderstanding | incorrect_technical_approach | outdated_api_knowledge | incorrect_api_usage | algorithm_error | business_logic_error | repository_context_failure | dependency_mismatch | type_inconsistency | integration_failure | insufficient_testing | model_limitation | tool_execution_failure.' },
+			domain: { description: 'web_backend | frontend | mobile | ai_ml | systems_desktop | games_embedded | general.' },
+			technology: { description: 'Framework, language, or library involved.' },
+			symptom: { description: 'Observed failure symptom.' },
+			root_cause: { description: 'Confirmed root cause.' },
+			verified_fix_pattern: { description: 'Preventive engineering pattern that fixed the issue.' },
+			verification_evidence: { description: 'Exact command/test output proving the fix worked.' },
+			verified_fix: { description: 'Must be true; unverified lessons are rejected.' },
+		},
+	},
+
+	// Kodia Universal App Builder Engine (UABE) & IRIRE — 10 full-lifecycle application building tools
+	uabe_open_workspace: {
+		name: 'uabe_open_workspace',
+		description: 'Opens the native Kodia Universal App Builder workspace (Ctrl+Alt+U) directly to a specified tab (create, requirements, preview, integrations, baas, reliability, handover, activity).',
+		params: {
+			tab: { description: 'Optional target tab: create | requirements | preview | integrations | baas | reliability | handover | activity.' },
+		},
+	},
+	uabe_init_project: {
+		name: 'uabe_init_project',
+		description: 'Initializes or updates a persistent Universal App Builder project (.kodia/app-builder/project.json), extracting Contract-to-Product requirements, recommending architecture/stack, and discovering required external credentials via IRIRE.',
+		params: {
+			name: { description: 'Optional application name.' },
+			brief: { description: 'Product idea, client brief, contract, SOW, or technical specification.' },
+			source_type: { description: 'Optional: idea | client_brief | contract | sow | prd | api_spec | figma_reference | existing_code.' },
+			build_mode: { description: 'Optional per-project mode: autonomous_build (default) | plan_first | user_chooses.' },
+			preferred_platforms: { description: 'Optional comma-separated/array platforms (web, fullstack, ai_app, enterprise_saas, ecommerce, mobile_rn, mobile_flutter, mobile_android, mobile_ios, desktop_electron, desktop_tauri).' },
+			preferred_stack: { description: 'Optional user-preferred technology stack.' },
+		},
+	},
+	uabe_analyze_contract: {
+		name: 'uabe_analyze_contract',
+		description: 'Extracts structured business objectives, user roles, workflows, traceable requirements, and ambiguities from a client contract, SOW, PRD, or brief.',
+		params: {
+			brief: { description: 'Full text of the contract, SOW, PRD, or product brief.' },
+			source_type: { description: 'Optional brief source type.' },
+		},
+	},
+	uabe_recommend_stack: {
+		name: 'uabe_recommend_stack',
+		description: 'Selects an optimal, language-agnostic architecture and technology stack respecting any existing workspace stack and explaining trade-offs.',
+		params: {
+			preferred_stack: { description: 'Optional user stack preference.' },
+			preferred_platforms: { description: 'Optional array or comma-separated target platforms.' },
+		},
+	},
+	uabe_discover_integrations: {
+		name: 'uabe_discover_integrations',
+		description: 'Runs IRIRE to discover all required external accounts, API keys, databases, BaaS, payments, OAuth, and cloud credentials with verified official links, billing transparency, step-by-step onboarding, and local alternatives.',
+		params: {
+			brief_override: { description: 'Optional updated brief or specification text to scan alongside workspace source files.' },
+		},
+	},
+	uabe_configure_integration: {
+		name: 'uabe_configure_integration',
+		description: 'Encrypts and stores an external integration credential in Kodia local vault (never in source code or handover packages) and updates IRIRE status.',
+		params: {
+			requirement_id: { description: 'IRIRE requirement ID.' },
+			env_var_name: { description: 'Environment variable name (e.g. MONGODB_URI, STRIPE_SECRET_KEY).' },
+			secret_value: { description: 'Credential value provided by the user.' },
+			mode: { description: 'Optional mode: live_verified | local_dev | sandbox | mock_substitute.' },
+		},
+	},
+	uabe_apply_visual_edit: {
+		name: 'uabe_apply_visual_edit',
+		description: 'Applies a visual property/text/class/style edit directly to the real source file with an automatic rollback checkpoint.',
+		params: {
+			file_path: { description: 'Workspace-relative source file path.' },
+			selector_or_text: { description: 'Target element text, selector, or identifier in the file.' },
+			new_text: { description: 'Optional replacement visible text.' },
+			style_changes: { description: 'Optional JSON object of CSS/JSX style properties.' },
+			add_classes: { description: 'Optional array/comma-separated CSS/Tailwind classes to add.' },
+			remove_classes: { description: 'Optional array/comma-separated CSS/Tailwind classes to remove.' },
+		},
+	},
+	uabe_scaffold_app: {
+		name: 'uabe_scaffold_app',
+		description: 'Scaffolds a clean, verified multi-platform starter foundation (website, fullstack_business, ai_app, mobile_rn, desktop_electron) with runnable tests and rollback checkpoint.',
+		params: {
+			template: { description: 'website | fullstack_business | ai_app | mobile_rn | desktop_electron.' },
+			app_name: { description: 'Application display name.' },
+		},
+	},
+	uabe_evaluate_reliability: {
+		name: 'uabe_evaluate_reliability',
+		description: 'Evaluates the honest Application Reliability Dashboard combining FPERE, ERIC semantic & installed-API audits, IRIRE credential status, and optional real compiler/test/build execution.',
+		params: {
+			run_compiler: { description: 'Optional boolean (default true) to run independent compiler checks.' },
+			test_command: { description: 'Optional real test command.' },
+			build_command: { description: 'Optional real build command.' },
+		},
+	},
+	uabe_generate_handover: {
+		name: 'uabe_generate_handover',
+		description: 'Generates a complete, secret-free client handover package in handover/ (PRODUCT_ARCHITECTURE.md, INSTALL_AND_OPERATIONS.md, VERIFICATION_REPORT.md, CLIENT_PRESENTATION.html, .env.example, handover-manifest.json).',
+		params: {
+			client_name: { description: 'Optional client or recipient organization name.' },
+			project_title: { description: 'Optional project title override.' },
+		},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -3142,6 +3370,19 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - NEVER arbitrarily hide, suppress, or dismiss genuine errors; always cross-check with the project's own compiler (kdre_verify_compilers) and distinguish compiler-confirmed errors from stale, configuration-dependent, or conflicting LSP diagnostics.
 - For version-sensitive tool/SDK/compiler compatibility issues discovered during diagnostic investigation, cross-check current official documentation using Live Engineering Intelligence (lei_research_technology / lei_check_dependency).
 - Use kdre_recover (purge_stale_markers, reload_project_config, restart_language_server) when language-server drift or stale markers are confirmed, and re-verify afterwards.`)
+		details.push(`KODIA FIRST-PASS ENGINEERING RELIABILITY ENGINE (FPERE — CONTRACT-FIRST, CONTINUOUS-INTEGRATION CODE GENERATION):
+- NEVER generate an entire multi-file application blindly and fix errors at the end. Follow: UNDERSTAND (fpere_analyze_architecture) → PLAN & DEFINE CONTRACTS (fpere_create_blueprint: shared types, API routes/payloads, DB models, env vars, Task DAG) → IMPLEMENT INCREMENTAL UNITS → VALIDATE IMMEDIATELY (fpere_validate_imports & write-time checks) → INTEGRATION CHECKPOINTS (fpere_check_integration) → FIRST-PASS QUALITY GATE (fpere_run_quality_gate).
+- When delegating to parallel specialists (contract_architect, backend, frontend, db_engineer, integration_verifier), define shared contracts first and coordinate file ownership with fpere_coordinate_agents so parallel agents never produce incompatible interfaces or overwrite each other.
+- NEVER optimize for a fake zero-error result: never weaken TypeScript strict mode, add @ts-ignore/@ts-nocheck, replace real implementations with mocks/stubs, or remove failing tests. Always diagnose root causes via fpere_plan_repair with bounded retries.`)
+		details.push(`KODIA ENGINEERING REASONING & TECHNICAL CORRECTNESS ENGINE (ERIC — PREVENTING COMPILING-YET-WRONG CODE):
+- Code that compiles can still be algorithmically, semantically, behaviorally, or architecturally wrong. Before non-trivial implementation: capture explicit requirements vs inferred assumptions & acceptance criteria (eric_specify_behavior) and compare technical approaches when meaningful architectural trade-offs exist (eric_evaluate_approaches).
+- NEVER invent library/framework methods from memory: verify real installed APIs via eric_verify_api_usage (inspects node_modules declarations on disk) and cross-check live docs with LEI (lei_research_technology) for current SDK/model versions.
+- Run eric_analyze_semantics and eric_independent_review (or delegate to the read-only \`eric_reviewer\` specialist) to catch async races, resource leaks, SQL/auth flaws, algorithm/ML leakage bugs, and weak/tautological test oracles.
+- NEVER claim full verification when tests did not run or acceptance criteria remain unchecked: honestly state what was checked, what passed/failed, what remains unverified, and known assumptions. Persist verified root-cause lessons only after proof via eric_record_failure_lesson.`)
+		details.push(`KODIA UNIVERSAL APP BUILDER ENGINE (UABE) & IRIRE — AUTONOMOUS FULL-LIFECYCLE PRODUCT ENGINEERING:
+- For any full application, website, SaaS, e-commerce, AI app, mobile app, desktop app, or client contract/SOW request: open/initialize UABE (uabe_open_workspace / uabe_init_project), extract traceable Contract-to-Product requirements (uabe_analyze_contract), select the simplest appropriate stack across any language/framework (uabe_recommend_stack), and discover all required external accounts, API keys, official setup links & billing disclosures upfront via IRIRE (uabe_discover_integrations).
+- Respect the project's Build Mode (default: Autonomous Build — proceed end-to-end without unnecessary pauses; Plan First — present plan and wait for approval; User Chooses Per Project). When credentials are missing, continue building unrelated modules & local/sandbox adapters cleanly while clearly marking external integrations as pending credentials (never claim a mock is live).
+- Coordinate FPERE (contract-first blueprints, import/export & full-stack checks), ERIC (semantic & installed API audits), LEI (current docs/models/pricing), API Studio, Mobile Studio, and Browser Preview/Testing. Support visual edits synced to real source code (uabe_apply_visual_edit), honest reliability reporting (uabe_evaluate_reliability), and secret-free client handover packages (uabe_generate_handover).`)
 		details.push(`NATIVE API ENGINEERING STUDIO & LIVE TESTING WORKFLOW: Whenever the user asks to build, inspect, test, debug, load-test, security-audit, document, or prepare an API (including "Test my API"):
 - Automatically open the native in-editor API Studio (api_open_studio) so the user can watch real execution live inside Kodia.
 - Discover actual routes, frameworks, protocols, specs, auth, and services with api_discover_project.

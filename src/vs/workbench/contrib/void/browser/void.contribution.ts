@@ -27,6 +27,9 @@ import './mobileStudioPane.js'
 import './liveIntelligencePane.js'
 import './liveIntelligenceService.js'
 import './diagnosticReliabilityService.js'
+import './firstPassReliabilityService.js'
+import './universalAppBuilderService.js'
+import './universalAppBuilderPane.js'
 
 // register css
 import './media/void.css'

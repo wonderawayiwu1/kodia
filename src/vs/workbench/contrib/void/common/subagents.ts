@@ -71,7 +71,12 @@ export type BuiltinSubagentType =
 	| 'dependency_intel'
 	| 'security_advisory_researcher'
 	| 'compat_verifier'
-	| 'evidence_auditor';
+	| 'evidence_auditor'
+	| 'contract_architect'
+	| 'integration_verifier'
+	| 'db_engineer'
+	| 'eric_reviewer'
+	| 'app_builder_lead';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -372,6 +377,31 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		description: 'read-only Research Evidence Auditor independently reviewing citations, freshness, conflicts, and verification statuses',
 		guidance: 'Use lei_inspect_evidence to audit verification statuses, expose conflicting sources, and ensure unverified findings are never marked Verified.',
 	},
+	contract_architect: {
+		canChangeFiles: true,
+		description: 'Contract-First Blueprint & Interface Architect establishing shared types, API schemas, DB contracts, and dependency-ordered Task DAGs before module generation',
+		guidance: 'Call fpere_analyze_architecture and fpere_create_blueprint first. Define shared interfaces and contracts before parallel agents implement dependent modules.',
+	},
+	integration_verifier: {
+		canChangeFiles: false,
+		description: 'read-only Independent Integration & First-Pass Quality Gate Verifier cross-checking imports, exports, frontend/backend API contracts, DB models, compilers, and tests',
+		guidance: 'Never trust generating-agent claims. Run fpere_validate_imports, fpere_check_integration, fpere_run_quality_gate, and kdre_verify_compilers to report real verified stages.',
+	},
+	db_engineer: {
+		canChangeFiles: true,
+		description: 'Database Schema, Migrations, Relations & Repository Contract specialist',
+		guidance: 'Align schemas, relations, indexes, and repository queries strictly with the shared Blueprint DB contracts and verify with fpere_check_integration.',
+	},
+	eric_reviewer: {
+		canChangeFiles: false,
+		description: 'read-only Independent Engineering Reasoning & Technical Correctness Reviewer auditing behavioral semantics, installed API declarations, algorithms, security boundaries, test-oracle strength, and honest verification evidence',
+		guidance: 'Never assume compiling code is correct. Run eric_verify_api_usage, eric_analyze_semantics, and eric_independent_review. Report verified evidence vs unverified areas, challenge weak/tautological tests, and refuse false confidence.',
+	},
+	app_builder_lead: {
+		canChangeFiles: true,
+		description: 'Universal App Builder Engine (UABE) Product Lead orchestrating Contract-to-Product extraction, universal stack selection, IRIRE credential discovery, full-stack/mobile/desktop/AI implementation, visual source-sync edits, honest reliability verification, and client handover',
+		guidance: 'Coordinate uabe_init_project, uabe_analyze_contract, uabe_discover_integrations, fpere_create_blueprint, eric_analyze_semantics, eric_verify_api_usage, uabe_evaluate_reliability, and uabe_generate_handover. Never invent credentials or fake 100% completion.',
+	},
 };
 
 // common names models use for the same roles
@@ -403,6 +433,9 @@ const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, BuiltinSubagentType>> = {
 	'researcher': 'tech_researcher', 'tech-research': 'tech_researcher', 'model-intel': 'ai_model_intel', 'ai-models': 'ai_model_intel',
 	'framework-research': 'framework_sdk_researcher', 'api-docs': 'api_docs_researcher', 'dep-intel': 'dependency_intel',
 	'advisories': 'security_advisory_researcher', 'compat': 'compat_verifier', 'evidence': 'evidence_auditor',
+	'contracts': 'contract_architect', 'integration': 'integration_verifier', 'db-engineer': 'db_engineer',
+	'eric': 'eric_reviewer', 'reasoning-reviewer': 'eric_reviewer',
+	'uabe': 'app_builder_lead', 'app-builder': 'app_builder_lead',
 };
 
 export interface CustomSubagentDefinition extends SubagentProfile {

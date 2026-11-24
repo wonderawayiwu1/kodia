@@ -27,6 +27,7 @@ import '../styles.css';
 import { useAccessor, useIsDark } from '../util/services.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import { DiagnosticReliabilityPanel } from './DiagnosticReliabilityPanel.js';
+import { FirstPassReliabilityPanel } from './FirstPassReliabilityPanel.js';
 import { CorrectnessWorkbenchState } from '../../../correctnessService.js';
 import {
 	CorrectnessDiagnostic,
@@ -412,6 +413,9 @@ export const CorrectnessHubApp = () => {
 					<div className='space-y-4'>
 						{/* Kodia Diagnostic Reliability Engine (KDRE) Live Panel */}
 						<DiagnosticReliabilityPanel />
+
+						{/* Kodia First-Pass Engineering Reliability Engine (FPERE) Live Panel */}
+						<FirstPassReliabilityPanel />
 
 						{/* Compiler summary strip */}
 						<div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5'>

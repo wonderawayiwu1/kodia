@@ -254,6 +254,24 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'correctness_export_sarif',
 	'correctness_list_proofs',
 	'correctness_manage_suppressions',
+	// ERIC Engineering Reasoning & Technical Correctness tools
+	'eric_specify_behavior',
+	'eric_evaluate_approaches',
+	'eric_verify_api_usage',
+	'eric_analyze_semantics',
+	'eric_independent_review',
+	'eric_record_failure_lesson',
+	// UABE Universal App Builder & IRIRE tools
+	'uabe_open_workspace',
+	'uabe_init_project',
+	'uabe_analyze_contract',
+	'uabe_recommend_stack',
+	'uabe_discover_integrations',
+	'uabe_configure_integration',
+	'uabe_apply_visual_edit',
+	'uabe_scaffold_app',
+	'uabe_evaluate_reliability',
+	'uabe_generate_handover',
 ]);
 
 /**
@@ -696,6 +714,30 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'kdre_evaluate_diagnostics':
 		case 'kdre_investigate_diagnostic':
 		case 'kdre_recover':
+		case 'fpere_analyze_architecture':
+		case 'fpere_create_blueprint':
+		case 'fpere_validate_imports':
+		case 'fpere_check_integration':
+		case 'fpere_run_quality_gate':
+		case 'fpere_coordinate_agents':
+		case 'fpere_plan_repair':
+		case 'fpere_get_status':
+		case 'eric_specify_behavior':
+		case 'eric_evaluate_approaches':
+		case 'eric_verify_api_usage':
+		case 'eric_analyze_semantics':
+		case 'eric_independent_review':
+		case 'eric_record_failure_lesson':
+		case 'uabe_open_workspace':
+		case 'uabe_init_project':
+		case 'uabe_analyze_contract':
+		case 'uabe_recommend_stack':
+		case 'uabe_discover_integrations':
+		case 'uabe_configure_integration':
+		case 'uabe_apply_visual_edit':
+		case 'uabe_scaffold_app':
+		case 'uabe_evaluate_reliability':
+		case 'uabe_generate_handover':
 			return 'low';
 
 		// Mobile scaffolding, device actions, and builds/tests

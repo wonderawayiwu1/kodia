@@ -193,6 +193,42 @@ import {
 	formatInvestigationForLLM as formatKdreInvestigationForLLM,
 	formatProjectConfigForLLM,
 } from '../common/diagnosticReliabilityEngine.js'
+import {
+	FpereCheckpointKind,
+	IKodiaFirstPassReliabilityMainService,
+	KODIA_FPERE_CHANNEL,
+} from '../common/firstPassReliabilityTypes.js'
+import {
+	formatArchitectureForLLM,
+	formatImportExportForLLM,
+	formatIntegrationForLLM,
+	formatQualityGateForLLM,
+} from '../common/firstPassReliabilityEngine.js'
+import {
+	EricApproachOption,
+	EricEngineeringDomain,
+	EricFailureCategory,
+} from '../common/engineeringReasoningTypes.js'
+import {
+	formatApiVerificationForLLM,
+	formatIndependentReviewForLLM,
+	formatSemanticReportForLLM,
+} from '../common/engineeringReasoningEngine.js'
+import {
+	IKodiaUniversalAppBuilderMainService,
+	IrireIntegrationMode,
+	KODIA_UABE_CHANNEL,
+	UabeBriefSourceType,
+	UabeBuildMode,
+	UabePlatformTarget,
+	UabeWorkspaceTab,
+} from '../common/universalAppBuilderTypes.js'
+import {
+	formatContractAnalysisForLLM,
+	formatIntegrationsForLLM,
+	formatReliabilityDashboardForLLM,
+} from '../common/universalAppBuilderEngine.js'
+import { IUniversalAppBuilderService } from './universalAppBuilderService.js'
 import { IKodiaLiveIntelligenceMainService, KODIA_LEI_CHANNEL, LeiDomain, LeiModelTaskRequirements, LeiPackageEcosystem } from '../common/liveIntelligenceTypes.js'
 import {
 	formatDependencyReportForLLM,
@@ -540,6 +576,34 @@ export class ToolsService implements IToolsService {
 		const mobileMainService = ProxyChannel.toService<IKodiaMobileMainService>(mainProcessService.getChannel(KODIA_MOBILE_CHANNEL))
 		const leiMainService = ProxyChannel.toService<IKodiaLiveIntelligenceMainService>(mainProcessService.getChannel(KODIA_LEI_CHANNEL))
 		const kdreMainService = ProxyChannel.toService<IKodiaDiagnosticReliabilityMainService>(mainProcessService.getChannel(KODIA_KDRE_CHANNEL))
+		const fpereMainService = ProxyChannel.toService<IKodiaFirstPassReliabilityMainService>(mainProcessService.getChannel(KODIA_FPERE_CHANNEL))
+		const uabeMainService = ProxyChannel.toService<IKodiaUniversalAppBuilderMainService>(mainProcessService.getChannel(KODIA_UABE_CHANNEL))
+
+		// FPERE Write-Time Guard: immediately verify imports, named/default exports, declared packages & stubs on edited code files
+		const runFpereWriteGuard = async (uri: URI, existingLintErrors: LintErrorItem[] | null): Promise<LintErrorItem[] | null> => {
+			const root = workspaceFolderPaths()[0]
+			if (!root || !/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py)$/i.test(uri.fsPath)) return existingLintErrors
+			const normRoot = root.replace(/\\/g, '/').toLowerCase()
+			const normFile = uri.fsPath.replace(/\\/g, '/')
+			if (!normFile.toLowerCase().startsWith(normRoot)) return existingLintErrors
+			const rel = normFile.slice(normRoot.length).replace(/^\/+/, '')
+			try {
+				const rep = await fpereMainService.validateImportsAndExports(root, [rel])
+				const fpereErrs: LintErrorItem[] = rep.issues
+					.filter(i => i.severity === 'error')
+					.slice(0, 8)
+					.map(i => ({
+						code: i.kind,
+						message: `[FPERE ${i.kind}] ${i.message} (${i.suggestedFix})`,
+						startLineNumber: i.line,
+						endLineNumber: i.line,
+					}))
+				if (fpereErrs.length === 0) return existingLintErrors
+				return [...(existingLintErrors ?? []), ...fpereErrs]
+			} catch {
+				return existingLintErrors
+			}
+		}
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
 		const getNotebookEditHistory = (uri: URI): NotebookEditHistoryState => {
@@ -2739,6 +2803,206 @@ export class ToolsService implements IToolsService {
 				const action: KdreRecoveryActionKind = (allowed as readonly string[]).includes(raw) ? raw as KdreRecoveryActionKind : 'reload_project_config'
 				return { action, target_language: validateOptionalStr('target_language', params.target_language) ?? undefined }
 			},
+			// Kodia First-Pass Engineering Reliability Engine (FPERE)
+			fpere_analyze_architecture: () => ({}),
+			fpere_create_blueprint: (params: RawToolParamsObj) => {
+				const parseArr = <T,>(v: unknown): T[] | undefined => {
+					if (Array.isArray(v)) return v as T[]
+					if (typeof v === 'string' && v.trim()) {
+						try { const p = JSON.parse(v); if (Array.isArray(p)) return p as T[] } catch { /* fall back to CSV */ }
+						return v.split(',').map(s => s.trim()).filter(Boolean) as unknown as T[]
+					}
+					return undefined
+				}
+				return {
+					title: validateStr('title', params.title),
+					objective: validateStr('objective', params.objective),
+					stack: parseArr<string>(params.stack) ?? [],
+					module_boundaries: parseArr(params.module_boundaries),
+					shared_interfaces: parseArr(params.shared_interfaces),
+					api_contracts: parseArr(params.api_contracts),
+					db_models: parseArr(params.db_models),
+					required_env_vars: parseArr<string>(params.required_env_vars),
+					build_command: validateOptionalStr('build_command', params.build_command) ?? undefined,
+					test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+					acceptance_criteria: parseArr<string>(params.acceptance_criteria),
+					tasks: parseArr(params.tasks),
+				}
+			},
+			fpere_validate_imports: (params: RawToolParamsObj) => {
+				const raw = params.target_files
+				const target_files = Array.isArray(raw) ? raw.map(String).filter(Boolean)
+					: typeof raw === 'string' && raw.trim() ? raw.split(',').map(s => s.trim()).filter(Boolean) : undefined
+				return { target_files }
+			},
+			fpere_check_integration: (params: RawToolParamsObj) => ({
+				checkpoint: (validateOptionalStr('checkpoint', params.checkpoint) ?? undefined) as FpereCheckpointKind | undefined,
+			}),
+			fpere_run_quality_gate: (params: RawToolParamsObj) => {
+				const raw = params.target_files
+				const target_files = Array.isArray(raw) ? raw.map(String).filter(Boolean)
+					: typeof raw === 'string' && raw.trim() ? raw.split(',').map(s => s.trim()).filter(Boolean) : undefined
+				return {
+					unit_label: validateOptionalStr('unit_label', params.unit_label) ?? undefined,
+					target_files,
+					checkpoint: (validateOptionalStr('checkpoint', params.checkpoint) ?? undefined) as FpereCheckpointKind | undefined,
+					run_compiler: validateBoolean(params.run_compiler, { default: true }) ?? true,
+					test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+					build_command: validateOptionalStr('build_command', params.build_command) ?? undefined,
+				}
+			},
+			fpere_coordinate_agents: (params: RawToolParamsObj) => {
+				const rawAct = validateStr('action', params.action)
+				const action: 'acquire' | 'release' | 'status' = rawAct === 'acquire' || rawAct === 'release' ? rawAct : 'status'
+				const rawFiles = params.files
+				const files = Array.isArray(rawFiles) ? rawFiles.map(String).filter(Boolean)
+					: typeof rawFiles === 'string' && rawFiles.trim() ? rawFiles.split(',').map(s => s.trim()).filter(Boolean) : undefined
+				return {
+					action,
+					agent_id: validateOptionalStr('agent_id', params.agent_id) ?? undefined,
+					task_id: validateOptionalStr('task_id', params.task_id) ?? undefined,
+					files,
+				}
+			},
+			fpere_plan_repair: (params: RawToolParamsObj) => {
+				const rawFiles = params.files
+				const files = Array.isArray(rawFiles) ? rawFiles.map(String).filter(Boolean)
+					: typeof rawFiles === 'string' && rawFiles.trim() ? rawFiles.split(',').map(s => s.trim()).filter(Boolean) : undefined
+				return {
+					error_summary: validateStr('error_summary', params.error_summary),
+					files,
+					max_retries: validateNumber(params.max_retries, { default: 3 }) ?? 3,
+				}
+			},
+			fpere_get_status: () => ({}),
+			// Kodia Engineering Reasoning & Technical Correctness Engine (ERIC)
+			eric_specify_behavior: (params: RawToolParamsObj) => {
+				const parseArr = <T,>(v: unknown): T[] | undefined => {
+					if (Array.isArray(v)) return v as T[]
+					if (typeof v === 'string' && v.trim()) {
+						try { const p = JSON.parse(v); if (Array.isArray(p)) return p as T[] } catch { /* CSV fallback */ }
+						return v.split(',').map(s => s.trim()).filter(Boolean) as unknown as T[]
+					}
+					return undefined
+				}
+				return {
+					feature_name: validateStr('feature_name', params.feature_name),
+					domain: (validateOptionalStr('domain', params.domain) ?? 'general') as EricEngineeringDomain,
+					explicit_requirements: parseArr<string>(params.explicit_requirements) ?? [],
+					inferred_assumptions: parseArr<string>(params.inferred_assumptions),
+					constraints: parseArr<string>(params.constraints),
+					inputs_and_outputs: parseArr(params.inputs_and_outputs),
+					edge_cases: parseArr<string>(params.edge_cases),
+					failure_conditions: parseArr<string>(params.failure_conditions),
+					security_requirements: parseArr<string>(params.security_requirements),
+					performance_requirements: parseArr<string>(params.performance_requirements),
+					integration_requirements: parseArr<string>(params.integration_requirements),
+					acceptance_criteria: parseArr(params.acceptance_criteria),
+					open_ambiguities: parseArr<string>(params.open_ambiguities),
+				}
+			},
+			eric_evaluate_approaches: (params: RawToolParamsObj) => {
+				const parseArr = <T,>(v: unknown): T[] => {
+					if (Array.isArray(v)) return v as T[]
+					if (typeof v === 'string' && v.trim()) {
+						try { const p = JSON.parse(v); if (Array.isArray(p)) return p as T[] } catch { /* ignore */ }
+					}
+					return []
+				}
+				return {
+					problem: validateStr('problem', params.problem),
+					domain: (validateOptionalStr('domain', params.domain) ?? 'general') as EricEngineeringDomain,
+					options: parseArr<EricApproachOption>(params.options),
+					evidence: parseArr<string>(params.evidence),
+				}
+			},
+			eric_verify_api_usage: () => ({}),
+			eric_analyze_semantics: () => ({}),
+			eric_independent_review: (params: RawToolParamsObj) => ({
+				test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+			}),
+			eric_record_failure_lesson: (params: RawToolParamsObj) => ({
+				category: (validateStr('category', params.category)) as EricFailureCategory,
+				domain: (validateOptionalStr('domain', params.domain) ?? 'general') as EricEngineeringDomain,
+				technology: validateStr('technology', params.technology),
+				symptom: validateStr('symptom', params.symptom),
+				root_cause: validateStr('root_cause', params.root_cause),
+				verified_fix_pattern: validateStr('verified_fix_pattern', params.verified_fix_pattern),
+				verification_evidence: validateStr('verification_evidence', params.verification_evidence),
+				verified_fix: validateBoolean(params.verified_fix, { default: false }) ?? false,
+			}),
+			// Kodia Universal App Builder Engine (UABE) & IRIRE
+			uabe_open_workspace: (params: RawToolParamsObj) => ({
+				tab: (validateOptionalStr('tab', params.tab) ?? 'create') as UabeWorkspaceTab,
+			}),
+			uabe_init_project: (params: RawToolParamsObj) => {
+				const rawP = params.preferred_platforms
+				const preferred_platforms = Array.isArray(rawP) ? rawP.map(String).filter(Boolean) as UabePlatformTarget[]
+					: typeof rawP === 'string' && rawP.trim() ? rawP.split(',').map(s => s.trim()).filter(Boolean) as UabePlatformTarget[] : undefined
+				return {
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					brief: validateStr('brief', params.brief),
+					source_type: (validateOptionalStr('source_type', params.source_type) ?? undefined) as UabeBriefSourceType | undefined,
+					build_mode: (validateOptionalStr('build_mode', params.build_mode) ?? undefined) as UabeBuildMode | undefined,
+					preferred_platforms,
+					preferred_stack: validateOptionalStr('preferred_stack', params.preferred_stack) ?? undefined,
+				}
+			},
+			uabe_analyze_contract: (params: RawToolParamsObj) => ({
+				brief: validateStr('brief', params.brief),
+				source_type: (validateOptionalStr('source_type', params.source_type) ?? undefined) as UabeBriefSourceType | undefined,
+			}),
+			uabe_recommend_stack: (params: RawToolParamsObj) => {
+				const rawP = params.preferred_platforms
+				const preferred_platforms = Array.isArray(rawP) ? rawP.map(String).filter(Boolean) as UabePlatformTarget[]
+					: typeof rawP === 'string' && rawP.trim() ? rawP.split(',').map(s => s.trim()).filter(Boolean) as UabePlatformTarget[] : undefined
+				return {
+					preferred_stack: validateOptionalStr('preferred_stack', params.preferred_stack) ?? undefined,
+					preferred_platforms,
+				}
+			},
+			uabe_discover_integrations: (params: RawToolParamsObj) => ({
+				brief_override: validateOptionalStr('brief_override', params.brief_override) ?? undefined,
+			}),
+			uabe_configure_integration: (params: RawToolParamsObj) => ({
+				requirement_id: validateStr('requirement_id', params.requirement_id),
+				env_var_name: validateStr('env_var_name', params.env_var_name),
+				secret_value: validateStr('secret_value', params.secret_value),
+				mode: (validateOptionalStr('mode', params.mode) ?? undefined) as IrireIntegrationMode | undefined,
+			}),
+			uabe_apply_visual_edit: (params: RawToolParamsObj) => {
+				const parseList = (v: unknown): string[] | undefined => Array.isArray(v) ? v.map(String).filter(Boolean)
+					: typeof v === 'string' && v.trim() ? v.split(/[\s,]+/).filter(Boolean) : undefined
+				let style_changes: Record<string, string> | undefined
+				if (params.style_changes && typeof params.style_changes === 'object' && !Array.isArray(params.style_changes)) {
+					style_changes = params.style_changes as Record<string, string>
+				} else if (typeof params.style_changes === 'string' && params.style_changes.trim()) {
+					try { style_changes = JSON.parse(params.style_changes) } catch { /* ignore */ }
+				}
+				return {
+					file_path: validateStr('file_path', params.file_path),
+					selector_or_text: validateStr('selector_or_text', params.selector_or_text),
+					new_text: validateOptionalStr('new_text', params.new_text) ?? undefined,
+					style_changes,
+					add_classes: parseList(params.add_classes),
+					remove_classes: parseList(params.remove_classes),
+				}
+			},
+			uabe_scaffold_app: (params: RawToolParamsObj) => {
+				const raw = validateStr('template', params.template)
+				const allowed = ['website', 'fullstack_business', 'ai_app', 'mobile_rn', 'desktop_electron'] as const
+				const template = (allowed as readonly string[]).includes(raw) ? raw as typeof allowed[number] : 'website'
+				return { template, app_name: validateStr('app_name', params.app_name) }
+			},
+			uabe_evaluate_reliability: (params: RawToolParamsObj) => ({
+				run_compiler: validateBoolean(params.run_compiler, { default: true }) ?? true,
+				test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+				build_command: validateOptionalStr('build_command', params.build_command) ?? undefined,
+			}),
+			uabe_generate_handover: (params: RawToolParamsObj) => ({
+				client_name: validateOptionalStr('client_name', params.client_name) ?? undefined,
+				project_title: validateOptionalStr('project_title', params.project_title) ?? undefined,
+			}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -3802,7 +4066,8 @@ export class ToolsService implements IToolsService {
 				// Event-driven fresh diagnostics wait (0ms for non-code files, ~120-550ms for code files)
 				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
-				return { result: { lintErrors } }
+				const checkedLintErrors = await runFpereWriteGuard(uri, lintErrors)
+				return { result: { lintErrors: checkedLintErrors } }
 			},
 
 			// write_file: alias for rewrite_file
@@ -3815,7 +4080,8 @@ export class ToolsService implements IToolsService {
 				await editCodeService.instantlyRewriteFile({ uri, newContent })
 				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
-				return { result: { lintErrors } }
+				const checkedLintErrors = await runFpereWriteGuard(uri, lintErrors)
+				return { result: { lintErrors: checkedLintErrors } }
 			},
 
 			edit_file: async ({ uri, searchReplaceBlocks }) => {
@@ -3828,7 +4094,8 @@ export class ToolsService implements IToolsService {
 
 				await this._waitForFreshLintErrors(uri)
 				const { lintErrors } = this._getLintErrors(uri)
-				return { result: { lintErrors } }
+				const checkedLintErrors = await runFpereWriteGuard(uri, lintErrors)
+				return { result: { lintErrors: checkedLintErrors } }
 			},
 
 			write_project_memory: async ({ section, content }) => {
@@ -5804,6 +6071,214 @@ export class ToolsService implements IToolsService {
 				}
 				return { result: { action: p.action, targetLanguage: p.target_language, executed: false, summary: 'Workbench KDRE service unavailable', affectedCount: 0, timestampMs: Date.now() } }
 			},
+			// Kodia First-Pass Engineering Reliability Engine (FPERE)
+			fpere_analyze_architecture: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.analyzeArchitecture(root)
+				return { result: res }
+			},
+			fpere_create_blueprint: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.saveBlueprint(root, {
+					title: p.title,
+					objective: p.objective,
+					stack: p.stack,
+					moduleBoundaries: p.module_boundaries ?? [],
+					sharedInterfaces: p.shared_interfaces ?? [],
+					apiContracts: p.api_contracts ?? [],
+					dbModels: p.db_models ?? [],
+					requiredEnvVars: p.required_env_vars ?? [],
+					buildCommand: p.build_command,
+					testCommand: p.test_command,
+					acceptanceCriteria: p.acceptance_criteria ?? [],
+					tasks: p.tasks ?? [],
+				})
+				return { result: res }
+			},
+			fpere_validate_imports: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.validateImportsAndExports(root, p.target_files)
+				return { result: res }
+			},
+			fpere_check_integration: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.checkFullStackIntegration(root, p.checkpoint)
+				return { result: res }
+			},
+			fpere_run_quality_gate: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.runFirstPassQualityGate(root, {
+					unitLabel: p.unit_label,
+					targetFiles: p.target_files,
+					checkpoint: p.checkpoint,
+					runCompiler: p.run_compiler,
+					runTestCommand: p.test_command,
+					runBuildCommand: p.build_command,
+				})
+				return { result: res }
+			},
+			fpere_coordinate_agents: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.coordinateAgents(root, {
+					action: p.action,
+					agentId: p.agent_id,
+					taskId: p.task_id,
+					files: p.files,
+				})
+				return { result: res }
+			},
+			fpere_plan_repair: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.planControlledRepair(root, {
+					errorSummary: p.error_summary,
+					files: p.files,
+					maxRetries: p.max_retries,
+				})
+				return { result: res }
+			},
+			fpere_get_status: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.getSnapshot(root)
+				return { result: res }
+			},
+			// Kodia Engineering Reasoning & Technical Correctness Engine (ERIC)
+			eric_specify_behavior: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.saveBehavioralSpec(root, {
+					featureName: p.feature_name,
+					domain: p.domain,
+					explicitRequirements: p.explicit_requirements,
+					inferredAssumptions: p.inferred_assumptions ?? [],
+					constraints: p.constraints ?? [],
+					inputsAndOutputs: p.inputs_and_outputs ?? [],
+					edgeCases: p.edge_cases ?? [],
+					failureConditions: p.failure_conditions ?? [],
+					securityRequirements: p.security_requirements ?? [],
+					performanceRequirements: p.performance_requirements ?? [],
+					integrationRequirements: p.integration_requirements ?? [],
+					acceptanceCriteria: p.acceptance_criteria ?? [],
+					openAmbiguities: p.open_ambiguities ?? [],
+				})
+				return { result: res }
+			},
+			eric_evaluate_approaches: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.evaluateApproaches(root, {
+					problem: p.problem,
+					domain: p.domain,
+					options: p.options,
+					evidence: p.evidence,
+				})
+				return { result: res }
+			},
+			eric_verify_api_usage: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.verifyInstalledApiUsage(root)
+				return { result: res }
+			},
+			eric_analyze_semantics: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.analyzeSemanticCorrectness(root)
+				return { result: res }
+			},
+			eric_independent_review: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.runIndependentReview(root, { testCommand: p.test_command })
+				return { result: res }
+			},
+			eric_record_failure_lesson: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await fpereMainService.recordFailureLesson(root, {
+					category: p.category,
+					domain: p.domain,
+					technology: p.technology,
+					symptom: p.symptom,
+					rootCause: p.root_cause,
+					verifiedFixPattern: p.verified_fix_pattern,
+					verificationEvidence: p.verification_evidence,
+					verifiedFix: p.verified_fix,
+				})
+				return { result: res }
+			},
+			// Kodia Universal App Builder Engine (UABE) & IRIRE
+			uabe_open_workspace: async (p) => {
+				const tab = p.tab ?? 'create'
+				try {
+					const uabeSvc = instantiationService.invokeFunction(acc => acc.get(IUniversalAppBuilderService))
+					await uabeSvc.openWorkspace(tab)
+					return { result: { opened: true, tab } }
+				} catch {
+					return { result: { opened: false, tab } }
+				}
+			},
+			uabe_init_project: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.initializeProject(root, {
+					name: p.name,
+					brief: p.brief,
+					sourceType: p.source_type,
+					buildMode: p.build_mode,
+					preferredPlatforms: p.preferred_platforms,
+					preferredStack: p.preferred_stack,
+				})
+				return { result: res }
+			},
+			uabe_analyze_contract: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.analyzeContractOrBrief(root, { brief: p.brief, sourceType: p.source_type })
+				return { result: res }
+			},
+			uabe_recommend_stack: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.recommendStack(root, { preferredStack: p.preferred_stack, preferredPlatforms: p.preferred_platforms })
+				return { result: res }
+			},
+			uabe_discover_integrations: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const requirements = await uabeMainService.discoverExternalRequirements(root, p.brief_override)
+				return { result: { requirements } }
+			},
+			uabe_configure_integration: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.configureIntegrationSecret(root, {
+					requirementId: p.requirement_id,
+					envVarName: p.env_var_name,
+					secretValue: p.secret_value,
+					mode: p.mode,
+				})
+				return { result: res }
+			},
+			uabe_apply_visual_edit: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.applyVisualEdit(root, {
+					filePath: p.file_path,
+					selectorOrText: p.selector_or_text,
+					newText: p.new_text,
+					styleChanges: p.style_changes,
+					addClasses: p.add_classes,
+					removeClasses: p.remove_classes,
+				})
+				return { result: res }
+			},
+			uabe_scaffold_app: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.scaffoldApplication(root, { template: p.template, appName: p.app_name })
+				return { result: res }
+			},
+			uabe_evaluate_reliability: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.evaluateReliabilityDashboard(root, {
+					runCompiler: p.run_compiler,
+					testCommand: p.test_command,
+					buildCommand: p.build_command,
+				})
+				return { result: res }
+			},
+			uabe_generate_handover: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uabeMainService.generateClientHandover(root, { clientName: p.client_name, projectTitle: p.project_title })
+				return { result: res }
+			},
 
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
@@ -7656,6 +8131,33 @@ export class ToolsService implements IToolsService {
 			].filter(Boolean).join('\n'),
 			kdre_investigate_diagnostic: (_params, r) => formatKdreInvestigationForLLM(r),
 			kdre_recover: (_params, r) => `KDRE Recovery (${r.action}): ${r.executed ? 'EXECUTED' : 'FAILED'} — ${r.summary}`,
+			// Kodia First-Pass Engineering Reliability Engine (FPERE)
+			fpere_analyze_architecture: (_params, r) => formatArchitectureForLLM(r),
+			fpere_create_blueprint: (_params, r) => `Blueprint "${r.title}" (${r.id}) saved to .kodia/fpere/blueprint.json — ${r.sharedInterfaces.length} shared interfaces, ${r.apiContracts.length} API contracts, ${r.dbModels.length} DB models, ${r.tasks.length} DAG tasks.`,
+			fpere_validate_imports: (_params, r) => formatImportExportForLLM(r),
+			fpere_check_integration: (_params, r) => formatIntegrationForLLM(r),
+			fpere_run_quality_gate: (_params, r) => formatQualityGateForLLM(r),
+			fpere_coordinate_agents: (_params, r) => `Agent Coordination (${r.granted ? 'GRANTED' : 'BLOCKED'}): ${r.message} | Ready DAG tasks: ${r.readyTaskIds.join(', ') || 'none'} | Blocked: ${r.blockedTaskIds.join(', ') || 'none'}`,
+			fpere_plan_repair: (_params, r) => `Repair Plan (${r.rootCauseClass}, attempt ${r.attemptNumber}/${r.maxRetries}${r.escalated ? ' — ESCALATED' : ''}): ${r.smallestCoherentFix}`,
+			fpere_get_status: (_params, r) => `FPERE Status — Phase: ${r.currentPhase} | Stage: ${r.currentStage} | Blueprint: ${r.blueprint?.title ?? 'none'} | Leases: ${r.activeLeases.length} | Repairs: ${r.repairHistory.length} | ERIC Review: ${r.lastIndependentReview?.verdict ?? 'none'} | Lessons: ${r.engineeringLessonsCount ?? 0}`,
+			// Kodia Engineering Reasoning & Technical Correctness Engine (ERIC)
+			eric_specify_behavior: (_params, r) => `Behavioral Spec "${r.featureName}" (${r.id}) saved — ${r.explicitRequirements.length} explicit requirement(s), ${r.inferredAssumptions.length} assumption(s), ${r.edgeCases.length} edge case(s), ${r.acceptanceCriteria.length} acceptance criteria.`,
+			eric_evaluate_approaches: (_params, r) => `Approach Evaluation (${r.id}): ${r.rationale}`,
+			eric_verify_api_usage: (_params, r) => formatApiVerificationForLLM(r),
+			eric_analyze_semantics: (_params, r) => formatSemanticReportForLLM(r),
+			eric_independent_review: (_params, r) => formatIndependentReviewForLLM(r),
+			eric_record_failure_lesson: (_params, r) => `${r.recorded ? 'RECORDED' : 'REJECTED'}: ${r.reason} (Total verified lessons: ${r.totalLessons})`,
+			// Kodia Universal App Builder Engine (UABE) & IRIRE
+			uabe_open_workspace: (_params, r) => r.opened ? `Opened Kodia Universal App Builder workspace (tab: ${r.tab}).` : `Could not open App Builder workspace (tab: ${r.tab}).`,
+			uabe_init_project: (_params, r) => `UABE Project "${r.name}" initialized (mode: ${r.buildMode}, platforms: ${r.platforms.join(', ')}) — ${r.contractAnalysis?.requirements.length ?? 0} requirement(s), ${r.integrations.length} external integration(s) discovered.`,
+			uabe_analyze_contract: (_params, r) => formatContractAnalysisForLLM(r),
+			uabe_recommend_stack: (_params, r) => `Stack Recommendation (${r.architectureStyle}): Frontend=${r.frontend} | Backend=${r.backend} | DB=${r.database}${r.mobile ? ` | Mobile=${r.mobile}` : ''}${r.desktop ? ` | Desktop=${r.desktop}` : ''} — ${r.rationale}`,
+			uabe_discover_integrations: (_params, r) => formatIntegrationsForLLM(r.requirements),
+			uabe_configure_integration: (_params, r) => `${r.ok ? 'SAVED' : 'FAILED'}: ${r.message}`,
+			uabe_apply_visual_edit: (_params, r) => r.applied ? `${r.summary} (Checkpoint: ${r.checkpointId})` : `Visual Edit Not Applied: ${r.summary}${r.limitationReason ? ` — ${r.limitationReason}` : ''}`,
+			uabe_scaffold_app: (_params, r) => `${r.summary} Files: ${r.filesWritten.join(', ')}. Checkpoint: ${r.checkpointId}`,
+			uabe_evaluate_reliability: (_params, r) => formatReliabilityDashboardForLLM(r),
+			uabe_generate_handover: (_params, r) => `${r.summary} Files: ${r.filesGenerated.map(f => f.relativePath).join(', ')}`,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

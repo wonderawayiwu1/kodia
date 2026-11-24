@@ -350,6 +350,30 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	kdre_evaluate_diagnostics: { done: 'Classified & cross-checked diagnostics', proposed: 'Classify editor diagnostics', running: 'Cross-checking editor diagnostics against compilers' },
 	kdre_investigate_diagnostic: { done: 'Investigated suspicious diagnostic', proposed: 'Investigate suspicious diagnostic', running: 'Investigating potential false positive with evidence' },
 	kdre_recover: { done: 'Executed diagnostic recovery action', proposed: 'Recover language server / diagnostics', running: 'Executing safe diagnostic recovery action' },
+	fpere_analyze_architecture: { done: 'Analyzed repository architecture', proposed: 'Analyze repository architecture', running: 'Mapping symbols, layers, APIs & conventions' },
+	fpere_create_blueprint: { done: 'Saved contract-first blueprint', proposed: 'Create engineering blueprint', running: 'Persisting contracts, models & Task DAG' },
+	fpere_validate_imports: { done: 'Validated imports, exports & hygiene', proposed: 'Validate imports & exports', running: 'Verifying relative imports, exports & packages' },
+	fpere_check_integration: { done: 'Checked full-stack integration', proposed: 'Check full-stack integration', running: 'Cross-checking frontend/backend/DB/env contracts' },
+	fpere_run_quality_gate: { done: 'Evaluated First-Pass Quality Gate', proposed: 'Run First-Pass Quality Gate', running: 'Running imports, contracts, compiler & tests' },
+	fpere_coordinate_agents: { done: 'Updated multi-agent ownership', proposed: 'Coordinate agent ownership', running: 'Checking DAG readiness & file ownership leases' },
+	fpere_plan_repair: { done: 'Created root-cause repair plan', proposed: 'Plan controlled repair', running: 'Classifying root cause & bounded retry plan' },
+	fpere_get_status: { done: 'Loaded FPERE live status', proposed: 'Load FPERE status', running: 'Loading blueprint, quality gate & leases' },
+	eric_specify_behavior: { done: 'Saved behavioral specification', proposed: 'Specify behavioral requirements', running: 'Recording requirements, edge cases & acceptance criteria' },
+	eric_evaluate_approaches: { done: 'Evaluated technical approaches', proposed: 'Evaluate technical approaches', running: 'Scoring engineering trade-offs & reliability' },
+	eric_verify_api_usage: { done: 'Verified installed API declarations', proposed: 'Verify installed API usage', running: 'Inspecting node_modules declarations against code' },
+	eric_analyze_semantics: { done: 'Completed semantic & behavioral audit', proposed: 'Analyze semantic correctness', running: 'Auditing async races, algorithms, security & test oracles' },
+	eric_independent_review: { done: 'Completed independent engineering review', proposed: 'Run independent engineering review', running: 'Auditing evidence, assumptions, risks & tests' },
+	eric_record_failure_lesson: { done: 'Recorded verified engineering lesson', proposed: 'Record failure lesson', running: 'Validating verification evidence & persisting lesson' },
+	uabe_open_workspace: { done: 'Opened Universal App Builder', proposed: 'Open Universal App Builder', running: 'Opening Kodia Universal App Builder workspace' },
+	uabe_init_project: { done: 'Initialized App Builder project', proposed: 'Initialize App Builder project', running: 'Extracting requirements, stack & IRIRE credentials' },
+	uabe_analyze_contract: { done: 'Extracted Contract-to-Product matrix', proposed: 'Analyze contract / brief', running: 'Extracting traceable requirements & workflows' },
+	uabe_recommend_stack: { done: 'Selected universal architecture & stack', proposed: 'Recommend architecture & stack', running: 'Evaluating architecture & stack trade-offs' },
+	uabe_discover_integrations: { done: 'Discovered external requirements (IRIRE)', proposed: 'Discover external requirements', running: 'Scanning accounts, API keys & official setup links' },
+	uabe_configure_integration: { done: 'Saved encrypted credential (IRIRE)', proposed: 'Configure integration credential', running: 'Encrypting secret & validating credential format' },
+	uabe_apply_visual_edit: { done: 'Synced visual edit to source code', proposed: 'Apply visual edit to source', running: 'Creating checkpoint & patching real source file' },
+	uabe_scaffold_app: { done: 'Scaffolded verified application', proposed: 'Scaffold application', running: 'Generating starter architecture & runnable tests' },
+	uabe_evaluate_reliability: { done: 'Evaluated truthful reliability dashboard', proposed: 'Evaluate application reliability', running: 'Running FPERE + ERIC + IRIRE + runtime checks' },
+	uabe_generate_handover: { done: 'Generated client handover package', proposed: 'Generate client handover', running: 'Building docs, QA report, deck & secret-free .env' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -372,9 +396,9 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 }
 
 export function getToolCategory(toolName: string): ToolCategory {
-	if (toolName.startsWith('ai_')) { return 'ai'; }
+	if (toolName.startsWith('ai_') || toolName.startsWith('uabe_')) { return 'ai'; }
 	if (toolName.startsWith('api_') || toolName.startsWith('oauth2_')) { return 'api'; }
-	if (toolName.startsWith('correctness_')) { return 'debug'; }
+	if (toolName.startsWith('correctness_') || toolName.startsWith('eric_') || toolName.startsWith('fpere_') || toolName.startsWith('kdre_')) { return 'debug'; }
 	if (toolName.startsWith('evolution_')) { return 'ai'; }
 	if (
 		toolName.includes('design_')

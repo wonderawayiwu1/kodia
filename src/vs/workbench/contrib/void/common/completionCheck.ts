@@ -27,8 +27,10 @@ export function shouldRequestCompletionCheck(opts: { chatMode: string; alreadyRe
 	return (opts.chatMode === 'agent' || opts.chatMode === 'debug') && !opts.alreadyRequested && turnChangedFiles(opts.messagesThisTurn);
 }
 
-export const COMPLETION_CHECK_REQUEST = `Kodia: before you finish, check your work against the request — with evidence, not from memory.
-1. Re-read the user's request and list each explicit requirement.
-2. Verify each one against the actual files (read them), and if the project has tests, a build or a type-check, run them now and report the command and its real result.
-3. If anything fails or a requirement is not met, fix it with the tools and verify again.
-Then give your final summary, stating only what you verified.`;
+export const COMPLETION_CHECK_REQUEST = `Kodia First-Pass Quality Gate — before you finish, verify your work with real evidence, not from memory:
+1. Re-read the user's request and list each explicit requirement and shared interface/API/DB contract.
+2. Run fpere_validate_imports (or fpere_run_quality_gate) to confirm zero broken relative imports, missing named/default exports, undeclared packages, or placeholder stubs.
+3. For multi-layer apps, run fpere_check_integration to verify frontend/backend API contracts, database models, and environment declarations align.
+4. Run the project's actual type-check, build, or test suite and report the real commands and results.
+5. If anything fails or a requirement is unmet, fix the root cause (never weaken strict mode, types, or tests) and re-verify.
+Then provide your concise final report stating only what was actually verified.`;

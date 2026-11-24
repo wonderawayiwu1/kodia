@@ -13,6 +13,7 @@ import {
 	Globe,
 	Home,
 	Palette,
+	Rocket,
 	Search,
 	Settings as SettingsIcon,
 	ShieldCheck,
@@ -37,6 +38,7 @@ import { AIEngineSettingsSection } from './AIEngineSettings.js';
 import { ApiStudioSettingsSection } from './ApiStudioSettings.js';
 import { CorrectnessSettingsSection } from './CorrectnessSettings.js';
 import { EvolutionSettingsSection } from './EvolutionSettings.js';
+import { AppBuilderSettingsSection } from './AppBuilderSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -125,6 +127,17 @@ const SECTIONS: readonly NavSectionDef[] = [
 			'Lifecycle hooks': ['hooks', 'pretooluse', 'posttooluse', 'guard', 'automation', 'workflows', '.kodia/hooks.json', 'claude'],
 			'Tool policy': ['tool', 'tools', 'disable', 'enable', 'allow', 'deny', 'block', 'policy', 'permissions'],
 			'MCP servers': ['mcp', 'model context protocol', 'plugins', 'extensions', 'integrations', 'tools', 'server'],
+		},
+	},
+	{
+		id: 'app_builder',
+		group: 'AI Engine',
+		label: 'Universal App Builder',
+		icon: <Rocket size={14} />,
+		keywordsOfGroup: {
+			'Default & Per-Project Build Mode': ['app builder', 'uabe', 'autonomous build', 'plan first', 'per project', 'contract', 'fullstack', 'website', 'mobile', 'desktop'],
+			'Autonomous Workflow, IRIRE & Visual Source Sync': ['irire', 'credentials', 'api key', 'supabase', 'firebase', 'mongodb', 'stripe', 'visual edit', 'preview', 'baas', 'cloud'],
+			'Reliability, Security & Handover Safeguards': ['handover', 'client delivery', 'redaction', 'reliability', 'fpere', 'eric', 'evidence', 'verification'],
 		},
 	},
 	{
@@ -260,6 +273,7 @@ export const Settings = () => {
 			case 'models': return <ModelsSection />;
 			case 'features': return <FeaturesSection />;
 			case 'agent': return <AgentSection />;
+			case 'app_builder': return <AppBuilderSettingsSection onRecordChange={recordChange} />;
 			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
 			case 'api_studio': return <ApiStudioSettingsSection onRecordChange={recordChange} />;
 			case 'correctness': return <CorrectnessSettingsSection onRecordChange={recordChange} />;

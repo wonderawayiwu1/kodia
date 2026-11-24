@@ -45,6 +45,7 @@ import { DebuggerActivity } from '../../../../common/debuggerActivityServiceType
 import { SubagentReport } from '../../../../common/subagents.js';
 import { buildRemodifyPromptRequest, extractRewrittenPrompt } from '../../../../common/promptRewriter.js';
 import { EngineeringIntelligenceStatus } from './EngineeringIntelligenceStatus.js';
+import { AppBuilderChatBar } from './AppBuilderChatBar.js';
 
 
 
@@ -4167,12 +4168,13 @@ export const SidebarChat = () => {
 	const isLandingPage = previousMessages.length === 0
 
 
-	const initiallySuggestedPromptsHTML = <div className='flex flex-col gap-2 w-full text-nowrap text-void-fg-3 select-none'>
+	const initiallySuggestedPromptsHTML = <div className='flex flex-col gap-2 w-full text-void-fg-3 select-none'>
 		{[
-			'Scan this project for security issues, secret leaks, and architecture bottlenecks',
-			'Map the codebase architecture and summarize how the key modules connect',
-			'Inspect git status and diff, then review my uncommitted changes',
-			'Discover and run the test suite and diagnose any failures'
+			'Build a complete full-stack web application with auth, database, REST API, live preview, and automated tests using UABE',
+			'Convert my client contract/brief into a traceable requirements matrix, architecture plan, and IRIRE external credentials checklist',
+			'Build an AI-powered application with backend model proxy, live model discovery (LEI), and graceful missing-key handling',
+			'Audit this workspace with FPERE + ERIC (imports, full-stack contracts, semantic correctness, and installed package APIs)',
+			'Prepare a secret-free client handover package (architecture docs, install guide, QA report & presentation)'
 		].map((text, index) => (
 			<div
 				key={index}
@@ -4216,6 +4218,7 @@ export const SidebarChat = () => {
 
 	const threadPageInput = <div key={'input' + chatThreadsState.currentThreadId}>
 		<ErrorBoundary>
+			<AppBuilderChatBar />
 			<EngineeringIntelligenceStatus variant='chat' />
 		</ErrorBoundary>
 		<LiveActivityStrip threadId={threadId} isRunning={isRunning} />
@@ -4247,8 +4250,9 @@ export const SidebarChat = () => {
 	</div>
 
 	const landingPageInput = <div>
-		<div className='pt-4'>
+		<div className='pt-4 space-y-1.5'>
 			<ErrorBoundary>
+				<AppBuilderChatBar />
 				<EngineeringIntelligenceStatus variant='chat' />
 			</ErrorBoundary>
 		</div>

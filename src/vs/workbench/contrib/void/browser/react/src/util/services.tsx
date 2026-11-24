@@ -85,6 +85,9 @@ import { ILiveIntelligenceService } from '../../../liveIntelligenceService.js';
 import { IKodiaLiveIntelligenceMainService } from '../../../../common/liveIntelligenceTypes.js';
 import { IDiagnosticReliabilityService } from '../../../diagnosticReliabilityService.js';
 import { IKodiaDiagnosticReliabilityMainService } from '../../../../common/diagnosticReliabilityTypes.js';
+import { IFirstPassReliabilityService } from '../../../firstPassReliabilityService.js';
+import { IKodiaFirstPassReliabilityMainService } from '../../../../common/firstPassReliabilityTypes.js';
+import { IUniversalAppBuilderService } from '../../../universalAppBuilderService.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -291,6 +294,9 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaLiveIntelligenceMainService: (() => { try { return accessor.get(IKodiaLiveIntelligenceMainService) } catch { return undefined } })(),
 		IDiagnosticReliabilityService: accessor.get(IDiagnosticReliabilityService),
 		IKodiaDiagnosticReliabilityMainService: (() => { try { return accessor.get(IKodiaDiagnosticReliabilityMainService) } catch { return undefined } })(),
+		IFirstPassReliabilityService: accessor.get(IFirstPassReliabilityService),
+		IKodiaFirstPassReliabilityMainService: (() => { try { return accessor.get(IKodiaFirstPassReliabilityMainService) } catch { return undefined } })(),
+		IUniversalAppBuilderService: accessor.get(IUniversalAppBuilderService),
 
 	} as const
 	return reactAccessor
