@@ -23,6 +23,7 @@ import {
 	X,
 } from 'lucide-react';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
+import '../styles.css';
 import { useIsDark } from '../util/services.js';
 import { displayInfoOfProviderName, nonlocalProviderNames } from '../../../../common/voidSettingsTypes.js';
 import { ModelsSection } from './ModelsSettings.js';

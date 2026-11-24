@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import { useEffect, useState } from 'react';
+import '../styles.css';
 import { useAccessor, useIsDark, useSettingsState } from '../util/services.js';
 import { Check, ChevronRight } from 'lucide-react';
 import { displayInfoOfProviderName, ProviderName, nonlocalProviderNames, isFeatureNameDisabled } from '../../../../common/voidSettingsTypes.js';

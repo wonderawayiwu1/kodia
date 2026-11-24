@@ -107,8 +107,8 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 	];
 
 	return (
-		<div className='flex items-center gap-1 px-2 py-1.5 border-b border-void-border-2 bg-void-bg-1/90 flex-shrink-0 select-none'>
-			<div role='tablist' aria-label='Kodia Command Center Views' className='flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto'>
+		<div className='flex items-center gap-1.5 px-2 py-1.5 border-b border-void-border-2 bg-void-bg-1/90 flex-shrink-0 select-none'>
+			<div role='tablist' aria-label='Kodia Command Center Views' className='kodia-thin-tabs flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto pb-0.5'>
 				{tabs.map(tab => {
 					const active = activePanel === tab.id;
 					return (
@@ -144,6 +144,7 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 					);
 				})}
 			</div>
+			<div className='flex items-center gap-0.5 pl-1.5 border-l border-void-border-2 flex-shrink-0'>
 			<button
 				type='button'
 				title='Open Kodia Universal App Builder Workspace (Ctrl+Alt+U)'
@@ -207,6 +208,7 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 			>
 				<Settings size={13} />
 			</button>
+			</div>
 		</div>
 	);
 });

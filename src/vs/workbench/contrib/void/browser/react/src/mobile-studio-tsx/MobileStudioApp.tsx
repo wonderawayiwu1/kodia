@@ -17,6 +17,7 @@ import {
 	Smartphone,
 	Zap,
 } from 'lucide-react';
+import '../styles.css';
 import { useAccessor, useIsDark } from '../util/services.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import {
@@ -174,7 +175,7 @@ export const MobileStudioApp: React.FC = () => {
 			</div>
 
 			{/* Section Nav */}
-			<div className='flex items-center gap-1 px-4 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 overflow-x-auto flex-shrink-0'>
+			<div className='kodia-thin-tabs flex items-center gap-1 px-4 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 overflow-x-auto flex-shrink-0'>
 				{SECTIONS.map(secTab => {
 					const active = state.activeSection === secTab.id;
 					return (

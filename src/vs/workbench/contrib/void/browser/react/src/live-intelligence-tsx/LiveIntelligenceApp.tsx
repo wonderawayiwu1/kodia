@@ -22,7 +22,8 @@ import {
 	XCircle,
 } from 'lucide-react';
 import '../styles.css';
-import { useAccessor } from '../util/services.js';
+import { useAccessor, useIsDark } from '../util/services.js';
+import { KodiaBadge, KodiaCard, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import type { LeiDashboardTab } from '../../../liveIntelligenceService.js';
 import type {
 	LeiDependencyReport,
@@ -36,6 +37,7 @@ import type {
 } from '../../../../common/liveIntelligenceTypes.js';
 
 export const LiveIntelligenceApp: React.FC = () => {
+	const isDark = useIsDark();
 	const accessor = useAccessor();
 	const leiService = accessor.get('ILiveIntelligenceService');
 
@@ -178,69 +180,74 @@ export const LiveIntelligenceApp: React.FC = () => {
 	];
 
 	return (
-		<div className='h-full w-full flex flex-col bg-void-bg-2 text-void-fg-1 text-xs overflow-hidden'>
+		<div className={`@@void-scope ${isDark ? 'dark' : ''} h-full w-full flex flex-col bg-void-bg-2 text-void-fg-1 text-xs overflow-hidden`}>
 			{/* Header */}
-			<div className='px-4 py-3 border-b border-void-border-2 bg-void-bg-1 flex items-center justify-between gap-3 flex-shrink-0'>
-				<div className='flex items-center gap-2.5'>
-					<Globe size={18} className='text-emerald-400' />
-					<div>
-						<div className='font-semibold text-sm flex items-center gap-2'>
-							<span>Kodia Live Engineering Intelligence (LEI)</span>
-							<span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${snapshot.systemStatus === 'active' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/35' : snapshot.systemStatus === 'unavailable' ? 'bg-rose-500/15 text-rose-300 border-rose-500/35' : 'bg-amber-500/15 text-amber-300 border-amber-500/35'}`}>
+			<div className='px-5 py-3.5 border-b border-void-border-2 bg-void-bg-1 flex flex-wrap items-center justify-between gap-3 flex-shrink-0'>
+				<div className='flex items-center gap-3 min-w-0'>
+					<div className='w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 flex items-center justify-center shrink-0'>
+						<Globe size={17} />
+					</div>
+					<div className='min-w-0'>
+						<div className='font-semibold text-sm flex items-center gap-2 flex-wrap'>
+							<span className='truncate'>Kodia Live Engineering Intelligence (LEI)</span>
+							<KodiaBadge tone={snapshot.systemStatus === 'active' ? 'success' : snapshot.systemStatus === 'unavailable' ? 'danger' : 'warning'}>
 								{snapshot.activeOperations.length > 0 ? 'Researching' : snapshot.systemStatus}
-							</span>
+							</KodiaBadge>
 						</div>
-						<div className='text-[11px] text-void-fg-3'>{snapshot.currentTask}</div>
+						<div className='text-[11px] text-void-fg-3 truncate mt-0.5'>{snapshot.currentTask}</div>
 					</div>
 				</div>
-				<div className='flex items-center gap-2'>
-					<button
-						type='button'
-						onClick={() => void leiService.refreshStaleKnowledge()}
-						className='inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-void-bg-2 hover:bg-void-bg-3 border border-void-border-2 cursor-pointer'
-					>
+				<div className='flex items-center gap-2 flex-shrink-0'>
+					<KodiaSecondaryButton onClick={() => void leiService.refreshStaleKnowledge()}>
 						<RefreshCw size={12} />
 						<span>Refresh Stale</span>
-					</button>
+					</KodiaSecondaryButton>
 				</div>
 			</div>
 
 			{/* Nav Bar */}
-			<div className='flex items-center gap-1 px-4 py-1.5 border-b border-void-border-2 bg-void-bg-1/80 overflow-x-auto flex-shrink-0'>
-				{tabs.map(t => (
-					<button
-						key={t.id}
-						type='button'
-						onClick={() => { setTab(t.id); leiService.setActiveTab(t.id); }}
-						className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded text-[11px] whitespace-nowrap cursor-pointer border ${tab === t.id ? 'bg-void-bg-3 text-void-fg-1 border-sky-500/50 font-medium' : 'border-transparent text-void-fg-3 hover:text-void-fg-1 hover:bg-void-bg-2'}`}
-					>
-						{t.icon}
-						<span>{t.label}</span>
-					</button>
-				))}
+			<div className='kodia-thin-tabs flex items-center gap-1.5 px-5 py-2 border-b border-void-border-2 bg-void-bg-1/75 overflow-x-auto flex-shrink-0'>
+				{tabs.map(t => {
+					const active = tab === t.id;
+					return (
+						<button
+							key={t.id}
+							type='button'
+							onClick={() => { setTab(t.id); leiService.setActiveTab(t.id); }}
+							style={active ? { borderColor: 'var(--kodia-accent)' } : undefined}
+							className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] whitespace-nowrap cursor-pointer border transition-all ${active
+								? 'bg-void-bg-3 text-void-fg-1 font-medium shadow-xs'
+								: 'border-transparent text-void-fg-3 hover:text-void-fg-1 hover:bg-void-bg-2'}`}
+						>
+							{t.icon}
+							<span>{t.label}</span>
+						</button>
+					);
+				})}
 			</div>
 
 			{/* Content */}
-			<div className='flex-1 overflow-y-auto p-4 flex flex-col gap-4'>
+			<div className='flex-1 overflow-y-auto p-5'>
+				<div className='max-w-6xl mx-auto w-full flex flex-col gap-4'>
 				{tab === 'overview' && (
 					<>
-						<div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
-							<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2'>
-								<div className='text-void-fg-3 text-[10px]'>Verified Evidence</div>
-								<div className='text-lg font-semibold text-emerald-300'>{snapshot.verifiedEvidenceCount} / {snapshot.evidenceCount}</div>
-							</div>
-							<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2'>
-								<div className='text-void-fg-3 text-[10px]'>Knowledge Freshness</div>
-								<div className='text-sm font-semibold mt-1'>{snapshot.knowledgeFreshness.replace(/_/g, ' ')}</div>
-							</div>
-							<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2'>
-								<div className='text-void-fg-3 text-[10px]'>Stale / Conflicts</div>
-								<div className='text-lg font-semibold text-amber-300'>{snapshot.staleEvidenceCount} / {snapshot.conflictCount}</div>
-							</div>
-							<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2'>
-								<div className='text-void-fg-3 text-[10px]'>Network & Live Search</div>
-								<div className='text-sm font-semibold mt-1'>{snapshot.networkAvailable ? 'Online' : 'Unavailable'}</div>
-							</div>
+						<div className='grid grid-cols-2 lg:grid-cols-4 gap-3'>
+							<KodiaCard className='flex flex-col gap-1'>
+								<div className='text-void-fg-3 text-[10px] uppercase tracking-wider font-medium'>Verified Evidence</div>
+								<div className='text-lg font-semibold text-emerald-400'>{snapshot.verifiedEvidenceCount} / {snapshot.evidenceCount}</div>
+							</KodiaCard>
+							<KodiaCard className='flex flex-col gap-1'>
+								<div className='text-void-fg-3 text-[10px] uppercase tracking-wider font-medium'>Knowledge Freshness</div>
+								<div className='text-sm font-semibold mt-0.5 capitalize'>{snapshot.knowledgeFreshness.replace(/_/g, ' ')}</div>
+							</KodiaCard>
+							<KodiaCard className='flex flex-col gap-1'>
+								<div className='text-void-fg-3 text-[10px] uppercase tracking-wider font-medium'>Stale / Conflicts</div>
+								<div className='text-lg font-semibold text-amber-400'>{snapshot.staleEvidenceCount} / {snapshot.conflictCount}</div>
+							</KodiaCard>
+							<KodiaCard className='flex flex-col gap-1'>
+								<div className='text-void-fg-3 text-[10px] uppercase tracking-wider font-medium'>Network &amp; Live Search</div>
+								<div className={`text-sm font-semibold mt-0.5 ${snapshot.networkAvailable ? 'text-emerald-400' : 'text-rose-400'}`}>{snapshot.networkAvailable ? 'Online' : 'Unavailable'}</div>
+							</KodiaCard>
 						</div>
 
 						<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2 flex flex-col gap-2'>
@@ -430,72 +437,87 @@ export const LiveIntelligenceApp: React.FC = () => {
 				)}
 
 				{tab === 'evidence' && (
-					<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2 flex flex-col gap-2'>
-						<div className='flex items-center justify-between'>
-							<span className='font-semibold'>Persistent Verified Evidence Repository</span>
-							<label className='flex items-center gap-1.5 text-[11px] cursor-pointer'>
-								<input type='checkbox' checked={includeStale} onChange={e => setIncludeStale(e.target.checked)} />
+					<KodiaCard className='flex flex-col gap-3'>
+						<div className='flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-void-border-2'>
+							<div className='flex items-center gap-2'>
+								<BookOpen size={14} className='text-emerald-400' />
+								<span className='font-semibold text-sm'>Persistent Verified Evidence Repository</span>
+								<KodiaBadge tone='accent'>{evidence.length} record(s)</KodiaBadge>
+							</div>
+							<label className='flex items-center gap-2 text-[11px] text-void-fg-2 cursor-pointer select-none'>
+								<input type='checkbox' checked={includeStale} onChange={e => setIncludeStale(e.target.checked)} className='accent-emerald-500 rounded cursor-pointer' />
 								<span>Include stale/invalidated</span>
 							</label>
 						</div>
 						{evidence.length === 0 ? (
-							<div className='text-void-fg-3 py-4 text-center'>No evidence records stored yet.</div>
+							<div className='text-void-fg-3 py-6 text-center'>No evidence records stored yet. Run Technology Research or AI Model Discovery to build verified evidence.</div>
 						) : (
-							evidence.map(rec => (
-								<div key={rec.id} className='p-2.5 rounded bg-void-bg-2 border border-void-border-2 flex flex-col gap-1'>
-									<div className='flex items-center justify-between gap-2'>
-										<span className='font-semibold flex items-center gap-1.5'>
-											<CheckCircle2 size={12} className='text-emerald-400' />
-											<span>{rec.technology}</span>
-											<span className='font-mono text-[10px] text-sky-300'>{rec.exactIdentifierOrVersion}</span>
-										</span>
-										<span className='text-[10px] text-void-fg-3'>{rec.verificationStatus} · {rec.researchDate}</span>
+							<div className='flex flex-col gap-2.5'>
+								{evidence.map(rec => (
+									<div key={rec.id} className='p-3 rounded-lg bg-void-bg-1 border border-void-border-2 flex flex-col gap-2'>
+										<div className='flex flex-wrap items-center justify-between gap-2'>
+											<div className='flex items-center gap-2 flex-wrap min-w-0'>
+												<CheckCircle2 size={13} className='text-emerald-400 shrink-0' />
+												<span className='font-semibold text-void-fg-1'>{rec.technology}</span>
+												<code className='font-mono text-[11px] px-1.5 py-0.5 rounded bg-void-bg-2 border border-void-border-2 text-sky-400'>{rec.exactIdentifierOrVersion}</code>
+												<KodiaBadge tone={rec.verificationStatus.startsWith('verified') ? 'success' : 'warning'}>{rec.verificationStatus.replace(/_/g, ' ')}</KodiaBadge>
+											</div>
+											<span className='text-[10px] text-void-fg-3 font-mono whitespace-nowrap'>{new Date(rec.researchDate).toLocaleString()}</span>
+										</div>
+										<div className='text-xs text-void-fg-2 leading-relaxed'>{rec.finding}</div>
+										<div className='flex flex-wrap gap-1.5 pt-0.5'>
+											{rec.sources.map(s => (
+												<button
+													key={s.url}
+													type='button'
+													onClick={() => openUrl(s.url)}
+													className='inline-flex items-center gap-1 px-2 py-1 rounded-md bg-void-bg-2 hover:bg-void-bg-3 border border-void-border-2 text-[11px] text-sky-400 hover:text-sky-300 cursor-pointer transition-colors'
+												>
+													<ExternalLink size={10} />
+													<span>{s.authorityLabel}</span>
+												</button>
+											))}
+										</div>
 									</div>
-									<div className='text-void-fg-2'>{rec.finding}</div>
-									<div className='flex flex-wrap gap-1'>
-										{rec.sources.map(s => (
-											<button key={s.url} type='button' onClick={() => openUrl(s.url)} className='text-[10px] text-sky-300 hover:underline cursor-pointer'>
-												{s.authorityLabel}
-											</button>
-										))}
-									</div>
-								</div>
-							))
+								))}
+							</div>
 						)}
-					</div>
+					</KodiaCard>
 				)}
 
 				{tab === 'policies' && (
-					<div className='p-3 rounded-md bg-void-bg-1 border border-void-border-2 flex flex-col gap-3'>
-						<div className='font-semibold'>Freshness Cache & Invalidation Policies</div>
-						<label className='flex items-center gap-2 cursor-pointer'>
+					<KodiaCard className='flex flex-col gap-3'>
+						<div className='font-semibold text-sm'>Freshness Cache &amp; Invalidation Policies</div>
+						<label className='flex items-center gap-2 cursor-pointer text-xs text-void-fg-2'>
 							<input
 								type='checkbox'
 								checked={snapshot.policies.enabled}
 								onChange={e => void leiService.updatePolicies({ enabled: e.target.checked })}
+								className='accent-emerald-500 rounded cursor-pointer'
 							/>
 							<span>Enable automatic Live Engineering Intelligence freshness verification</span>
 						</label>
-						<div className='grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]'>
-							<div className='p-2 rounded bg-void-bg-2 border border-void-border-2'>
+						<div className='grid grid-cols-2 md:grid-cols-4 gap-2.5 text-[11px]'>
+							<div className='p-2.5 rounded-md bg-void-bg-1 border border-void-border-2'>
 								<div className='text-void-fg-3 text-[10px]'>AI Models TTL</div>
-								<div className='font-mono'>{Math.round(snapshot.policies.aiModelsTtlMs / 3600000)}h</div>
+								<div className='font-mono text-sm font-semibold mt-0.5'>{Math.round(snapshot.policies.aiModelsTtlMs / 3600000)}h</div>
 							</div>
-							<div className='p-2 rounded bg-void-bg-2 border border-void-border-2'>
+							<div className='p-2.5 rounded-md bg-void-bg-1 border border-void-border-2'>
 								<div className='text-void-fg-3 text-[10px]'>Package Versions TTL</div>
-								<div className='font-mono'>{Math.round(snapshot.policies.packageVersionsTtlMs / 3600000)}h</div>
+								<div className='font-mono text-sm font-semibold mt-0.5'>{Math.round(snapshot.policies.packageVersionsTtlMs / 3600000)}h</div>
 							</div>
-							<div className='p-2 rounded bg-void-bg-2 border border-void-border-2'>
+							<div className='p-2.5 rounded-md bg-void-bg-1 border border-void-border-2'>
 								<div className='text-void-fg-3 text-[10px]'>Security Advisories TTL</div>
-								<div className='font-mono'>{Math.round(snapshot.policies.securityAdvisoriesTtlMs / 3600000)}h</div>
+								<div className='font-mono text-sm font-semibold mt-0.5'>{Math.round(snapshot.policies.securityAdvisoriesTtlMs / 3600000)}h</div>
 							</div>
-							<div className='p-2 rounded bg-void-bg-2 border border-void-border-2'>
+							<div className='p-2.5 rounded-md bg-void-bg-1 border border-void-border-2'>
 								<div className='text-void-fg-3 text-[10px]'>Framework Releases TTL</div>
-								<div className='font-mono'>{Math.round(snapshot.policies.frameworkReleasesTtlMs / 3600000)}h</div>
+								<div className='font-mono text-sm font-semibold mt-0.5'>{Math.round(snapshot.policies.frameworkReleasesTtlMs / 3600000)}h</div>
 							</div>
 						</div>
-					</div>
+					</KodiaCard>
 				)}
+				</div>
 			</div>
 		</div>
 	);

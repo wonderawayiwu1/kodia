@@ -4,6 +4,7 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useEffect, useState } from 'react'
+import '../styles.css'
 import { useIsDark } from '../util/services.js'
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js'
 import { QuickEditChat } from './QuickEditChat.js'

@@ -268,7 +268,7 @@ export const UniversalAppBuilderApp: React.FC = () => {
 			</header>
 
 			{/* Workspace Tabs */}
-			<nav className='px-4 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 flex items-center gap-1 overflow-x-auto shrink-0'>
+			<nav className='kodia-thin-tabs px-4 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 flex items-center gap-1 overflow-x-auto shrink-0'>
 				{tabs.map(t => {
 					const active = activeTab === t.id;
 					return (

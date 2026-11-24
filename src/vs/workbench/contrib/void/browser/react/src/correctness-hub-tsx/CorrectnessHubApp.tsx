@@ -359,7 +359,7 @@ export const CorrectnessHubApp = () => {
 			)}
 
 			{/* Navigation Tabs */}
-			<div className='flex items-center gap-1 px-3 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 overflow-x-auto flex-shrink-0'>
+			<div className='kodia-thin-tabs flex items-center gap-1 px-3 py-1.5 border-b border-void-border-2 bg-void-bg-1/70 overflow-x-auto flex-shrink-0'>
 				{TABS.map(tab => {
 					const active = state.activeSection === tab.id;
 					const badge =
