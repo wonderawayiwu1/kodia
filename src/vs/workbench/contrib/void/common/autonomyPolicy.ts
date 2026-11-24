@@ -668,6 +668,24 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'evolution_manage_proposals':
 		case 'evolution_schedule_periodic_audit':
 			return 'medium';
+
+		// Kodia Permanent Mobile Application Engineering Platform — read/inspect/design/audit tools
+		case 'mobile_open_studio':
+		case 'mobile_probe_environment':
+		case 'mobile_inspect_project':
+		case 'mobile_design_architecture':
+		case 'mobile_audit_security':
+		case 'mobile_audit_performance':
+		case 'mobile_assess_readiness':
+		case 'mobile_discover_capabilities':
+		case 'mobile_workspace_overview':
+			return 'low';
+
+		// Mobile scaffolding, device actions, and builds/tests
+		case 'mobile_scaffold_project':
+		case 'mobile_device_action':
+		case 'mobile_build_and_test':
+			return 'medium';
 	}
 	return 'medium';
 }

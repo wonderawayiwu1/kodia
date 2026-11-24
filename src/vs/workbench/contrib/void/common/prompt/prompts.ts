@@ -2706,6 +2706,112 @@ export const builtinTools: {
 		params: {},
 	},
 
+	// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+	mobile_open_studio: {
+		name: 'mobile_open_studio',
+		description: 'Opens and focuses the native in-editor Kodia Mobile Engineering Studio tab at a specific section (overview, architecture, devices, build, security, release).',
+		params: {
+			section: { description: 'Optional Mobile Studio section: overview | architecture | devices | build | security | release.' },
+		},
+	},
+	mobile_probe_environment: {
+		name: 'mobile_probe_environment',
+		description: 'Performs real host environment detection for Android SDK/ADB/Emulator/AVDs/Gradle/JDK, Flutter/Dart, Node/npm/React Native, Python, Docker, and macOS Xcode/iOS Simulators, returning installed toolchains, connected devices, and honest platform limitations.',
+		params: {},
+	},
+	mobile_inspect_project: {
+		name: 'mobile_inspect_project',
+		description: 'Deeply inspects an existing mobile workspace (React Native/Expo, Flutter, Native Android Kotlin, Native iOS Swift, KMP, MAUI, Ionic/Capacitor), discovering targets, screens, navigation, state management, API clients, offline DBs, permissions, backend, tests, and defects.',
+		params: {},
+	},
+	mobile_design_architecture: {
+		name: 'mobile_design_architecture',
+		description: 'Runs Three-Engine Unified Mobile Orchestration (Mobile + Universal Software + AI Engines) to design framework, architecture pattern, multi-language backend (never forcing Node.js), database, Material 3 / iOS HIG UI system, offline-first sync, secure AI proxy/on-device runtime, Mermaid diagram, ADRs, and specialist assignments.',
+		params: {
+			objective: { description: 'Complete description of the mobile application to engineer.' },
+			platform: { description: 'Optional target platform: android | ios | both.' },
+			framework: { description: 'Optional framework: react-native-expo | react-native-cli | flutter | android-kotlin | ios-swift | kotlin-multiplatform | dotnet-maui | ionic-capacitor | pwa | custom.' },
+			app_category: { description: 'Optional category: general | ai-powered | enterprise | ecommerce | fintech | social | on-demand | healthcare | education | iot-companion | offline-first | game.' },
+			backend: { description: 'Optional backend stack: none | node-express | node-nestjs | node-fastify | python-fastapi | python-django | go-gin | rust-axum | java-spring | php-laravel | dotnet-aspnet | supabase | firebase.' },
+			database: { description: 'Optional database: none | postgresql | mysql | sqlite | mongodb | redis | firestore | supabase.' },
+			include_auth: { description: 'Optional boolean ("true"/"false").' },
+			include_ai: { description: 'Optional boolean ("true"/"false").' },
+			include_offline: { description: 'Optional boolean ("true"/"false").' },
+			include_realtime: { description: 'Optional boolean ("true"/"false").' },
+			device_capabilities: { description: 'Optional JSON array of device capabilities (e.g. ["Camera", "GPS", "BLE", "Biometrics"]).' },
+		},
+	},
+	mobile_scaffold_project: {
+		name: 'mobile_scaffold_project',
+		description: 'Generates a real, runnable multi-file mobile application (React Native/Expo, Flutter, Native Android Kotlin, Native iOS Swift, etc.) with optional cross-language backend (Python/FastAPI, Node, etc.), offline-first sync queue, secure AI proxy client, and executable unit/integration tests directly on disk.',
+		params: {
+			project_name: { description: 'Human-readable project name (e.g. "PulseField Mobile").' },
+			target_dir: { description: 'Optional relative or absolute subdirectory inside the workspace.' },
+			objective: { description: 'Optional short project description.' },
+			framework: { description: 'Target framework: react-native-expo | react-native-cli | flutter | android-kotlin | ios-swift | kotlin-multiplatform | dotnet-maui | ionic-capacitor | pwa.' },
+			platform: { description: 'Optional target platform: android | ios | both.' },
+			app_category: { description: 'Optional category: general | ai-powered | enterprise | ecommerce | fintech | social | on-demand | healthcare | education | iot-companion | offline-first | game.' },
+			backend: { description: 'Optional backend stack: none | node-express | node-nestjs | python-fastapi | python-django | go-gin | rust-axum | java-spring | php-laravel | supabase | firebase.' },
+			database: { description: 'Optional database: none | postgresql | mysql | sqlite | mongodb | redis | firestore | supabase.' },
+			include_ai: { description: 'Optional boolean ("true"/"false").' },
+			include_offline: { description: 'Optional boolean ("true"/"false").' },
+			include_auth: { description: 'Optional boolean ("true"/"false").' },
+			overwrite: { description: 'Optional boolean (default false). Set true only when intentionally overwriting existing files.' },
+		},
+	},
+	mobile_device_action: {
+		name: 'mobile_device_action',
+		description: 'Runs real Android ADB / Emulator / iOS Simulator device actions (list_devices, start_emulator, install_app, launch_app, stop_app, screenshot, logcat, diagnostics). Never fakes device discovery or execution.',
+		params: {
+			action: { description: 'One of: list_devices | start_emulator | install_app | launch_app | stop_app | screenshot | logcat | diagnostics.' },
+			device_id: { description: 'Optional target device/emulator serial ID.' },
+			avd_name: { description: 'Optional Android AVD name for start_emulator.' },
+			package_name: { description: 'Optional Android package ID for launch_app / stop_app.' },
+			artifact_path: { description: 'Optional APK path for install_app.' },
+			lines: { description: 'Optional number of logcat lines (default 100).' },
+		},
+	},
+	mobile_build_and_test: {
+		name: 'mobile_build_and_test',
+		description: 'Executes real mobile client or backend builds, typechecks, lints, unit tests, widget tests, or integration tests and returns structured pass/fail/blocked_by_env evidence.',
+		params: {
+			mode: { description: 'One of: test | build | typecheck | lint | backend_test.' },
+			target_dir: { description: 'Optional relative or absolute project directory.' },
+			framework: { description: 'Optional framework hint (react-native-expo, flutter, android-kotlin, ios-swift, etc.).' },
+			platform: { description: 'Optional platform: android | ios | all.' },
+			custom_command: { description: 'Optional explicit build/test command override.' },
+			timeout_ms: { description: 'Optional timeout in milliseconds (default 90000).' },
+		},
+	},
+	mobile_audit_security: {
+		name: 'mobile_audit_security',
+		description: 'Runs an OWASP MASVS / MASTG mobile security and privacy audit scanning for hardcoded secrets/API keys, cleartext HTTP, ATS bypasses, insecure AsyncStorage/SharedPreferences tokens, unsafe WebViews, debuggable manifests, and client-trusted payment checks.',
+		params: {},
+	},
+	mobile_audit_performance: {
+		name: 'mobile_audit_performance',
+		description: 'Audits mobile source files for rendering bottlenecks (unvirtualized ScrollViews, console.log overhead), cold-start optimizations, memory/asset hotspots, and AI latency recommendations.',
+		params: {},
+	},
+	mobile_assess_readiness: {
+		name: 'mobile_assess_readiness',
+		description: 'Runs Kodia\'s independent Mobile Production & App Store / Play Store Readiness Engine, producing evidence-based verified/failed/partial/not_tested/blocked_by_env/requires_external_creds_or_hardware dimensions.',
+		params: {},
+	},
+	mobile_discover_capabilities: {
+		name: 'mobile_discover_capabilities',
+		description: 'Queries Kodia\'s extensible Mobile Capability Discovery Catalogue covering React Native New Architecture, Expo/EAS, Flutter Impeller, Jetpack Compose, SwiftUI, KMP, .NET MAUI, Capacitor, LiteRT/Core ML/ONNX Mobile, Maestro/Detox/Patrol, offline-first sync, and store release automation.',
+		params: {
+			query: { description: 'Optional keyword filter (e.g. "flutter", "offline", "core ml", "maestro", "kmp").' },
+			category: { description: 'Optional category: framework | ai-runtime | testing | device-api | build-release | architecture.' },
+		},
+	},
+	mobile_workspace_overview: {
+		name: 'mobile_workspace_overview',
+		description: 'Loads persisted Mobile Studio environment, project intelligence, architecture, scaffold, build/test, security, performance, and store readiness snapshots from .kodia/mobile/.',
+		params: {},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -2866,6 +2972,11 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - Do NOT force AI into ordinary non-AI software requests. When a request is pure software engineering (websites, CRUD apps, utilities, games, APIs without AI), keep it clean and use Kodia's Universal Software Engineering Engine & Design Intelligence directly.
 - When a request involves AI systems, chatbots, RAG, ML/DL models, computer vision, speech/audio, autonomous agents, workflows, or full-stack AI products, coordinate both engines via ai_orchestrate_project / ai_scaffold_product_factory, probe real hardware (ai_probe_compute_hardware), profile datasets (ai_profile_dataset), build/evaluate RAG (ai_rag_build_index, ai_rag_query, ai_rag_evaluate), track experiments/models (ai_experiment_manage, ai_model_registry), run quantitative evaluations (ai_evaluate_system) and AI security audits (ai_audit_security), and delegate independent workstreams to AI specialists (ai_architect, ml_engineer, llm_engineer, rag_engineer, agentic_engineer, data_engineer, cv_engineer, mlops, ai_security, ai_eval).
 - Never claim a model was trained, evaluated, deployed, or verified on hardware unless the real operation actually ran and produced verifiable artifacts. Always clearly note required external API keys or unverified cloud services.`)
+		details.push(`PERMANENT MOBILE APPLICATION ENGINEERING PLATFORM (Three-Engine Unified Orchestration): Whenever the user asks to design, build, inspect, test, debug, secure, optimize, or prepare an Android, iOS, or cross-platform mobile application (React Native/Expo, Flutter, Native Kotlin/Compose, Native Swift/SwiftUI, KMP, .NET MAUI, Ionic/Capacitor):
+- Coordinate all three engines seamlessly: Mobile Application Engineering Engine + Universal Software Engineering Engine (multi-language backends: Python/FastAPI, Go/Gin, Node/NestJS/Express, Laravel, Spring Boot, Rust/Axum, Postgres/SQLite/Redis) + AI Engineering Engine (for AI-powered mobile apps).
+- Open Mobile Studio (mobile_open_studio), probe real host SDKs/devices (mobile_probe_environment), inspect existing mobile repos (mobile_inspect_project), design architecture (mobile_design_architecture), and scaffold/implement real frontend + backend + offline sync + tests (mobile_scaffold_project + file tools).
+- NEVER embed privileged server/LLM API keys in distributed mobile apps; always route hosted AI and payment verification through a secure backend.
+- Run real tests/builds (mobile_build_and_test), device/emulator controls where available (mobile_device_action), OWASP MASVS security audits (mobile_audit_security), performance audits (mobile_audit_performance), and independent store readiness (mobile_assess_readiness). NEVER fake builds, tests, or devices, and honestly state macOS/Xcode requirements for native iOS builds on Windows.`)
 		details.push(`NATIVE API ENGINEERING STUDIO & LIVE TESTING WORKFLOW: Whenever the user asks to build, inspect, test, debug, load-test, security-audit, document, or prepare an API (including "Test my API"):
 - Automatically open the native in-editor API Studio (api_open_studio) so the user can watch real execution live inside Kodia.
 - Discover actual routes, frameworks, protocols, specs, auth, and services with api_discover_project.

@@ -320,6 +320,19 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	evolution_manage_proposals: { done: 'Updated Evolution proposals', proposed: 'Manage evolution proposals', running: 'Updating governed capability proposals' },
 	evolution_schedule_periodic_audit: { done: 'Scheduled periodic evolution audit', proposed: 'Schedule periodic audit', running: 'Registering recurring capability-discovery job' },
 	evolution_workspace_overview: { done: 'Loaded Evolution & Ops overview', proposed: 'Load evolution overview', running: 'Aggregating supply-chain, IaC, prod, compliance & radar' },
+	// Kodia Permanent Mobile Application Engineering Platform
+	mobile_open_studio: { done: 'Opened Mobile Studio', proposed: 'Open Mobile Studio', running: 'Opening Kodia Mobile Engineering Studio' },
+	mobile_probe_environment: { done: 'Probed mobile SDKs & devices', proposed: 'Probe mobile environment', running: 'Detecting Android/iOS/Flutter/RN SDKs & devices' },
+	mobile_inspect_project: { done: 'Inspected mobile project', proposed: 'Inspect mobile project', running: 'Analyzing mobile architecture, screens & configs' },
+	mobile_design_architecture: { done: 'Designed mobile architecture', proposed: 'Design mobile architecture', running: 'Orchestrating Three-Engine mobile architecture' },
+	mobile_scaffold_project: { done: 'Scaffolded mobile project', proposed: 'Scaffold mobile project', running: 'Generating mobile client, backend & tests' },
+	mobile_device_action: { done: 'Executed device action', proposed: 'Run mobile device action', running: 'Running ADB/Emulator/Simulator control' },
+	mobile_build_and_test: { done: 'Ran mobile build/tests', proposed: 'Run mobile build/tests', running: 'Executing mobile/backend build & test suite' },
+	mobile_audit_security: { done: 'Audited mobile security', proposed: 'Audit mobile security (MASVS)', running: 'Scanning OWASP MASVS/MASTG security rules' },
+	mobile_audit_performance: { done: 'Audited mobile performance', proposed: 'Audit mobile performance', running: 'Analyzing mobile rendering & startup hotspots' },
+	mobile_assess_readiness: { done: 'Assessed store readiness', proposed: 'Assess mobile store readiness', running: 'Evaluating Android/iOS production & store gates' },
+	mobile_discover_capabilities: { done: 'Discovered mobile capabilities', proposed: 'Discover mobile capabilities', running: 'Querying mobile technology catalogue' },
+	mobile_workspace_overview: { done: 'Loaded Mobile Studio snapshot', proposed: 'Load mobile overview', running: 'Loading persisted .kodia/mobile/ state' },
 };
 
 function humanizeToolName(toolName: string): string {

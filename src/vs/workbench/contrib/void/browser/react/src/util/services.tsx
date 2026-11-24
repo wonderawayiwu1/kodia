@@ -79,6 +79,8 @@ import { ICorrectnessService } from '../../../correctnessService.js';
 import { IKodiaCorrectnessMainService } from '../../../../common/correctnessTypes.js';
 import { IEvolutionService } from '../../../evolutionService.js';
 import { IKodiaEvolutionMainService } from '../../../../common/evolutionTypes.js';
+import { IMobileEngineeringService } from '../../../mobileEngineeringService.js';
+import { IKodiaMobileMainService } from '../../../../common/mobileEngineeringTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -279,6 +281,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaCorrectnessMainService: (() => { try { return accessor.get(IKodiaCorrectnessMainService) } catch { return undefined } })(),
 		IEvolutionService: accessor.get(IEvolutionService),
 		IKodiaEvolutionMainService: (() => { try { return accessor.get(IKodiaEvolutionMainService) } catch { return undefined } })(),
+		IMobileEngineeringService: accessor.get(IMobileEngineeringService),
+		IKodiaMobileMainService: (() => { try { return accessor.get(IKodiaMobileMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

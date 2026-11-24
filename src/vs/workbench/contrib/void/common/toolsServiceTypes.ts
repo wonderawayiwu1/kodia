@@ -125,6 +125,27 @@ import type {
 	SupplyChainAuditReport,
 	TechnologyEvaluationResult,
 } from './evolutionTypes.js';
+import type {
+	MobileAppCategory,
+	MobileArchitectureDesignReport,
+	MobileBackendStack,
+	MobileBuildTestRequest,
+	MobileBuildTestResult,
+	MobileCapabilityEntry,
+	MobileDatabaseId,
+	MobileDeviceActionResult,
+	MobileDeviceActionType,
+	MobileEnvironmentProbeReport,
+	MobileFrameworkId,
+	MobilePerformanceAuditReport,
+	MobileProductionReadinessReport,
+	MobileProjectIntelligenceReport,
+	MobileScaffoldResult,
+	MobileSecurityAuditReport,
+	MobileStudioSection,
+	MobileTargetPlatform,
+	MobileWorkspaceSnapshot,
+} from './mobileEngineeringTypes.js';
 
 
 
@@ -336,6 +357,10 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'evolution_supply_chain_sbom': 'terminal',
 	'evolution_manage_proposals': 'edits',
 	'evolution_schedule_periodic_audit': 'edits',
+	// Kodia Permanent Mobile Application Engineering Platform
+	'mobile_scaffold_project': 'edits',
+	'mobile_device_action': 'terminal',
+	'mobile_build_and_test': 'terminal',
 }
 
 
@@ -660,6 +685,19 @@ export type BuiltinToolCallParams = {
 	'evolution_manage_proposals': { action: 'list' | 'add' | 'update_status' | 'remove', id?: string, status?: EvolutionProposal['status'], title?: string, domain?: EvolutionDomain, verdict?: EvolutionVerdict, signal_score?: number, justification?: string, acceptance_criteria?: string[] },
 	'evolution_schedule_periodic_audit': { interval_hours?: number },
 	'evolution_workspace_overview': {},
+	// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+	'mobile_open_studio': { section?: MobileStudioSection },
+	'mobile_probe_environment': {},
+	'mobile_inspect_project': {},
+	'mobile_design_architecture': { objective: string, platform?: MobileTargetPlatform, framework?: MobileFrameworkId, app_category?: MobileAppCategory, backend?: MobileBackendStack, database?: MobileDatabaseId, include_auth?: boolean, include_ai?: boolean, include_offline?: boolean, include_realtime?: boolean, device_capabilities?: string[] },
+	'mobile_scaffold_project': { project_name: string, target_dir?: string, objective?: string, framework: MobileFrameworkId, platform?: MobileTargetPlatform, app_category?: MobileAppCategory, backend?: MobileBackendStack, database?: MobileDatabaseId, include_ai?: boolean, include_offline?: boolean, include_auth?: boolean, overwrite?: boolean },
+	'mobile_device_action': { action: MobileDeviceActionType, device_id?: string, avd_name?: string, package_name?: string, artifact_path?: string, lines?: number },
+	'mobile_build_and_test': { mode: MobileBuildTestRequest['mode'], target_dir?: string, framework?: MobileFrameworkId, platform?: 'android' | 'ios' | 'all', custom_command?: string, timeout_ms?: number },
+	'mobile_audit_security': {},
+	'mobile_audit_performance': {},
+	'mobile_assess_readiness': {},
+	'mobile_discover_capabilities': { query?: string, category?: MobileCapabilityEntry['category'] },
+	'mobile_workspace_overview': {},
 }
 
 // RESULT OF TOOL CALL
@@ -954,6 +992,19 @@ export type BuiltinToolResultType = {
 	'evolution_manage_proposals': { proposals: EvolutionProposal[] },
 	'evolution_schedule_periodic_audit': { scheduled: boolean, jobId?: string, intervalHours: number, message: string },
 	'evolution_workspace_overview': EvolutionWorkspaceSnapshot,
+	// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+	'mobile_open_studio': { opened: boolean, section: MobileStudioSection },
+	'mobile_probe_environment': MobileEnvironmentProbeReport,
+	'mobile_inspect_project': MobileProjectIntelligenceReport,
+	'mobile_design_architecture': MobileArchitectureDesignReport,
+	'mobile_scaffold_project': MobileScaffoldResult,
+	'mobile_device_action': MobileDeviceActionResult,
+	'mobile_build_and_test': MobileBuildTestResult,
+	'mobile_audit_security': MobileSecurityAuditReport,
+	'mobile_audit_performance': MobilePerformanceAuditReport,
+	'mobile_assess_readiness': MobileProductionReadinessReport,
+	'mobile_discover_capabilities': { entries: MobileCapabilityEntry[] },
+	'mobile_workspace_overview': MobileWorkspaceSnapshot,
 }
 
 

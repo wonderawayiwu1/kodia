@@ -23,6 +23,7 @@ import './voidSettingsPane.js'
 import './apiStudioPane.js'
 import './correctnessPane.js'
 import './evolutionPane.js'
+import './mobileStudioPane.js'
 
 // register css
 import './media/void.css'
@@ -124,4 +125,5 @@ import './aiEngineeringService.js'
 import './apiStudioService.js'
 import './correctnessService.js'
 import './evolutionService.js'
+import './mobileEngineeringService.js'
 import '../common/executionObservability.js'

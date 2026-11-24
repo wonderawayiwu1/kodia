@@ -50,7 +50,20 @@ export type BuiltinSubagentType =
 	| 'api_qa_perf'
 	| 'verifier'
 	| 'supply_chain_ops'
-	| 'evolution_scout';
+	| 'evolution_scout'
+	// Kodia Mobile Application Engineering Engine specialist workforce
+	| 'mobile_architect'
+	| 'react_native_engineer'
+	| 'flutter_engineer'
+	| 'android_native_engineer'
+	| 'ios_native_engineer'
+	| 'mobile_ui_ux'
+	| 'mobile_ai_engineer'
+	| 'mobile_offline_sync'
+	| 'mobile_security'
+	| 'mobile_qa'
+	| 'mobile_perf'
+	| 'mobile_release';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -251,6 +264,66 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		description: 'read-only Continuous Capability Evolution & Signal-vs-Hype Scout that evaluates emerging engineering technologies, license compatibility, and Kodia self-improvement proposals',
 		guidance: 'Use evolution_run_capability_radar, evolution_evaluate_technology, and evolution_manage_proposals. Strictly distinguish verifiable engineering signal from marketing hype, flag incompatible licenses, avoid duplicating existing Kodia capabilities, and NEVER blindly install dependencies.',
 	},
+	mobile_architect: {
+		canChangeFiles: false,
+		description: 'read-only Mobile Systems Architect designing Android, iOS, cross-platform, backend, offline-sync, and AI mobile architectures',
+		guidance: 'Use mobile_probe_environment, mobile_inspect_project, mobile_design_architecture, and mobile_discover_capabilities. Coordinate Mobile, Universal Software, and AI Engines with concrete ADRs and Mermaid diagrams.',
+	},
+	react_native_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in React Native CLI, Expo, Expo Router, New Architecture (Fabric/TurboModules/JSI/Hermes), native modules, and TypeScript mobile apps',
+		guidance: 'Build clean, typed, virtualized React Native screens, navigation, state management, SecureStore auth, deep links, and automated tests. Verify via mobile_build_and_test.',
+	},
+	flutter_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in Flutter SDK, Dart, Material 3, Cupertino, Riverpod/Bloc, GoRouter, platform channels, FFI, and widget/integration tests',
+		guidance: 'Implement modular Clean Architecture Flutter features with Riverpod/Bloc, GoRouter, Drift/SQLite offline storage, and flutter_test suites.',
+	},
+	android_native_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in Native Android (Kotlin, Jetpack Compose, Material 3, Room, Hilt, WorkManager, Coroutines/Flow, Gradle Kotlin DSL, NDK/JNI)',
+		guidance: 'Write idiomatic Kotlin/Compose architectures with proper Android permissions, cleartext-disabled networking, ViewModels, Room persistence, and JUnit/Compose tests.',
+	},
+	ios_native_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in Native iOS (Swift, SwiftUI, UIKit, Swift Concurrency, SwiftData/Core Data, Keychain, Core ML, StoreKit, XCTest)',
+		guidance: 'Follow Apple HIG, Swift structured concurrency, Keychain security, and Privacy Manifests. Honestly note macOS/Xcode requirements when running on non-macOS hosts.',
+	},
+	mobile_ui_ux: {
+		canChangeFiles: true,
+		description: 'specialist in Material 3, iOS HIG, Cupertino, platform-adaptive tokens, touch targets (48dp), safe areas, gestures, animations, and mobile accessibility',
+		guidance: 'Design mobile-first interfaces with WCAG AA contrast, dynamic type, dark/light themes, skeleton/empty/error states, and responsive phone/tablet/foldable layouts.',
+	},
+	mobile_ai_engineer: {
+		canChangeFiles: true,
+		description: 'specialist in AI-powered mobile apps: secure backend AI proxies, streaming chat/voice/vision, RAG, and on-device LiteRT/Core ML/ONNX Runtime Mobile',
+		guidance: 'NEVER embed privileged server API keys in mobile apps. Route cloud inference through authenticated backend proxies or use on-device LiteRT/Core ML/ONNX runtimes, and verify real responses.',
+	},
+	mobile_offline_sync: {
+		canChangeFiles: true,
+		description: 'specialist in offline-first mobile storage (SQLite/Room/SwiftData/Drift), durable mutation outbox queues, retry backoff, and conflict reconciliation',
+		guidance: 'Design idempotent local-first writes, network-state transitions, optimistic UI, and automated offline-to-online reconciliation tests.',
+	},
+	mobile_security: {
+		canChangeFiles: false,
+		description: 'read-only OWASP MASVS / MASTG Mobile Security & Privacy specialist auditing secrets, Keychain/Keystore, TLS, WebViews, deep links, and permissions',
+		guidance: 'Run mobile_audit_security and inspect client/backend boundaries for secret leaks, cleartext traffic, insecure storage, unsafe WebViews, and client-trusted payments.',
+	},
+	mobile_qa: {
+		canChangeFiles: true,
+		description: 'specialist in mobile unit, widget/component, API integration, Detox/Maestro/Espresso/XCUITest E2E, and emulator/device verification',
+		guidance: 'Run real mobile_build_and_test and mobile_device_action checks. Never claim physical-device verification if only unit tests or emulators ran; report exact pass/fail/blocked evidence.',
+	},
+	mobile_perf: {
+		canChangeFiles: true,
+		description: 'specialist in mobile cold start, 60/120fps rendering, list virtualization, memory/battery profiling, APK/AAB/IPA size, and on-device AI latency',
+		guidance: 'Run mobile_audit_performance and eliminate unvirtualized lists, JS/UI thread jank, oversized assets, and redundant network calls without removing features.',
+	},
+	mobile_release: {
+		canChangeFiles: false,
+		description: 'read-only Mobile Release & Store Readiness specialist evaluating Android APK/AAB/Play Store and iOS Archive/IPA/TestFlight/App Store readiness',
+		guidance: 'Run mobile_assess_readiness to produce strict evidence-based readiness reports. Never silently sign, upload, or publish apps without explicit user authorization.',
+	},
 };
 
 // common names models use for the same roles
@@ -274,6 +347,11 @@ const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, BuiltinSubagentType>> = {
 	performance: 'performance', perf: 'performance', optimize: 'performance',
 	ui_ux: 'ui_ux', 'ui-ux': 'ui_ux', ux: 'ui_ux', design: 'ui_ux',
 	refactor: 'refactor', refactoring: 'refactor',
+	mobile: 'mobile_architect', 'mobile-architect': 'mobile_architect', 'react-native': 'react_native_engineer', rn: 'react_native_engineer',
+	flutter: 'flutter_engineer', android: 'android_native_engineer', kotlin: 'android_native_engineer',
+	ios: 'ios_native_engineer', swift: 'ios_native_engineer',
+	'mobile-ui': 'mobile_ui_ux', 'mobile-ai': 'mobile_ai_engineer', 'mobile-offline': 'mobile_offline_sync',
+	'mobile-security': 'mobile_security', 'mobile-qa': 'mobile_qa', 'mobile-perf': 'mobile_perf', 'mobile-release': 'mobile_release',
 };
 
 export interface CustomSubagentDefinition extends SubagentProfile {

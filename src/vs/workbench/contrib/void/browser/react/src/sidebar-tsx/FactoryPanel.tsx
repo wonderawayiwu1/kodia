@@ -13,6 +13,7 @@ import {
 	Plus,
 	Rocket,
 	Scale,
+	Smartphone,
 	Sparkles,
 	Trash2,
 } from 'lucide-react';
@@ -21,11 +22,14 @@ import {
 	ArchitectureDecisionRecord,
 	AutopilotObjective,
 	computeRequirementCoverage,
+	DEFAULT_MOBILE_FACTORY_CONFIG,
 	FACTORY_PROJECT_PROFILES,
 	FactoryProjectProfileId,
+	MobileFactoryConfig,
 	ProjectRequirement,
 	RequirementStatus,
 } from '../../../../common/softwareFactory.js';
+import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
 import { KodiaBadge, KodiaCard, KodiaEmptyState, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 
 type FactorySubTab = 'build' | 'requirements' | 'autopilot' | 'council';
@@ -36,6 +40,7 @@ export const FactoryPanel = ({ onOpenChat }: { onOpenChat?: () => void }) => {
 	const accessor = useAccessor();
 	const factoryService = accessor.get('ISoftwareFactoryService');
 	const chatThreadService = accessor.get('IChatThreadService');
+	const commandService = accessor.get('ICommandService');
 
 	const [subTab, setSubTab] = useState<FactorySubTab>('build');
 
@@ -58,6 +63,7 @@ export const FactoryPanel = ({ onOpenChat }: { onOpenChat?: () => void }) => {
 	// Idea -> App form state
 	const [idea, setIdea] = useState('');
 	const [profileId, setProfileId] = useState<FactoryProjectProfileId>('web-app');
+	const [mobileConfig, setMobileConfig] = useState<MobileFactoryConfig>({ ...DEFAULT_MOBILE_FACTORY_CONFIG });
 
 	// New requirement form
 	const [reqTitle, setReqTitle] = useState('');
@@ -88,7 +94,7 @@ export const FactoryPanel = ({ onOpenChat }: { onOpenChat?: () => void }) => {
 
 	const handleLaunchFactory = async () => {
 		if (!idea.trim()) { return; }
-		await factoryService.launchFactoryBuild(idea, profileId);
+		await factoryService.launchFactoryBuild(idea, profileId, profileId === 'mobile-app' ? mobileConfig : undefined);
 		setIdea('');
 		onOpenChat?.();
 	};
@@ -200,6 +206,99 @@ export const FactoryPanel = ({ onOpenChat }: { onOpenChat?: () => void }) => {
 									);
 								})}
 							</div>
+
+							{profileId === 'mobile-app' && (
+								<div className='p-2.5 rounded-md bg-void-bg-1 border border-void-border-2 flex flex-col gap-2'>
+									<div className='flex items-center justify-between'>
+										<span className='text-[11px] font-semibold text-void-fg-1 flex items-center gap-1.5'>
+											<Smartphone size={12} className='text-blue-400' />
+											<span>Mobile Engineering Configuration</span>
+										</span>
+										<button
+											type='button'
+											onClick={() => void commandService.executeCommand(KODIA_OPEN_MOBILE_STUDIO_ACTION_ID)}
+											className='text-[10px] text-blue-400 hover:underline cursor-pointer'
+										>
+											Open Mobile Studio
+										</button>
+									</div>
+									<div className='grid grid-cols-2 gap-1.5'>
+										<select
+											value={mobileConfig.platform}
+											onChange={e => setMobileConfig(c => ({ ...c, platform: e.target.value as MobileFactoryConfig['platform'] }))}
+											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'
+										>
+											<option value='both'>Android + iOS</option>
+											<option value='android'>Android</option>
+											<option value='ios'>iOS</option>
+										</select>
+										<select
+											value={mobileConfig.framework}
+											onChange={e => setMobileConfig(c => ({ ...c, framework: e.target.value as MobileFactoryConfig['framework'] }))}
+											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'
+										>
+											<option value='react-native-expo'>React Native (Expo)</option>
+											<option value='react-native-cli'>React Native CLI</option>
+											<option value='flutter'>Flutter (Dart)</option>
+											<option value='android-kotlin'>Native Android (Kotlin)</option>
+											<option value='ios-swift'>Native iOS (Swift)</option>
+											<option value='kotlin-multiplatform'>Kotlin Multiplatform</option>
+											<option value='dotnet-maui'>.NET MAUI</option>
+											<option value='ionic-capacitor'>Ionic / Capacitor</option>
+										</select>
+										<select
+											value={mobileConfig.backend}
+											onChange={e => setMobileConfig(c => ({ ...c, backend: e.target.value as MobileFactoryConfig['backend'] }))}
+											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'
+										>
+											<option value='auto'>Backend: Auto-Select</option>
+											<option value='python-fastapi'>Python / FastAPI</option>
+											<option value='node-express'>Node / Express</option>
+											<option value='node-nestjs'>Node / NestJS</option>
+											<option value='go-gin'>Go / Gin</option>
+											<option value='rust-axum'>Rust / Axum</option>
+											<option value='java-spring'>Java / Spring Boot</option>
+											<option value='php-laravel'>PHP / Laravel</option>
+											<option value='supabase'>Supabase</option>
+											<option value='firebase'>Firebase</option>
+											<option value='none'>No Backend (Local)</option>
+										</select>
+										<select
+											value={mobileConfig.database}
+											onChange={e => setMobileConfig(c => ({ ...c, database: e.target.value as MobileFactoryConfig['database'] }))}
+											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 text-[11px]'
+										>
+											<option value='auto'>Database: Auto</option>
+											<option value='postgresql'>PostgreSQL</option>
+											<option value='sqlite'>SQLite</option>
+											<option value='mysql'>MySQL</option>
+											<option value='mongodb'>MongoDB</option>
+											<option value='redis'>Redis</option>
+											<option value='firestore'>Firestore</option>
+											<option value='supabase'>Supabase DB</option>
+											<option value='none'>None</option>
+										</select>
+									</div>
+									<div className='flex flex-wrap gap-2.5 text-[10px] text-void-fg-2'>
+										<label className='flex items-center gap-1 cursor-pointer'>
+											<input type='checkbox' checked={mobileConfig.includeAuth} onChange={e => setMobileConfig(c => ({ ...c, includeAuth: e.target.checked }))} />
+											<span>Auth</span>
+										</label>
+										<label className='flex items-center gap-1 cursor-pointer'>
+											<input type='checkbox' checked={mobileConfig.includeAI} onChange={e => setMobileConfig(c => ({ ...c, includeAI: e.target.checked }))} />
+											<span>AI Capabilities</span>
+										</label>
+										<label className='flex items-center gap-1 cursor-pointer'>
+											<input type='checkbox' checked={mobileConfig.includeOffline} onChange={e => setMobileConfig(c => ({ ...c, includeOffline: e.target.checked }))} />
+											<span>Offline-First</span>
+										</label>
+										<label className='flex items-center gap-1 cursor-pointer'>
+											<input type='checkbox' checked={mobileConfig.includeRealtime} onChange={e => setMobileConfig(c => ({ ...c, includeRealtime: e.target.checked }))} />
+											<span>Real-Time</span>
+										</label>
+									</div>
+								</div>
+							)}
 
 							<KodiaPrimaryButton
 								onClick={() => void handleLaunchFactory()}

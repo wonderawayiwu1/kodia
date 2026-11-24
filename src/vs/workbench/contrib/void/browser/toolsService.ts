@@ -184,6 +184,7 @@ import {
 	ProofCarryingChangeRecord,
 } from '../common/correctnessTypes.js'
 import { IEvolutionService } from './evolutionService.js'
+import { IMobileEngineeringService } from './mobileEngineeringService.js'
 import { IKodiaWorkflowsService } from '../common/kodiaWorkflows.js'
 import {
 	DEFAULT_EVOLUTION_ENGINE_SETTINGS,
@@ -194,6 +195,27 @@ import {
 	IKodiaEvolutionMainService,
 	KODIA_EVOLUTION_CHANNEL,
 } from '../common/evolutionTypes.js'
+import {
+	IKodiaMobileMainService,
+	KODIA_MOBILE_CHANNEL,
+	MobileAppCategory,
+	MobileBackendStack,
+	MobileBuildTestRequest,
+	MobileCapabilityEntry,
+	MobileDatabaseId,
+	MobileDeviceActionType,
+	MobileFrameworkId,
+	MobileStudioSection,
+	MobileTargetPlatform,
+} from '../common/mobileEngineeringTypes.js'
+import {
+	discoverMobileCapabilities,
+	formatMobileArchitectureForLLM,
+	formatMobileEnvironmentForLLM,
+	formatMobileProjectIntelForLLM,
+	formatMobileReadinessForLLM,
+	formatMobileSecurityForLLM,
+} from '../common/mobileEngineeringKnowledge.js'
 import {
 	analyzeTaintFlows,
 	analyzeWorkspaceCorrectness,
@@ -496,6 +518,7 @@ export class ToolsService implements IToolsService {
 		const apiStudioMainService = ProxyChannel.toService<IKodiaApiStudioMainService>(mainProcessService.getChannel(KODIA_API_STUDIO_CHANNEL))
 		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
+		const mobileMainService = ProxyChannel.toService<IKodiaMobileMainService>(mainProcessService.getChannel(KODIA_MOBILE_CHANNEL))
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
 		const getNotebookEditHistory = (uri: URI): NotebookEditHistoryState => {
@@ -608,6 +631,9 @@ export class ToolsService implements IToolsService {
 		}
 		const getEvolutionService = (): IEvolutionService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IEvolutionService)) } catch { return undefined }
+		}
+		const getMobileService = (): IMobileEngineeringService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IMobileEngineeringService)) } catch { return undefined }
 		}
 		const getWorkflowsService = (): IKodiaWorkflowsService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IKodiaWorkflowsService)) } catch { return undefined }
@@ -2509,6 +2535,71 @@ export class ToolsService implements IToolsService {
 				interval_hours: validateNumber(params.interval_hours, { default: null }) ?? undefined,
 			}),
 			evolution_workspace_overview: () => ({}),
+
+			// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+			mobile_open_studio: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? undefined) as MobileStudioSection | undefined,
+			}),
+			mobile_probe_environment: () => ({}),
+			mobile_inspect_project: () => ({}),
+			mobile_design_architecture: (params: RawToolParamsObj) => {
+				const objective = validateStr('objective', params.objective)
+				let device_capabilities: string[] | undefined
+				if (params.device_capabilities !== undefined && params.device_capabilities !== null) {
+					device_capabilities = parseNotebookArrayParam('device_capabilities', params.device_capabilities).map(String)
+				}
+				return {
+					objective,
+					platform: (validateOptionalStr('platform', params.platform) ?? undefined) as MobileTargetPlatform | undefined,
+					framework: (validateOptionalStr('framework', params.framework) ?? undefined) as MobileFrameworkId | undefined,
+					app_category: (validateOptionalStr('app_category', params.app_category) ?? undefined) as MobileAppCategory | undefined,
+					backend: (validateOptionalStr('backend', params.backend) ?? undefined) as MobileBackendStack | undefined,
+					database: (validateOptionalStr('database', params.database) ?? undefined) as MobileDatabaseId | undefined,
+					include_auth: params.include_auth !== undefined ? validateBoolean(params.include_auth, { default: true }) : undefined,
+					include_ai: params.include_ai !== undefined ? validateBoolean(params.include_ai, { default: false }) : undefined,
+					include_offline: params.include_offline !== undefined ? validateBoolean(params.include_offline, { default: false }) : undefined,
+					include_realtime: params.include_realtime !== undefined ? validateBoolean(params.include_realtime, { default: false }) : undefined,
+					device_capabilities,
+				}
+			},
+			mobile_scaffold_project: (params: RawToolParamsObj) => ({
+				project_name: validateStr('project_name', params.project_name),
+				target_dir: validateOptionalStr('target_dir', params.target_dir) ?? undefined,
+				objective: validateOptionalStr('objective', params.objective) ?? undefined,
+				framework: validateStr('framework', params.framework) as MobileFrameworkId,
+				platform: (validateOptionalStr('platform', params.platform) ?? undefined) as MobileTargetPlatform | undefined,
+				app_category: (validateOptionalStr('app_category', params.app_category) ?? undefined) as MobileAppCategory | undefined,
+				backend: (validateOptionalStr('backend', params.backend) ?? undefined) as MobileBackendStack | undefined,
+				database: (validateOptionalStr('database', params.database) ?? undefined) as MobileDatabaseId | undefined,
+				include_ai: params.include_ai !== undefined ? validateBoolean(params.include_ai, { default: false }) : undefined,
+				include_offline: params.include_offline !== undefined ? validateBoolean(params.include_offline, { default: false }) : undefined,
+				include_auth: params.include_auth !== undefined ? validateBoolean(params.include_auth, { default: true }) : undefined,
+				overwrite: params.overwrite !== undefined ? validateBoolean(params.overwrite, { default: false }) : false,
+			}),
+			mobile_device_action: (params: RawToolParamsObj) => ({
+				action: validateStr('action', params.action) as MobileDeviceActionType,
+				device_id: validateOptionalStr('device_id', params.device_id) ?? undefined,
+				avd_name: validateOptionalStr('avd_name', params.avd_name) ?? undefined,
+				package_name: validateOptionalStr('package_name', params.package_name) ?? undefined,
+				artifact_path: validateOptionalStr('artifact_path', params.artifact_path) ?? undefined,
+				lines: params.lines !== undefined && params.lines !== null ? (validateNumber(params.lines, { default: 100 }) ?? undefined) : undefined,
+			}),
+			mobile_build_and_test: (params: RawToolParamsObj) => ({
+				mode: validateStr('mode', params.mode) as MobileBuildTestRequest['mode'],
+				target_dir: validateOptionalStr('target_dir', params.target_dir) ?? undefined,
+				framework: (validateOptionalStr('framework', params.framework) ?? undefined) as MobileFrameworkId | undefined,
+				platform: (validateOptionalStr('platform', params.platform) ?? undefined) as 'android' | 'ios' | 'all' | undefined,
+				custom_command: validateOptionalStr('custom_command', params.custom_command) ?? undefined,
+				timeout_ms: params.timeout_ms !== undefined && params.timeout_ms !== null ? (validateNumber(params.timeout_ms, { default: 90000 }) ?? undefined) : undefined,
+			}),
+			mobile_audit_security: () => ({}),
+			mobile_audit_performance: () => ({}),
+			mobile_assess_readiness: () => ({}),
+			mobile_discover_capabilities: (params: RawToolParamsObj) => ({
+				query: validateOptionalStr('query', params.query) ?? undefined,
+				category: (validateOptionalStr('category', params.category) ?? undefined) as MobileCapabilityEntry['category'] | undefined,
+			}),
+			mobile_workspace_overview: () => ({}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -5297,6 +5388,114 @@ export class ToolsService implements IToolsService {
 				return { result: snap }
 			},
 
+			// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+			mobile_open_studio: async ({ section }) => {
+				const targetSection: MobileStudioSection = section ?? 'overview'
+				const svc = getMobileService()
+				await svc?.openStudio(targetSection)
+				return { result: { opened: true, section: targetSection } }
+			},
+			mobile_probe_environment: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.probeEnvironment(root)
+				getMobileService()?.recordEnvironment(report)
+				return { result: report }
+			},
+			mobile_inspect_project: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.inspectWorkspace(root)
+				getMobileService()?.recordProjectIntel(report)
+				return { result: report }
+			},
+			mobile_design_architecture: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.designArchitecture(root, {
+					objective: p.objective,
+					platform: p.platform,
+					framework: p.framework,
+					appCategory: p.app_category,
+					backend: p.backend,
+					database: p.database,
+					includeAuth: p.include_auth,
+					includeAI: p.include_ai,
+					includeOffline: p.include_offline,
+					includeRealtime: p.include_realtime,
+					deviceCapabilities: p.device_capabilities,
+				})
+				getMobileService()?.recordArchitecture(report)
+				return { result: report }
+			},
+			mobile_scaffold_project: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await mobileMainService.scaffoldProject(root, {
+					projectName: p.project_name,
+					targetDir: p.target_dir,
+					objective: p.objective,
+					framework: p.framework,
+					platform: p.platform,
+					appCategory: p.app_category,
+					backend: p.backend,
+					database: p.database,
+					includeAI: p.include_ai,
+					includeOffline: p.include_offline,
+					includeAuth: p.include_auth,
+					overwrite: p.overwrite,
+				})
+				getMobileService()?.recordScaffold(res)
+				return { result: res }
+			},
+			mobile_device_action: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await mobileMainService.runDeviceAction(root, {
+					action: p.action,
+					deviceId: p.device_id,
+					avdName: p.avd_name,
+					packageName: p.package_name,
+					artifactPath: p.artifact_path,
+					lines: p.lines,
+				})
+				return { result: res }
+			},
+			mobile_build_and_test: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await mobileMainService.runBuildOrTest(root, {
+					mode: p.mode,
+					targetDir: p.target_dir,
+					framework: p.framework,
+					platform: p.platform,
+					customCommand: p.custom_command,
+					timeoutMs: p.timeout_ms,
+				})
+				getMobileService()?.recordBuildTest(res)
+				return { result: res }
+			},
+			mobile_audit_security: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.runSecurityAudit(root)
+				getMobileService()?.recordSecurityAudit(report)
+				return { result: report }
+			},
+			mobile_audit_performance: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.runPerformanceAudit(root)
+				getMobileService()?.recordPerformanceAudit(report)
+				return { result: report }
+			},
+			mobile_assess_readiness: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const report = await mobileMainService.assessProductionReadiness(root)
+				getMobileService()?.recordReadiness(report)
+				return { result: report }
+			},
+			mobile_discover_capabilities: async ({ query, category }) => {
+				return { result: { entries: discoverMobileCapabilities(query, category) } }
+			},
+			mobile_workspace_overview: async () => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const snap = await mobileMainService.loadWorkspaceSnapshot(root)
+				return { result: snap }
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
 				const compactOutputForRead = (out: any) => {
@@ -7073,6 +7272,44 @@ export class ToolsService implements IToolsService {
 				`- Modernization Plans: ${r.modernizationReports.length}`,
 				`- Capability Radar audits: ${r.radarReports.length}`,
 				`- Governed Proposals: ${r.proposals.length}`,
+			].join('\n'),
+
+			// Kodia Permanent Mobile Application Engineering Platform (12 tools)
+			mobile_open_studio: (_params, r) => `Opened Kodia Mobile Engineering Studio (section: ${r.section}).`,
+			mobile_probe_environment: (_params, r) => formatMobileEnvironmentForLLM(r),
+			mobile_inspect_project: (_params, r) => formatMobileProjectIntelForLLM(r),
+			mobile_design_architecture: (_params, r) => formatMobileArchitectureForLLM(r),
+			mobile_scaffold_project: (_params, r) => [
+				`Scaffolded ${r.framework} mobile project (backend: ${r.backendStack}) in ${r.projectDir}:`,
+				`Created ${r.createdFiles.length} file(s): ${r.createdFiles.join(', ')}`,
+				...(r.skippedFiles.length > 0 ? [`Skipped existing: ${r.skippedFiles.join(', ')}`] : []),
+				`Next steps:\n${r.nextSteps.map(s => `  - ${s}`).join('\n')}`,
+			].join('\n'),
+			mobile_device_action: (_params, r) => `Mobile device action "${r.action}" → ${r.status} (${r.durationMs}ms)\n${r.error ? `Error: ${r.error}\n` : ''}${r.output}`.trim(),
+			mobile_build_and_test: (_params, r) => [
+				`Mobile ${r.mode} → ${r.status.toUpperCase()} (${r.durationMs}ms) [${r.command}]`,
+				r.summary,
+				...(r.stdout ? [`Stdout:\n${r.stdout.slice(0, 3000)}`] : []),
+				...(r.stderr ? [`Stderr:\n${r.stderr.slice(0, 1500)}`] : []),
+			].join('\n'),
+			mobile_audit_security: (_params, r) => formatMobileSecurityForLLM(r),
+			mobile_audit_performance: (_params, r) => [
+				`Mobile Performance Audit — Score: ${r.score}/100 (${r.filesScanned} files scanned, ${r.findings.length} finding(s))`,
+				...r.findings.slice(0, 12).map(f => `  - [${f.severity.toUpperCase()}][${f.category}] ${f.file}:${f.line} — ${f.title}: ${f.recommendation}`),
+				`Recommendations:\n${r.recommendations.map(rec => `  - ${rec}`).join('\n')}`,
+			].join('\n'),
+			mobile_assess_readiness: (_params, r) => formatMobileReadinessForLLM(r),
+			mobile_discover_capabilities: (_params, r) => r.entries.length === 0
+				? 'No matching mobile capabilities found.'
+				: r.entries.map(e => `- **${e.name}** [${e.category}/${e.maturity}] (${e.platforms.join(', ')}) — ${e.summary}`).join('\n'),
+			mobile_workspace_overview: (_params, r) => [
+				`# Kodia Mobile Engineering Workspace Snapshot (${r.workspaceRoot})`,
+				`- Environment probed: ${r.environment ? `${r.environment.toolchains.filter(t => t.installed).length}/${r.environment.toolchains.length} toolchains, ${r.environment.devices.length} devices` : 'no'}`,
+				`- Project detected: ${r.projectIntel?.detected ? r.projectIntel.frameworkLabel : 'none yet'}`,
+				`- Architecture blueprint: ${r.architecture ? `${r.architecture.framework} + ${r.architecture.backendStack} (${r.architecture.engineMode})` : 'none yet'}`,
+				`- Last build/test: ${r.lastBuildTest ? `${r.lastBuildTest.mode} → ${r.lastBuildTest.status}` : 'not run'}`,
+				`- OWASP MASVS security: ${r.securityAudit ? `${r.securityAudit.score}/100` : 'not audited'}`,
+				`- Store readiness: ${r.readinessReport ? `${r.readinessReport.overallStatus} (${r.readinessReport.readinessScore}/100)` : 'not assessed'}`,
 			].join('\n'),
 
 			// Notebook operations

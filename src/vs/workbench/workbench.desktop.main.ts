@@ -70,6 +70,7 @@ import '../workbench/contrib/void/electron-browser/aiEngineService.js';
 import '../workbench/contrib/void/electron-browser/apiStudioService.js';
 import '../workbench/contrib/void/electron-browser/correctnessService.js';
 import '../workbench/contrib/void/electron-browser/evolutionService.js';
+import '../workbench/contrib/void/electron-browser/mobileEngineeringService.js';
 import './services/imageResize/electron-browser/imageResizeService.js';
 import './services/localTranscription/electron-browser/localTranscriptionService.js';
 import './services/secrets/electron-browser/secretStorageService.js';

@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAccessor, useChatThreadsState, useIsDark } from '../util/services.js';
-import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Server, Settings, ShieldCheck, Users, Workflow } from 'lucide-react';
+import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Server, Settings, ShieldCheck, Smartphone, Users, Workflow } from 'lucide-react';
 
 import '../styles.css';
 import { SidebarChat } from './SidebarChat.js';
@@ -26,6 +26,7 @@ import { VOID_OPEN_SETTINGS_ACTION_ID } from '../../../voidSettingsPane.js';
 import { KODIA_OPEN_API_STUDIO_ACTION_ID } from '../../../apiStudioService.js';
 import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from '../../../correctnessService.js';
 import { KODIA_OPEN_EVOLUTION_HUB_ACTION_ID } from '../../../evolutionService.js';
+import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
 
 type SidebarTab = 'chat' | 'ai-engine' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
@@ -141,6 +142,15 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 					);
 				})}
 			</div>
+			<button
+				type='button'
+				title='Open Kodia Mobile Application Engineering Studio (Ctrl+Alt+M)'
+				aria-label='Open Kodia Mobile Engineering Studio'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_MOBILE_STUDIO_ACTION_ID)}
+				className='p-1 rounded-md text-void-fg-3 hover:text-blue-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<Smartphone size={13} />
+			</button>
 			<button
 				type='button'
 				title='Open Kodia API Engineering Studio (Ctrl+Alt+A)'

@@ -14,6 +14,7 @@ import {
 	buildSoftwareFactoryPrompt,
 	FactoryProjectProfileId,
 	ISoftwareFactoryService,
+	MobileFactoryConfig,
 	ProjectRequirement,
 	RequirementStatus,
 } from '../common/softwareFactory.js';
@@ -200,14 +201,14 @@ export class SoftwareFactoryService extends Disposable implements ISoftwareFacto
 		this._save();
 	}
 
-	async launchFactoryBuild(idea: string, profileId: FactoryProjectProfileId): Promise<string> {
+	async launchFactoryBuild(idea: string, profileId: FactoryProjectProfileId, mobileConfig?: MobileFactoryConfig): Promise<string> {
 		const trimmed = idea.trim();
 		const req = this.addRequirement({
 			title: trimmed.slice(0, 72),
 			description: trimmed,
 			priority: 'high',
 		});
-		const prompt = buildSoftwareFactoryPrompt(trimmed, profileId, [req, ...this._requirements.filter(r => r.id !== req.id && r.status !== 'verified')]);
+		const prompt = buildSoftwareFactoryPrompt(trimmed, profileId, [req, ...this._requirements.filter(r => r.id !== req.id && r.status !== 'verified')], mobileConfig);
 		const threadId = this._chatThreadService.state.currentThreadId;
 		this.updateRequirement(req.id, { status: 'in_progress' as RequirementStatus });
 		if (this._chatThreadService.streamState[threadId]?.isRunning) {

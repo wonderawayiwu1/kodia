@@ -7,6 +7,7 @@ import { Event } from '../../../../base/common/event.js';
 import { createDecorator } from '../../../../platform/instantiation/common/instantiation.js';
 
 export type FactoryProjectProfileId =
+	| 'mobile-app'
 	| 'web-app'
 	| 'saas-platform'
 	| 'api-backend'
@@ -15,6 +16,30 @@ export type FactoryProjectProfileId =
 	| 'cli-tool'
 	| 'ai-agent-system'
 	| 'data-pipeline';
+
+export interface MobileFactoryConfig {
+	readonly platform: 'android' | 'ios' | 'both';
+	readonly framework: 'react-native-expo' | 'react-native-cli' | 'flutter' | 'android-kotlin' | 'ios-swift' | 'kotlin-multiplatform' | 'dotnet-maui' | 'ionic-capacitor';
+	readonly appCategory: 'general' | 'ai-powered' | 'enterprise' | 'ecommerce' | 'fintech' | 'social' | 'on-demand' | 'healthcare' | 'education' | 'iot-companion' | 'offline-first' | 'game';
+	readonly backend: 'auto' | 'none' | 'node-express' | 'node-nestjs' | 'python-fastapi' | 'python-django' | 'go-gin' | 'rust-axum' | 'java-spring' | 'php-laravel' | 'supabase' | 'firebase';
+	readonly database: 'auto' | 'none' | 'postgresql' | 'mysql' | 'sqlite' | 'mongodb' | 'redis' | 'firestore' | 'supabase';
+	readonly includeAuth: boolean;
+	readonly includeAI: boolean;
+	readonly includeOffline: boolean;
+	readonly includeRealtime: boolean;
+}
+
+export const DEFAULT_MOBILE_FACTORY_CONFIG: MobileFactoryConfig = {
+	platform: 'both',
+	framework: 'react-native-expo',
+	appCategory: 'general',
+	backend: 'auto',
+	database: 'auto',
+	includeAuth: true,
+	includeAI: false,
+	includeOffline: true,
+	includeRealtime: false,
+};
 
 export interface FactoryProjectProfile {
 	readonly id: FactoryProjectProfileId;
@@ -25,6 +50,13 @@ export interface FactoryProjectProfile {
 }
 
 export const FACTORY_PROJECT_PROFILES: readonly FactoryProjectProfile[] = [
+	{
+		id: 'mobile-app',
+		label: 'Mobile Application',
+		summary: 'Android, iOS & cross-platform apps (React Native, Flutter, Kotlin, Swift) with backend API, DB, AI, offline sync, security & store readiness.',
+		defaultStack: 'React Native (Expo/CLI) / Flutter / Kotlin / Swift + Multi-Language Backend + SQLite/Postgres',
+		deliverables: ['Mobile architecture & ADRs', 'Adaptive Material 3 / iOS HIG UI', 'Backend API & DB schema', 'Offline sync & security (MASVS)', 'Unit/UI/integration tests & Store readiness'],
+	},
 	{
 		id: 'web-app',
 		label: 'Full-Stack Web App',
@@ -120,11 +152,34 @@ export interface ArchitectureDecisionRecord {
 	readonly createdAt: string;
 }
 
-export function buildSoftwareFactoryPrompt(idea: string, profileId: FactoryProjectProfileId, requirements: readonly ProjectRequirement[]): string {
+export function buildSoftwareFactoryPrompt(
+	idea: string,
+	profileId: FactoryProjectProfileId,
+	requirements: readonly ProjectRequirement[],
+	mobileConfig?: MobileFactoryConfig,
+): string {
 	const profile = FACTORY_PROJECT_PROFILES.find(p => p.id === profileId) ?? FACTORY_PROJECT_PROFILES[0];
 	const reqLines = requirements.length > 0
 		? `\nTracked Requirements to satisfy:\n${requirements.map(r => `- [${r.id}] (${r.priority}) ${r.title}: ${r.description}`).join('\n')}\n`
 		: '';
+
+	if (profileId === 'mobile-app') {
+		const cfg = mobileConfig ?? DEFAULT_MOBILE_FACTORY_CONFIG;
+		return [
+			`[Kodia Autonomous Mobile Application Factory — Three-Engine Unified Orchestration]`,
+			`Objective: ${idea.trim()}`,
+			`Target Platforms: ${cfg.platform} | Framework: ${cfg.framework} | Category: ${cfg.appCategory}`,
+			`Backend: ${cfg.backend} | Database: ${cfg.database} | Auth: ${cfg.includeAuth} | AI: ${cfg.includeAI} | Offline-First: ${cfg.includeOffline} | Real-Time: ${cfg.includeRealtime}`,
+			`Target Deliverables: ${profile.deliverables.join(', ')}`,
+			reqLines,
+			`Autonomous Mobile Engineering Protocol:`,
+			`1. Open Mobile Studio (mobile_open_studio) and probe real host SDKs/devices (mobile_probe_environment) + inspect workspace (mobile_inspect_project).`,
+			`2. Design the Three-Engine architecture (mobile_design_architecture) coordinating Mobile + Universal Software + AI Engineering Engines, and create a structured Task Plan (create_task_plan).`,
+			`3. Scaffold and implement the complete mobile client (navigation, state, adaptive Material 3 / iOS HIG UI, offline sync, native integrations) AND full backend/database/AI proxy using mobile_scaffold_project and file tools — NEVER embed privileged API keys in mobile code.`,
+			`4. Execute real mobile & backend tests (mobile_build_and_test), device/emulator checks where installed (mobile_device_action), OWASP MASVS security audit (mobile_audit_security), performance audit (mobile_audit_performance), and independent store readiness (mobile_assess_readiness).`,
+			`5. Report verified vs environment-blocked results honestly with evidence.`,
+		].join('\n');
+	}
 
 	return [
 		`[Kodia Autonomous Software Factory — ${profile.label}]`,
@@ -188,7 +243,7 @@ export interface ISoftwareFactoryService {
 	addDecision(input: { title: string; context: string; decision: string; consequences?: string; status?: 'proposed' | 'accepted' | 'superseded'; relatedFiles?: readonly string[] }): ArchitectureDecisionRecord;
 	removeDecision(id: string): void;
 
-	launchFactoryBuild(idea: string, profileId: FactoryProjectProfileId): Promise<string>;
+	launchFactoryBuild(idea: string, profileId: FactoryProjectProfileId, mobileConfig?: MobileFactoryConfig): Promise<string>;
 	launchModelCouncil(question: string): Promise<string>;
 }
 
