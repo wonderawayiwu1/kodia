@@ -246,6 +246,8 @@ import { FirstPassReliabilityMainService } from '../../workbench/contrib/void/el
 import { IKodiaFirstPassReliabilityMainService, KODIA_FPERE_CHANNEL } from '../../workbench/contrib/void/common/firstPassReliabilityTypes.js';
 import { UniversalAppBuilderMainService } from '../../workbench/contrib/void/electron-main/universalAppBuilderMainService.js';
 import { IKodiaUniversalAppBuilderMainService, KODIA_UABE_CHANNEL } from '../../workbench/contrib/void/common/universalAppBuilderTypes.js';
+import { UniversalAutomationMainService } from '../../workbench/contrib/void/electron-main/universalAutomationMainService.js';
+import { IKodiaUniversalAutomationMainService, KODIA_UAEP_CHANNEL } from '../../workbench/contrib/void/common/universalAutomationTypes.js';
 import { KodiaNotebookKernelMainService } from '../../workbench/contrib/void/electron-main/kodiaNotebookKernelMainService.js';
 import { IKodiaNotebookKernelMainService, KODIA_NOTEBOOK_KERNEL_CHANNEL } from '../../workbench/contrib/void/common/kodiaNotebookKernelTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
@@ -1416,6 +1418,7 @@ export class CodeApplication extends Disposable {
 		services.set(IKodiaDiagnosticReliabilityMainService, new SyncDescriptor(DiagnosticReliabilityMainService, undefined, false));
 		services.set(IKodiaFirstPassReliabilityMainService, new SyncDescriptor(FirstPassReliabilityMainService, undefined, false));
 		services.set(IKodiaUniversalAppBuilderMainService, new SyncDescriptor(UniversalAppBuilderMainService, undefined, false));
+		services.set(IKodiaUniversalAutomationMainService, new SyncDescriptor(UniversalAutomationMainService, undefined, false));
 		services.set(IBrowserService, new SyncDescriptor(KodiaBrowserMainService, undefined, false));
 		services.set(IApiMainService, new SyncDescriptor(KodiaApiMainService, undefined, false));
 		services.set(ICodeIndexService, new SyncDescriptor(KodiaCodeIndexMainService, undefined, false));
@@ -1660,6 +1663,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: Universal App Builder Engine (UABE) & IRIRE — Full-Stack App Creation, Visual Edit Sync, Integrations, Reliability & Handover
 		const kodiaUabeChannel = ProxyChannel.fromService(accessor.get(IKodiaUniversalAppBuilderMainService), disposables, { unbufferedEvents: ['onDidEmitEvent', 'onDidChangeProject'] });
 		mainProcessElectronServer.registerChannel(KODIA_UABE_CHANNEL, kodiaUabeChannel);
+
+		// Kodia: Universal Automation Engineering Platform (UAEP) — Visual-to-Code Workflows, Durable Runtime, Multi-Tenant Vault & Embedded Platforms
+		const kodiaUaepChannel = ProxyChannel.fromService(accessor.get(IKodiaUniversalAutomationMainService), disposables, { unbufferedEvents: ['onDidEmitEvent', 'onDidChangeSnapshot'] });
+		mainProcessElectronServer.registerChannel(KODIA_UAEP_CHANNEL, kodiaUaepChannel);
 
 		// Kodia: Built-in Persistent Python / Jupyter Notebook Kernel Engine
 		const kodiaNotebookKernelChannel = ProxyChannel.fromService(accessor.get(IKodiaNotebookKernelMainService), disposables);

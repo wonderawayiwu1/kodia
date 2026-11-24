@@ -212,6 +212,18 @@ import type {
 	UabeVisualEditResult,
 	UabeWorkspaceTab,
 } from './universalAppBuilderTypes.js';
+import type {
+	UaepCodegenTarget,
+	UaepCodeSyncReport,
+	UaepCompileReport,
+	UaepDeploymentTarget,
+	UaepEmbeddedPlatformResult,
+	UaepExecutionRecord,
+	UaepPortablePackageResult,
+	UaepStudioSection,
+	UaepTenantCredentialMeta,
+	UaepWorkflowDefinition,
+} from './universalAutomationTypes.js';
 
 
 
@@ -865,6 +877,17 @@ export type BuiltinToolCallParams = {
 	'uabe_scaffold_app': { template: 'website' | 'fullstack_business' | 'ai_app' | 'mobile_rn' | 'desktop_electron', app_name: string },
 	'uabe_evaluate_reliability': { run_compiler?: boolean, test_command?: string, build_command?: string },
 	'uabe_generate_handover': { client_name?: string, project_title?: string },
+	// Kodia Universal Automation Engineering Platform (UAEP)
+	'uaep_open_studio': { section?: UaepStudioSection },
+	'uaep_generate_workflow': { prompt: string, tenant_id?: string, name?: string },
+	'uaep_modify_workflow': { workflow_id: string, tenant_id?: string, instruction: string },
+	'uaep_compile_workflow': { workflow_id: string, tenant_id?: string, target_language?: UaepCodegenTarget, write_to_dir?: string },
+	'uaep_check_code_sync': { workflow_id: string, tenant_id?: string, generated_file_path: string },
+	'uaep_execute_workflow': { workflow_id: string, tenant_id?: string, trigger_input?: Record<string, unknown>, trigger_kind?: string, stop_at_breakpoints?: boolean },
+	'uaep_resume_execution': { execution_id: string, tenant_id?: string, approval_granted?: boolean },
+	'uaep_save_credential': { tenant_id?: string, name: string, provider: string, env_key: string, secret_value: string },
+	'uaep_export_portable_package': { workflow_id: string, tenant_id?: string, target: UaepDeploymentTarget, output_dir?: string },
+	'uaep_generate_embedded_platform': { app_name: string, output_dir?: string, multi_tenant?: boolean, branding_color?: string },
 }
 
 // RESULT OF TOOL CALL
@@ -1218,6 +1241,17 @@ export type BuiltinToolResultType = {
 	'uabe_scaffold_app': UabeScaffoldResult,
 	'uabe_evaluate_reliability': UabeReliabilityDashboardReport,
 	'uabe_generate_handover': UabeHandoverPackageResult,
+	// Kodia Universal Automation Engineering Platform (UAEP)
+	'uaep_open_studio': { opened: boolean, section: UaepStudioSection },
+	'uaep_generate_workflow': { workflow: UaepWorkflowDefinition, compileReport: UaepCompileReport },
+	'uaep_modify_workflow': { workflow: UaepWorkflowDefinition, compileReport: UaepCompileReport, changeSummary: string },
+	'uaep_compile_workflow': UaepCompileReport,
+	'uaep_check_code_sync': UaepCodeSyncReport,
+	'uaep_execute_workflow': UaepExecutionRecord,
+	'uaep_resume_execution': UaepExecutionRecord,
+	'uaep_save_credential': UaepTenantCredentialMeta,
+	'uaep_export_portable_package': UaepPortablePackageResult,
+	'uaep_generate_embedded_platform': UaepEmbeddedPlatformResult,
 }
 
 

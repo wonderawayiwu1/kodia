@@ -76,7 +76,8 @@ export type BuiltinSubagentType =
 	| 'integration_verifier'
 	| 'db_engineer'
 	| 'eric_reviewer'
-	| 'app_builder_lead';
+	| 'app_builder_lead'
+	| 'automation_engineer';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -402,6 +403,11 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		description: 'Universal App Builder Engine (UABE) Product Lead orchestrating Contract-to-Product extraction, universal stack selection, IRIRE credential discovery, full-stack/mobile/desktop/AI implementation, visual source-sync edits, honest reliability verification, and client handover',
 		guidance: 'Coordinate uabe_init_project, uabe_analyze_contract, uabe_discover_integrations, fpere_create_blueprint, eric_analyze_semantics, eric_verify_api_usage, uabe_evaluate_reliability, and uabe_generate_handover. Never invent credentials or fake 100% completion.',
 	},
+	automation_engineer: {
+		canChangeFiles: true,
+		description: 'Universal Automation Engineering Platform (UAEP) specialist designing visual-to-code workflows, durable multi-tenant runtimes, BYOK AI agents, standalone deployment packages, and embedded n8n-like automation platforms',
+		guidance: 'Use uaep_open_studio, uaep_generate_workflow, uaep_compile_workflow, uaep_execute_workflow, uaep_export_portable_package, and uaep_generate_embedded_platform. Never fake API/AI executions, never hardcode secrets, and always enforce idempotency and tenant isolation.',
+	},
 };
 
 // common names models use for the same roles
@@ -436,6 +442,7 @@ const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, BuiltinSubagentType>> = {
 	'contracts': 'contract_architect', 'integration': 'integration_verifier', 'db-engineer': 'db_engineer',
 	'eric': 'eric_reviewer', 'reasoning-reviewer': 'eric_reviewer',
 	'uabe': 'app_builder_lead', 'app-builder': 'app_builder_lead',
+	'uaep': 'automation_engineer', 'automation': 'automation_engineer',
 };
 
 export interface CustomSubagentDefinition extends SubagentProfile {

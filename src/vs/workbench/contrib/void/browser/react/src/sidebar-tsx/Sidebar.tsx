@@ -29,6 +29,7 @@ import { KODIA_OPEN_EVOLUTION_HUB_ACTION_ID } from '../../../evolutionService.js
 import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
 import { KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID } from '../../../liveIntelligenceService.js';
 import { KODIA_OPEN_APP_BUILDER_ACTION_ID } from '../../../universalAppBuilderService.js';
+import { KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID } from '../../../universalAutomationService.js';
 
 type SidebarTab = 'chat' | 'ai-engine' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
@@ -153,6 +154,15 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 				className='p-1 rounded-md text-sky-400 hover:text-sky-300 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
 			>
 				<Rocket size={13} />
+			</button>
+			<button
+				type='button'
+				title='Open Kodia Universal Automation Studio (Ctrl+Alt+W)'
+				aria-label='Open Kodia Universal Automation Studio'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID)}
+				className='p-1 rounded-md text-fuchsia-400 hover:text-fuchsia-300 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<Workflow size={13} />
 			</button>
 			<button
 				type='button'

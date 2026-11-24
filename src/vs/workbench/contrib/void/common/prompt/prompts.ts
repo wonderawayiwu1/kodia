@@ -3195,6 +3195,103 @@ export const builtinTools: {
 		},
 	},
 
+	// Kodia Universal Automation Engineering Platform (UAEP) — 10 visual-to-code, durable runtime & embedded platform tools
+	uaep_open_studio: {
+		name: 'uaep_open_studio',
+		description: 'Opens the native Kodia Automation Studio (Ctrl+Alt+W) to a specified section (overview, canvas, templates, executions, connectors, credentials, deployment, embedded, security).',
+		params: {
+			section: { description: 'Optional section: overview | canvas | templates | executions | connectors | credentials | deployment | embedded | security.' },
+		},
+	},
+	uaep_generate_workflow: {
+		name: 'uaep_generate_workflow',
+		description: 'Generates a formal versioned visual workflow IR from natural language, saves it for the tenant, and validates/compiles it.',
+		params: {
+			prompt: { description: 'Natural language description of the business process or AI automation.' },
+			tenant_id: { description: 'Optional tenant/organization ID (default "default").' },
+			name: { description: 'Optional workflow display name.' },
+		},
+	},
+	uaep_modify_workflow: {
+		name: 'uaep_modify_workflow',
+		description: 'Conversationally modifies an existing workflow (e.g. add human approval, add retry policy, add error compensation) while preserving existing nodes.',
+		params: {
+			workflow_id: { description: 'Workflow ID to modify.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			instruction: { description: 'Modification instruction.' },
+		},
+	},
+	uaep_compile_workflow: {
+		name: 'uaep_compile_workflow',
+		description: 'Runs the 12-stage Visual-to-Code compiler: validates graph structure, cycles, expressions, security, generates TypeScript/JavaScript/Python + Dockerfile + docker-compose.yml + .env.example.',
+		params: {
+			workflow_id: { description: 'Workflow ID to compile.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			target_language: { description: 'typescript | javascript | python.' },
+			write_to_dir: { description: 'Optional output directory to write generated files.' },
+		},
+	},
+	uaep_check_code_sync: {
+		name: 'uaep_check_code_sync',
+		description: 'Verifies bidirectional workflow-to-code synchronization and detects manual edit drift/conflicts using UAEP-IR-HASH provenance headers.',
+		params: {
+			workflow_id: { description: 'Workflow ID.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			generated_file_path: { description: 'Path to generated workflow source file.' },
+		},
+	},
+	uaep_execute_workflow: {
+		name: 'uaep_execute_workflow',
+		description: 'Executes a validated workflow on the durable UAEP runtime with real HTTP/VM/AI/logic execution, idempotency ledger protection, breakpoints, and human approval waits.',
+		params: {
+			workflow_id: { description: 'Workflow ID to execute.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			trigger_input: { description: 'Optional JSON object trigger payload.' },
+			trigger_kind: { description: 'Optional trigger kind (manual, webhook, cron).' },
+			stop_at_breakpoints: { description: 'Optional boolean to pause at debugger breakpoints.' },
+		},
+	},
+	uaep_resume_execution: {
+		name: 'uaep_resume_execution',
+		description: 'Resumes a paused, interrupted, or human-approval-waiting workflow execution from its durable step checkpoint without duplicating completed idempotent side effects.',
+		params: {
+			execution_id: { description: 'Execution ID to resume.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			approval_granted: { description: 'Optional boolean for human approval gate.' },
+		},
+	},
+	uaep_save_credential: {
+		name: 'uaep_save_credential',
+		description: 'Encrypts (AES-256-GCM) and stores a tenant-isolated automation credential in the local UAEP vault (never in workflow IR or exports).',
+		params: {
+			tenant_id: { description: 'Optional tenant ID.' },
+			name: { description: 'Human-readable credential label.' },
+			provider: { description: 'Provider name (nvidia, openai, stripe, postgres, etc.).' },
+			env_key: { description: 'Environment key referenced by nodes (e.g. NVIDIA_API_KEY).' },
+			secret_value: { description: 'Secret value to encrypt.' },
+		},
+	},
+	uaep_export_portable_package: {
+		name: 'uaep_export_portable_package',
+		description: 'Exports a zero-secret, independently runnable automation deployment package (standalone Node runtime, Dockerfile, docker-compose, deployment manifest) for local, Docker, VPS, private cloud, or air-gapped environments.',
+		params: {
+			workflow_id: { description: 'Workflow ID to export.' },
+			tenant_id: { description: 'Optional tenant ID.' },
+			target: { description: 'local_standalone | docker_compose | serverless_cloudflare | free_cloud_render | vps_linux | private_cloud_onprem | air_gapped_regulated.' },
+			output_dir: { description: 'Optional target output directory.' },
+		},
+	},
+	uaep_generate_embedded_platform: {
+		name: 'uaep_generate_embedded_platform',
+		description: 'Generates a complete standalone, multi-tenant n8n-like embedded automation platform (visual builder UI, durable engine, tenant isolation, tests & Dockerfile) that operates independently of Kodia.',
+		params: {
+			app_name: { description: 'Name of the generated automation platform.' },
+			output_dir: { description: 'Optional target directory.' },
+			multi_tenant: { description: 'Optional boolean (default true) enabling strict multi-tenant isolation.' },
+			branding_color: { description: 'Optional hex accent color.' },
+		},
+	},
+
 	// go_to_definition
 	// go_to_usages
 
@@ -3383,6 +3480,10 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - For any full application, website, SaaS, e-commerce, AI app, mobile app, desktop app, or client contract/SOW request: open/initialize UABE (uabe_open_workspace / uabe_init_project), extract traceable Contract-to-Product requirements (uabe_analyze_contract), select the simplest appropriate stack across any language/framework (uabe_recommend_stack), and discover all required external accounts, API keys, official setup links & billing disclosures upfront via IRIRE (uabe_discover_integrations).
 - Respect the project's Build Mode (default: Autonomous Build — proceed end-to-end without unnecessary pauses; Plan First — present plan and wait for approval; User Chooses Per Project). When credentials are missing, continue building unrelated modules & local/sandbox adapters cleanly while clearly marking external integrations as pending credentials (never claim a mock is live).
 - Coordinate FPERE (contract-first blueprints, import/export & full-stack checks), ERIC (semantic & installed API audits), LEI (current docs/models/pricing), API Studio, Mobile Studio, and Browser Preview/Testing. Support visual edits synced to real source code (uabe_apply_visual_edit), honest reliability reporting (uabe_evaluate_reliability), and secret-free client handover packages (uabe_generate_handover).`)
+		details.push(`KODIA UNIVERSAL AUTOMATION ENGINEERING PLATFORM (UAEP — VISUAL-TO-CODE, DURABLE RUNTIME & EMBEDDED PLATFORMS):
+- For workflow automations, AI-agent pipelines, webhooks, schedules, standalone background runtimes, or building n8n-like / embedded automation platforms inside applications: open/use Kodia Automation Studio (uaep_open_studio) and the \`uaep_*\` toolset (or delegate to \`automation_engineer\`).
+- Use uaep_generate_workflow / uaep_modify_workflow, validate & compile to TS/JS/Python + Docker via uaep_compile_workflow, enforce multi-tenant encrypted BYOK credentials via uaep_save_credential, execute durably with idempotency & approval gates via uaep_execute_workflow / uaep_resume_execution, export independent zero-secret runtimes via uaep_export_portable_package, and generate standalone multi-tenant automation apps via uaep_generate_embedded_platform.
+- NEVER simulate successful API/AI calls, NEVER leak secrets into exports or workflow IR, and NEVER make deployed automations depend on Kodia staying open.`)
 		details.push(`NATIVE API ENGINEERING STUDIO & LIVE TESTING WORKFLOW: Whenever the user asks to build, inspect, test, debug, load-test, security-audit, document, or prepare an API (including "Test my API"):
 - Automatically open the native in-editor API Studio (api_open_studio) so the user can watch real execution live inside Kodia.
 - Discover actual routes, frameworks, protocols, specs, auth, and services with api_discover_project.

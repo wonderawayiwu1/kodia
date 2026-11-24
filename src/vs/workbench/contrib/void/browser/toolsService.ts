@@ -229,6 +229,15 @@ import {
 	formatReliabilityDashboardForLLM,
 } from '../common/universalAppBuilderEngine.js'
 import { IUniversalAppBuilderService } from './universalAppBuilderService.js'
+import {
+	IKodiaUniversalAutomationMainService,
+	KODIA_UAEP_CHANNEL,
+	UaepCodegenTarget,
+	UaepDeploymentTarget,
+	UaepStudioSection,
+} from '../common/universalAutomationTypes.js'
+import { formatCompileReportForLLM } from '../common/universalAutomationEngine.js'
+import { IUniversalAutomationService } from './universalAutomationService.js'
 import { IKodiaLiveIntelligenceMainService, KODIA_LEI_CHANNEL, LeiDomain, LeiModelTaskRequirements, LeiPackageEcosystem } from '../common/liveIntelligenceTypes.js'
 import {
 	formatDependencyReportForLLM,
@@ -578,6 +587,7 @@ export class ToolsService implements IToolsService {
 		const kdreMainService = ProxyChannel.toService<IKodiaDiagnosticReliabilityMainService>(mainProcessService.getChannel(KODIA_KDRE_CHANNEL))
 		const fpereMainService = ProxyChannel.toService<IKodiaFirstPassReliabilityMainService>(mainProcessService.getChannel(KODIA_FPERE_CHANNEL))
 		const uabeMainService = ProxyChannel.toService<IKodiaUniversalAppBuilderMainService>(mainProcessService.getChannel(KODIA_UABE_CHANNEL))
+		const uaepMainService = ProxyChannel.toService<IKodiaUniversalAutomationMainService>(mainProcessService.getChannel(KODIA_UAEP_CHANNEL))
 
 		// FPERE Write-Time Guard: immediately verify imports, named/default exports, declared packages & stubs on edited code files
 		const runFpereWriteGuard = async (uri: URI, existingLintErrors: LintErrorItem[] | null): Promise<LintErrorItem[] | null> => {
@@ -3002,6 +3012,70 @@ export class ToolsService implements IToolsService {
 			uabe_generate_handover: (params: RawToolParamsObj) => ({
 				client_name: validateOptionalStr('client_name', params.client_name) ?? undefined,
 				project_title: validateOptionalStr('project_title', params.project_title) ?? undefined,
+			}),
+			// Kodia Universal Automation Engineering Platform (UAEP)
+			uaep_open_studio: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? 'canvas') as UaepStudioSection,
+			}),
+			uaep_generate_workflow: (params: RawToolParamsObj) => ({
+				prompt: validateStr('prompt', params.prompt),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				name: validateOptionalStr('name', params.name) ?? undefined,
+			}),
+			uaep_modify_workflow: (params: RawToolParamsObj) => ({
+				workflow_id: validateStr('workflow_id', params.workflow_id),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				instruction: validateStr('instruction', params.instruction),
+			}),
+			uaep_compile_workflow: (params: RawToolParamsObj) => ({
+				workflow_id: validateStr('workflow_id', params.workflow_id),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				target_language: (validateOptionalStr('target_language', params.target_language) ?? 'typescript') as UaepCodegenTarget,
+				write_to_dir: validateOptionalStr('write_to_dir', params.write_to_dir) ?? undefined,
+			}),
+			uaep_check_code_sync: (params: RawToolParamsObj) => ({
+				workflow_id: validateStr('workflow_id', params.workflow_id),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				generated_file_path: validateStr('generated_file_path', params.generated_file_path),
+			}),
+			uaep_execute_workflow: (params: RawToolParamsObj) => {
+				let trigger_input: Record<string, unknown> | undefined
+				if (params.trigger_input && typeof params.trigger_input === 'object' && !Array.isArray(params.trigger_input)) {
+					trigger_input = params.trigger_input as Record<string, unknown>
+				} else if (typeof params.trigger_input === 'string' && params.trigger_input.trim()) {
+					try { trigger_input = JSON.parse(params.trigger_input) } catch { /* ignore */ }
+				}
+				return {
+					workflow_id: validateStr('workflow_id', params.workflow_id),
+					tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+					trigger_input,
+					trigger_kind: validateOptionalStr('trigger_kind', params.trigger_kind) ?? undefined,
+					stop_at_breakpoints: validateBoolean(params.stop_at_breakpoints, { default: false }) ?? false,
+				}
+			},
+			uaep_resume_execution: (params: RawToolParamsObj) => ({
+				execution_id: validateStr('execution_id', params.execution_id),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				approval_granted: params.approval_granted !== undefined ? (validateBoolean(params.approval_granted, { default: true }) ?? true) : undefined,
+			}),
+			uaep_save_credential: (params: RawToolParamsObj) => ({
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				name: validateStr('name', params.name),
+				provider: validateStr('provider', params.provider),
+				env_key: validateStr('env_key', params.env_key),
+				secret_value: validateStr('secret_value', params.secret_value),
+			}),
+			uaep_export_portable_package: (params: RawToolParamsObj) => ({
+				workflow_id: validateStr('workflow_id', params.workflow_id),
+				tenant_id: validateOptionalStr('tenant_id', params.tenant_id) ?? undefined,
+				target: (validateOptionalStr('target', params.target) ?? 'docker_compose') as UaepDeploymentTarget,
+				output_dir: validateOptionalStr('output_dir', params.output_dir) ?? undefined,
+			}),
+			uaep_generate_embedded_platform: (params: RawToolParamsObj) => ({
+				app_name: validateStr('app_name', params.app_name),
+				output_dir: validateOptionalStr('output_dir', params.output_dir) ?? undefined,
+				multi_tenant: validateBoolean(params.multi_tenant, { default: true }) ?? true,
+				branding_color: validateOptionalStr('branding_color', params.branding_color) ?? undefined,
 			}),
 
 			// Notebook operations
@@ -6279,6 +6353,62 @@ export class ToolsService implements IToolsService {
 				const res = await uabeMainService.generateClientHandover(root, { clientName: p.client_name, projectTitle: p.project_title })
 				return { result: res }
 			},
+			// Kodia Universal Automation Engineering Platform (UAEP)
+			uaep_open_studio: async (p) => {
+				const section = p.section ?? 'canvas'
+				try {
+					const svc = instantiationService.invokeFunction(acc => acc.get(IUniversalAutomationService))
+					await svc.openStudio(section)
+					return { result: { opened: true, section } }
+				} catch {
+					return { result: { opened: false, section } }
+				}
+			},
+			uaep_generate_workflow: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.generateWorkflowFromPrompt(root, { prompt: p.prompt, tenantId: p.tenant_id, name: p.name })
+				return { result: res }
+			},
+			uaep_modify_workflow: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.modifyWorkflowFromPrompt(root, { workflowId: p.workflow_id, tenantId: p.tenant_id, instruction: p.instruction })
+				return { result: res }
+			},
+			uaep_compile_workflow: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.compileWorkflow(root, { workflowId: p.workflow_id, tenantId: p.tenant_id, targetLanguage: p.target_language, writeToDir: p.write_to_dir })
+				return { result: res }
+			},
+			uaep_check_code_sync: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.checkWorkflowCodeSync(root, { workflowId: p.workflow_id, tenantId: p.tenant_id, generatedFilePath: p.generated_file_path })
+				return { result: res }
+			},
+			uaep_execute_workflow: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.executeWorkflow(root, { workflowId: p.workflow_id, tenantId: p.tenant_id, triggerInput: p.trigger_input, triggerKind: p.trigger_kind, stopAtBreakpoints: p.stop_at_breakpoints })
+				return { result: res }
+			},
+			uaep_resume_execution: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.resumeExecution(root, { executionId: p.execution_id, tenantId: p.tenant_id, approvalGranted: p.approval_granted })
+				return { result: res }
+			},
+			uaep_save_credential: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.saveTenantCredential(root, { tenantId: p.tenant_id ?? 'default', name: p.name, provider: p.provider, envKey: p.env_key, secretValue: p.secret_value })
+				return { result: res }
+			},
+			uaep_export_portable_package: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.exportPortablePackage(root, { workflowId: p.workflow_id, tenantId: p.tenant_id, target: p.target, outputDir: p.output_dir })
+				return { result: res }
+			},
+			uaep_generate_embedded_platform: async (p) => {
+				const root = workspaceFolderPaths()[0] ?? ''
+				const res = await uaepMainService.generateEmbeddedPlatform(root, { appName: p.app_name, outputDir: p.output_dir, multiTenant: p.multi_tenant, brandingColor: p.branding_color })
+				return { result: res }
+			},
 
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
@@ -8158,6 +8288,17 @@ export class ToolsService implements IToolsService {
 			uabe_scaffold_app: (_params, r) => `${r.summary} Files: ${r.filesWritten.join(', ')}. Checkpoint: ${r.checkpointId}`,
 			uabe_evaluate_reliability: (_params, r) => formatReliabilityDashboardForLLM(r),
 			uabe_generate_handover: (_params, r) => `${r.summary} Files: ${r.filesGenerated.map(f => f.relativePath).join(', ')}`,
+			// Kodia Universal Automation Engineering Platform (UAEP)
+			uaep_open_studio: (_params, r) => r.opened ? `Opened Kodia Automation Studio (section: ${r.section}).` : `Could not open Automation Studio (${r.section}).`,
+			uaep_generate_workflow: (_params, r) => `Generated workflow "${r.workflow.name}" (${r.workflow.id}, ${r.workflow.nodes.length} nodes) — ${r.compileReport.summary}`,
+			uaep_modify_workflow: (_params, r) => `Modified "${r.workflow.name}" v${r.workflow.version}: ${r.changeSummary} (${r.compileReport.valid ? 'VALID' : 'ERRORS'})`,
+			uaep_compile_workflow: (_params, r) => formatCompileReportForLLM(r),
+			uaep_check_code_sync: (_params, r) => `${r.inSync ? 'IN SYNC' : 'DRIFT DETECTED'}: ${r.message}`,
+			uaep_execute_workflow: (_params, r) => `Execution ${r.executionId} [${r.status}] — ${r.steps.length} step(s), AI tokens: ${r.aiTokensUsed}${r.error ? ` | Error: ${r.error}` : ''}`,
+			uaep_resume_execution: (_params, r) => `Resumed Execution ${r.executionId} [${r.status}] — ${r.steps.length} step(s)${r.error ? ` | Error: ${r.error}` : ''}`,
+			uaep_save_credential: (_params, r) => `Saved encrypted tenant credential "${r.envKey}" (${r.maskedPreview}) for tenant "${r.tenantId}".`,
+			uaep_export_portable_package: (_params, r) => `${r.summary} Start: \`${r.startCommand}\``,
+			uaep_generate_embedded_platform: (_params, r) => `${r.summary} Start: \`${r.startCommand}\` | Test: \`${r.testCommand}\``,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

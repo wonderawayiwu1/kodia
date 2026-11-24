@@ -4,9 +4,10 @@
  *--------------------------------------------------------------------------------------*/
 
 import React, { useEffect, useState } from 'react';
-import { KeyRound, Package, Rocket, ShieldCheck, SlidersHorizontal } from 'lucide-react';
+import { KeyRound, Package, Rocket, ShieldCheck, SlidersHorizontal, Workflow } from 'lucide-react';
 import { useAccessor, useSettingsState } from '../util/services.js';
 import type { UabeBuildMode, UabeProjectState } from '../../../../common/universalAppBuilderTypes.js';
+import { KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID } from '../../../universalAutomationService.js';
 
 const MODE_CYCLE: Record<UabeBuildMode, { next: UabeBuildMode; label: string; tip: string }> = {
 	autonomous_build: {
@@ -29,6 +30,7 @@ const MODE_CYCLE: Record<UabeBuildMode, { next: UabeBuildMode; label: string; ti
 export const AppBuilderChatBar: React.FC = () => {
 	const accessor = useAccessor();
 	const uabe = accessor.get('IUniversalAppBuilderService');
+	const commandService = accessor.get('ICommandService');
 	const settings = useSettingsState();
 	const [state, setState] = useState<UabeProjectState>(() => uabe.getCachedProjectState());
 
@@ -59,6 +61,16 @@ export const AppBuilderChatBar: React.FC = () => {
 				>
 					<Rocket size={10} className='text-sky-400' />
 					<span>App Builder</span>
+				</button>
+
+				<button
+					type='button'
+					onClick={() => void commandService.executeCommand(KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID)}
+					title='Open Kodia Automation Studio (Ctrl+Alt+W)'
+					className='inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-void-bg-2 hover:bg-void-bg-3 border border-void-border-2 text-void-fg-2 cursor-pointer transition-colors'
+				>
+					<Workflow size={10} className='text-fuchsia-400' />
+					<span>Automation</span>
 				</button>
 
 				<button

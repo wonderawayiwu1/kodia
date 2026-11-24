@@ -272,6 +272,17 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'uabe_scaffold_app',
 	'uabe_evaluate_reliability',
 	'uabe_generate_handover',
+	// UAEP Universal Automation Engineering Platform tools
+	'uaep_open_studio',
+	'uaep_generate_workflow',
+	'uaep_modify_workflow',
+	'uaep_compile_workflow',
+	'uaep_check_code_sync',
+	'uaep_execute_workflow',
+	'uaep_resume_execution',
+	'uaep_save_credential',
+	'uaep_export_portable_package',
+	'uaep_generate_embedded_platform',
 ]);
 
 /**
@@ -738,6 +749,16 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'uabe_scaffold_app':
 		case 'uabe_evaluate_reliability':
 		case 'uabe_generate_handover':
+		case 'uaep_open_studio':
+		case 'uaep_generate_workflow':
+		case 'uaep_modify_workflow':
+		case 'uaep_compile_workflow':
+		case 'uaep_check_code_sync':
+		case 'uaep_execute_workflow':
+		case 'uaep_resume_execution':
+		case 'uaep_save_credential':
+		case 'uaep_export_portable_package':
+		case 'uaep_generate_embedded_platform':
 			return 'low';
 
 		// Mobile scaffolding, device actions, and builds/tests

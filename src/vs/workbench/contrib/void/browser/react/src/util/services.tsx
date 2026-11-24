@@ -88,6 +88,7 @@ import { IKodiaDiagnosticReliabilityMainService } from '../../../../common/diagn
 import { IFirstPassReliabilityService } from '../../../firstPassReliabilityService.js';
 import { IKodiaFirstPassReliabilityMainService } from '../../../../common/firstPassReliabilityTypes.js';
 import { IUniversalAppBuilderService } from '../../../universalAppBuilderService.js';
+import { IUniversalAutomationService } from '../../../universalAutomationService.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -297,6 +298,7 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IFirstPassReliabilityService: accessor.get(IFirstPassReliabilityService),
 		IKodiaFirstPassReliabilityMainService: (() => { try { return accessor.get(IKodiaFirstPassReliabilityMainService) } catch { return undefined } })(),
 		IUniversalAppBuilderService: accessor.get(IUniversalAppBuilderService),
+		IUniversalAutomationService: accessor.get(IUniversalAutomationService),
 
 	} as const
 	return reactAccessor

@@ -374,6 +374,16 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	uabe_scaffold_app: { done: 'Scaffolded verified application', proposed: 'Scaffold application', running: 'Generating starter architecture & runnable tests' },
 	uabe_evaluate_reliability: { done: 'Evaluated truthful reliability dashboard', proposed: 'Evaluate application reliability', running: 'Running FPERE + ERIC + IRIRE + runtime checks' },
 	uabe_generate_handover: { done: 'Generated client handover package', proposed: 'Generate client handover', running: 'Building docs, QA report, deck & secret-free .env' },
+	uaep_open_studio: { done: 'Opened Automation Studio', proposed: 'Open Automation Studio', running: 'Opening Kodia Universal Automation Studio' },
+	uaep_generate_workflow: { done: 'Generated visual workflow', proposed: 'Generate visual workflow', running: 'Compiling natural language into visual workflow IR' },
+	uaep_modify_workflow: { done: 'Modified workflow graph', proposed: 'Modify workflow graph', running: 'Updating workflow nodes & edges safely' },
+	uaep_compile_workflow: { done: 'Compiled visual workflow to code', proposed: 'Compile visual workflow', running: 'Validating graph & generating TS/JS/Python + Docker' },
+	uaep_check_code_sync: { done: 'Checked workflow-to-code sync', proposed: 'Check workflow-code sync', running: 'Comparing IR provenance hash & manual edits' },
+	uaep_execute_workflow: { done: 'Executed durable workflow', proposed: 'Execute workflow', running: 'Running durable workflow steps & connectors' },
+	uaep_resume_execution: { done: 'Resumed workflow execution', proposed: 'Resume workflow execution', running: 'Resuming from durable checkpoint / approval gate' },
+	uaep_save_credential: { done: 'Saved encrypted tenant credential', proposed: 'Save tenant credential', running: 'Encrypting secret in tenant-isolated vault' },
+	uaep_export_portable_package: { done: 'Exported standalone runtime package', proposed: 'Export standalone runtime', running: 'Packaging independent runtime, Docker & env template' },
+	uaep_generate_embedded_platform: { done: 'Generated embedded automation platform', proposed: 'Generate embedded platform', running: 'Scaffolding standalone multi-tenant automation app' },
 };
 
 function humanizeToolName(toolName: string): string {
@@ -396,7 +406,7 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 }
 
 export function getToolCategory(toolName: string): ToolCategory {
-	if (toolName.startsWith('ai_') || toolName.startsWith('uabe_')) { return 'ai'; }
+	if (toolName.startsWith('ai_') || toolName.startsWith('uabe_') || toolName.startsWith('uaep_')) { return 'ai'; }
 	if (toolName.startsWith('api_') || toolName.startsWith('oauth2_')) { return 'api'; }
 	if (toolName.startsWith('correctness_') || toolName.startsWith('eric_') || toolName.startsWith('fpere_') || toolName.startsWith('kdre_')) { return 'debug'; }
 	if (toolName.startsWith('evolution_')) { return 'ai'; }

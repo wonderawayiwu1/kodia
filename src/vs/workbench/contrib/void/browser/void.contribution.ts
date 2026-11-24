@@ -30,6 +30,8 @@ import './diagnosticReliabilityService.js'
 import './firstPassReliabilityService.js'
 import './universalAppBuilderService.js'
 import './universalAppBuilderPane.js'
+import './universalAutomationService.js'
+import './universalAutomationPane.js'
 
 // register css
 import './media/void.css'

@@ -20,6 +20,7 @@ import {
 	Sliders,
 	Sparkles,
 	Wand2,
+	Workflow,
 	X,
 } from 'lucide-react';
 import ErrorBoundary from '../sidebar-tsx/ErrorBoundary.js';
@@ -40,6 +41,7 @@ import { ApiStudioSettingsSection } from './ApiStudioSettings.js';
 import { CorrectnessSettingsSection } from './CorrectnessSettings.js';
 import { EvolutionSettingsSection } from './EvolutionSettings.js';
 import { AppBuilderSettingsSection } from './AppBuilderSettings.js';
+import { AutomationSettingsSection } from './AutomationSettings.js';
 import { SettingsSearchContext } from './SettingsControls.js';
 
 type SectionId = SettingsNavigateTarget;
@@ -139,6 +141,16 @@ const SECTIONS: readonly NavSectionDef[] = [
 			'Default & Per-Project Build Mode': ['app builder', 'uabe', 'autonomous build', 'plan first', 'per project', 'contract', 'fullstack', 'website', 'mobile', 'desktop'],
 			'Autonomous Workflow, IRIRE & Visual Source Sync': ['irire', 'credentials', 'api key', 'supabase', 'firebase', 'mongodb', 'stripe', 'visual edit', 'preview', 'baas', 'cloud'],
 			'Reliability, Security & Handover Safeguards': ['handover', 'client delivery', 'redaction', 'reliability', 'fpere', 'eric', 'evidence', 'verification'],
+		},
+	},
+	{
+		id: 'automation',
+		group: 'AI Engine',
+		label: 'Automation Studio (UAEP)',
+		icon: <Workflow size={14} />,
+		keywordsOfGroup: {
+			'Compiler & Runtime Defaults': ['automation', 'uaep', 'n8n', 'workflow', 'visual canvas', 'nodes', 'triggers', 'webhooks', 'cron', 'codegen', 'durable', 'workers'],
+			'Enterprise Security, Multi-Tenancy & Isolation': ['tenant', 'vault', 'sandbox', 'audit', 'air-gapped', 'embedded', 'docker', 'idempotency'],
 		},
 	},
 	{
@@ -275,6 +287,7 @@ export const Settings = () => {
 			case 'features': return <FeaturesSection />;
 			case 'agent': return <AgentSection />;
 			case 'app_builder': return <AppBuilderSettingsSection onRecordChange={recordChange} />;
+			case 'automation': return <AutomationSettingsSection onRecordChange={recordChange} />;
 			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
 			case 'api_studio': return <ApiStudioSettingsSection onRecordChange={recordChange} />;
 			case 'correctness': return <CorrectnessSettingsSection onRecordChange={recordChange} />;
