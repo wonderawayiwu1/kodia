@@ -81,6 +81,8 @@ import { IEvolutionService } from '../../../evolutionService.js';
 import { IKodiaEvolutionMainService } from '../../../../common/evolutionTypes.js';
 import { IMobileEngineeringService } from '../../../mobileEngineeringService.js';
 import { IKodiaMobileMainService } from '../../../../common/mobileEngineeringTypes.js';
+import { ILiveIntelligenceService } from '../../../liveIntelligenceService.js';
+import { IKodiaLiveIntelligenceMainService } from '../../../../common/liveIntelligenceTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -283,6 +285,8 @@ const getReactAccessor = (accessor: ServicesAccessor) => {
 		IKodiaEvolutionMainService: (() => { try { return accessor.get(IKodiaEvolutionMainService) } catch { return undefined } })(),
 		IMobileEngineeringService: accessor.get(IMobileEngineeringService),
 		IKodiaMobileMainService: (() => { try { return accessor.get(IKodiaMobileMainService) } catch { return undefined } })(),
+		ILiveIntelligenceService: accessor.get(ILiveIntelligenceService),
+		IKodiaLiveIntelligenceMainService: (() => { try { return accessor.get(IKodiaLiveIntelligenceMainService) } catch { return undefined } })(),
 
 	} as const
 	return reactAccessor

@@ -63,7 +63,15 @@ export type BuiltinSubagentType =
 	| 'mobile_security'
 	| 'mobile_qa'
 	| 'mobile_perf'
-	| 'mobile_release';
+	| 'mobile_release'
+	| 'tech_researcher'
+	| 'ai_model_intel'
+	| 'framework_sdk_researcher'
+	| 'api_docs_researcher'
+	| 'dependency_intel'
+	| 'security_advisory_researcher'
+	| 'compat_verifier'
+	| 'evidence_auditor';
 
 /** Either a built-in specialist role or a workspace/user custom agent name. */
 export type SubagentType = BuiltinSubagentType | (string & {});
@@ -324,6 +332,46 @@ export const SUBAGENT_TYPES: { readonly [T in BuiltinSubagentType]: SubagentProf
 		description: 'read-only Mobile Release & Store Readiness specialist evaluating Android APK/AAB/Play Store and iOS Archive/IPA/TestFlight/App Store readiness',
 		guidance: 'Run mobile_assess_readiness to produce strict evidence-based readiness reports. Never silently sign, upload, or publish apps without explicit user authorization.',
 	},
+	tech_researcher: {
+		canChangeFiles: false,
+		description: 'read-only Live Technology Research specialist discovering current official vendor documentation, release notes, and compatibility constraints',
+		guidance: 'Run lei_assess_freshness and lei_research_technology to inspect authoritative docs (never relying on snippets alone) and record verified evidence.',
+	},
+	ai_model_intel: {
+		canChangeFiles: false,
+		description: 'read-only AI Model & Provider Intelligence specialist discovering current NVIDIA, OpenAI, Anthropic, Gemini, Groq, Mistral, DeepSeek, and local model catalogs and capabilities',
+		guidance: 'Use lei_discover_models and lei_verify_model to verify exact model identifiers, deprecations, vision/tool-calling/reasoning capabilities, and availability without hardcoding defaults.',
+	},
+	framework_sdk_researcher: {
+		canChangeFiles: false,
+		description: 'read-only Framework & SDK Research specialist verifying current releases, breaking changes, and migration guides across web, backend, and mobile frameworks',
+		guidance: 'Inspect official release notes via lei_research_technology and check SDK compatibility before scaffolding or upgrading projects.',
+	},
+	api_docs_researcher: {
+		canChangeFiles: false,
+		description: 'read-only API Documentation Research specialist verifying external API endpoints, auth methods, SDK versions, rate limits, and deprecations',
+		guidance: 'Use lei_research_technology to inspect official API references before writing external integrations.',
+	},
+	dependency_intel: {
+		canChangeFiles: false,
+		description: 'read-only Dependency Intelligence specialist checking npm, PyPI, pub.dev, crates.io, and Packagist versions, peer compatibility, licenses, and maintenance',
+		guidance: 'Run lei_check_dependency before installing or upgrading packages. Never upgrade unrelated working dependencies.',
+	},
+	security_advisory_researcher: {
+		canChangeFiles: false,
+		description: 'read-only Security Advisory Research specialist querying OSV/CVE/GHSA advisories and OWASP recommendations',
+		guidance: 'Run lei_check_security to verify vulnerabilities and fixed versions, providing impact analysis before any dependency changes.',
+	},
+	compat_verifier: {
+		canChangeFiles: false,
+		description: 'read-only Compatibility Verification specialist cross-checking runtime, compiler, SDK, and dependency compatibility constraints',
+		guidance: 'Cross-check project manifests against verified registry and framework release evidence via lei_check_dependency and lei_research_technology.',
+	},
+	evidence_auditor: {
+		canChangeFiles: false,
+		description: 'read-only Research Evidence Auditor independently reviewing citations, freshness, conflicts, and verification statuses',
+		guidance: 'Use lei_inspect_evidence to audit verification statuses, expose conflicting sources, and ensure unverified findings are never marked Verified.',
+	},
 };
 
 // common names models use for the same roles
@@ -352,6 +400,9 @@ const SUBAGENT_TYPE_ALIASES: Readonly<Record<string, BuiltinSubagentType>> = {
 	ios: 'ios_native_engineer', swift: 'ios_native_engineer',
 	'mobile-ui': 'mobile_ui_ux', 'mobile-ai': 'mobile_ai_engineer', 'mobile-offline': 'mobile_offline_sync',
 	'mobile-security': 'mobile_security', 'mobile-qa': 'mobile_qa', 'mobile-perf': 'mobile_perf', 'mobile-release': 'mobile_release',
+	'researcher': 'tech_researcher', 'tech-research': 'tech_researcher', 'model-intel': 'ai_model_intel', 'ai-models': 'ai_model_intel',
+	'framework-research': 'framework_sdk_researcher', 'api-docs': 'api_docs_researcher', 'dep-intel': 'dependency_intel',
+	'advisories': 'security_advisory_researcher', 'compat': 'compat_verifier', 'evidence': 'evidence_auditor',
 };
 
 export interface CustomSubagentDefinition extends SubagentProfile {

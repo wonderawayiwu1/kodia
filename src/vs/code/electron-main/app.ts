@@ -238,6 +238,8 @@ import { KodiaEvolutionMainService } from '../../workbench/contrib/void/electron
 import { IKodiaEvolutionMainService, KODIA_EVOLUTION_CHANNEL } from '../../workbench/contrib/void/common/evolutionTypes.js';
 import { KodiaMobileMainService } from '../../workbench/contrib/void/electron-main/mobileEngineeringMainService.js';
 import { IKodiaMobileMainService, KODIA_MOBILE_CHANNEL } from '../../workbench/contrib/void/common/mobileEngineeringTypes.js';
+import { LiveIntelligenceMainService } from '../../workbench/contrib/void/electron-main/liveIntelligenceMainService.js';
+import { IKodiaLiveIntelligenceMainService, KODIA_LEI_CHANNEL } from '../../workbench/contrib/void/common/liveIntelligenceTypes.js';
 import { KodiaNotebookKernelMainService } from '../../workbench/contrib/void/electron-main/kodiaNotebookKernelMainService.js';
 import { IKodiaNotebookKernelMainService, KODIA_NOTEBOOK_KERNEL_CHANNEL } from '../../workbench/contrib/void/common/kodiaNotebookKernelTypes.js';
 import { MCPChannel } from '../../workbench/contrib/void/electron-main/mcpChannel.js';
@@ -1404,6 +1406,7 @@ export class CodeApplication extends Disposable {
 		services.set(IMlxMainService, new SyncDescriptor(MlxMainService, undefined, false));
 		services.set(IKodiaWebFetchService, new SyncDescriptor(KodiaWebFetchMainService, undefined, false));
 		services.set(IWebSearchService, new SyncDescriptor(WebSearchMainService, undefined, false));
+		services.set(IKodiaLiveIntelligenceMainService, new SyncDescriptor(LiveIntelligenceMainService, undefined, false));
 		services.set(IBrowserService, new SyncDescriptor(KodiaBrowserMainService, undefined, false));
 		services.set(IApiMainService, new SyncDescriptor(KodiaApiMainService, undefined, false));
 		services.set(ICodeIndexService, new SyncDescriptor(KodiaCodeIndexMainService, undefined, false));
@@ -1632,6 +1635,10 @@ export class CodeApplication extends Disposable {
 		// Kodia: Permanent Mobile Application Engineering Platform (SDK/Device Lab, Scaffolding, Builds, MASVS Security & Store Readiness)
 		const kodiaMobileChannel = ProxyChannel.fromService(accessor.get(IKodiaMobileMainService), disposables, { unbufferedEvents: ['onDidEmitEvent'] });
 		mainProcessElectronServer.registerChannel(KODIA_MOBILE_CHANNEL, kodiaMobileChannel);
+
+		// Kodia: Live Engineering Intelligence (LEI) — Freshness Detection, Live Docs/API/Registry/OSV Research & Real-Time Events
+		const kodiaLeiChannel = ProxyChannel.fromService(accessor.get(IKodiaLiveIntelligenceMainService), disposables, { unbufferedEvents: ['onDidEmitEvent', 'onDidChangeSnapshot'] });
+		mainProcessElectronServer.registerChannel(KODIA_LEI_CHANNEL, kodiaLeiChannel);
 
 		// Kodia: Built-in Persistent Python / Jupyter Notebook Kernel Engine
 		const kodiaNotebookKernelChannel = ProxyChannel.fromService(accessor.get(IKodiaNotebookKernelMainService), disposables);

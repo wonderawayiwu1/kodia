@@ -679,6 +679,16 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'mobile_assess_readiness':
 		case 'mobile_discover_capabilities':
 		case 'mobile_workspace_overview':
+		case 'lei_open_dashboard':
+		case 'lei_assess_freshness':
+		case 'lei_research_technology':
+		case 'lei_discover_models':
+		case 'lei_verify_model':
+		case 'lei_check_dependency':
+		case 'lei_check_security':
+		case 'lei_diagnose_error':
+		case 'lei_inspect_evidence':
+		case 'lei_refresh_knowledge':
 			return 'low';
 
 		// Mobile scaffolding, device actions, and builds/tests

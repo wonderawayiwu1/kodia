@@ -146,6 +146,19 @@ import type {
 	MobileTargetPlatform,
 	MobileWorkspaceSnapshot,
 } from './mobileEngineeringTypes.js';
+import type {
+	LeiDependencyReport,
+	LeiDomain,
+	LeiEvidenceRecord,
+	LeiFailureDiagnosisReport,
+	LeiFreshnessAssessment,
+	LeiModelDiscoveryReport,
+	LeiModelTaskRequirements,
+	LeiModelVerificationReport,
+	LeiPackageEcosystem,
+	LeiResearchResult,
+	LeiSecurityAuditReport,
+} from './liveIntelligenceTypes.js';
 
 
 
@@ -698,6 +711,17 @@ export type BuiltinToolCallParams = {
 	'mobile_assess_readiness': {},
 	'mobile_discover_capabilities': { query?: string, category?: MobileCapabilityEntry['category'] },
 	'mobile_workspace_overview': {},
+	// Kodia Live Engineering Intelligence (LEI)
+	'lei_open_dashboard': { tab?: 'overview' | 'research' | 'models' | 'dependencies' | 'evidence' | 'policies' },
+	'lei_assess_freshness': { topic: string, technology?: string, current_version_or_id?: string },
+	'lei_research_technology': { topic: string, technology?: string, domain?: LeiDomain, current_version_or_id?: string, force_refresh?: boolean, official_urls?: string[] },
+	'lei_discover_models': { provider: string, task_type?: LeiModelTaskRequirements['taskType'], requires_vision?: boolean, requires_tool_calling?: boolean, requires_reasoning?: boolean, min_context_window?: number, user_selected_model_id?: string, force_refresh?: boolean },
+	'lei_verify_model': { provider: string, model_id: string, task_type?: LeiModelTaskRequirements['taskType'], requires_vision?: boolean, requires_tool_calling?: boolean, test_endpoint?: boolean, force_refresh?: boolean },
+	'lei_check_dependency': { package_name: string, ecosystem: LeiPackageEcosystem, current_version?: string, force_refresh?: boolean },
+	'lei_check_security': { target: string, ecosystem?: LeiPackageEcosystem, version?: string, force_refresh?: boolean },
+	'lei_diagnose_error': { error_message: string, technology?: string, current_version?: string },
+	'lei_inspect_evidence': { technology?: string, domain?: LeiDomain, include_stale?: boolean },
+	'lei_refresh_knowledge': { technology?: string, reason?: string },
 }
 
 // RESULT OF TOOL CALL
@@ -1005,6 +1029,17 @@ export type BuiltinToolResultType = {
 	'mobile_assess_readiness': MobileProductionReadinessReport,
 	'mobile_discover_capabilities': { entries: MobileCapabilityEntry[] },
 	'mobile_workspace_overview': MobileWorkspaceSnapshot,
+	// Kodia Live Engineering Intelligence (LEI)
+	'lei_open_dashboard': { opened: boolean, tab: string },
+	'lei_assess_freshness': LeiFreshnessAssessment,
+	'lei_research_technology': LeiResearchResult,
+	'lei_discover_models': LeiModelDiscoveryReport,
+	'lei_verify_model': LeiModelVerificationReport,
+	'lei_check_dependency': LeiDependencyReport,
+	'lei_check_security': LeiSecurityAuditReport,
+	'lei_diagnose_error': LeiFailureDiagnosisReport,
+	'lei_inspect_evidence': { records: LeiEvidenceRecord[] },
+	'lei_refresh_knowledge': { refreshed: number, failed: number, invalidated: number },
 }
 
 

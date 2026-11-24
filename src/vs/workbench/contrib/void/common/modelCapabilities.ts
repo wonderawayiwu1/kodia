@@ -2597,15 +2597,30 @@ export const detectTaskType = (userMessage: string): TaskType => {
 	return 'general'
 }
 
+export interface LeiModelRoutingHint {
+	readonly deprecated?: boolean
+	readonly unavailable?: boolean
+	readonly verifiedVision?: boolean
+	readonly verifiedToolCalling?: boolean
+	readonly endpointVerified?: boolean
+}
+
 // Score a model for a given task type. Higher = better fit.
 export const scoreModelForTask = (
 	taskType: TaskType,
 	providerName: ProviderName,
 	modelName: string,
 	overridesOfModel: OverridesOfModel | undefined,
+	leiHint?: LeiModelRoutingHint,
 ): number => {
 	const caps = getModelCapabilities(providerName, modelName, overridesOfModel)
 	let score = 0
+
+	// Research-aware penalties & boosts from Live Engineering Intelligence
+	if (leiHint?.deprecated || leiHint?.unavailable) return 0
+	if (leiHint?.endpointVerified) score += 15
+	const effectiveVision = leiHint?.verifiedVision ?? caps.supportsVision
+	if (taskType === 'vision' && !effectiveVision) return 0
 
 	// Base score from context window (larger is generally better)
 	const ctxScore = Math.min(Math.log2(Math.max(caps.contextWindow, 1024)) / 20, 1) * 10
@@ -2619,10 +2634,10 @@ export const scoreModelForTask = (
 	}
 
 	// Vision support bonus
-	if (caps.supportsVision) score += 10
+	if (effectiveVision) score += 10
 
 	// Tool support bonus
-	if (caps.specialToolFormat) score += 5
+	if (caps.specialToolFormat || leiHint?.verifiedToolCalling) score += 5
 
 	// Task-specific scoring
 	switch (taskType) {
@@ -2678,7 +2693,7 @@ export const scoreModelForTask = (
 // Auto-select the best model from available options for a given task
 export const autoSelectModel = (
 	userMessage: string,
-	availableModels: { providerName: ProviderName, modelName: string, contextWindow?: number }[],
+	availableModels: { providerName: ProviderName, modelName: string, contextWindow?: number, leiHint?: LeiModelRoutingHint }[],
 	overridesOfModel: OverridesOfModel | undefined,
 ): { providerName: ProviderName, modelName: string, reason: string } | null => {
 
@@ -2686,11 +2701,13 @@ export const autoSelectModel = (
 
 	const taskType = detectTaskType(userMessage)
 
-	// Score all available models
+	// Score all available models (research-aware: filters out deprecated/unavailable or vision-incompatible models)
 	const scored = availableModels.map(m => {
-		const score = scoreModelForTask(taskType, m.providerName, m.modelName, overridesOfModel)
+		const score = scoreModelForTask(taskType, m.providerName, m.modelName, overridesOfModel, m.leiHint)
 		return { ...m, score }
-	})
+	}).filter(m => m.score > 0)
+
+	if (scored.length === 0) return null
 
 	// Sort by score descending
 	scored.sort((a, b) => b.score - a.score)

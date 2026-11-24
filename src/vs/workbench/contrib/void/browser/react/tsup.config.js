@@ -14,6 +14,7 @@ export default defineConfig({
 		'./src2/correctness-hub-tsx/index.tsx',
 		'./src2/evolution-hub-tsx/index.tsx',
 		'./src2/mobile-studio-tsx/index.tsx',
+		'./src2/live-intelligence-tsx/index.tsx',
 		'./src2/void-tooltip/index.tsx',
 		'./src2/void-onboarding/index.tsx',
 		'./src2/quick-edit-tsx/index.tsx',

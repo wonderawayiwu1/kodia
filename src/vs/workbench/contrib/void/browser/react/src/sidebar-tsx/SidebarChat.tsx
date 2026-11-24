@@ -44,6 +44,7 @@ import { CustomSlashCommand } from '../../../../common/customCommands.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 import { SubagentReport } from '../../../../common/subagents.js';
 import { buildRemodifyPromptRequest, extractRewrittenPrompt } from '../../../../common/promptRewriter.js';
+import { EngineeringIntelligenceStatus } from './EngineeringIntelligenceStatus.js';
 
 
 
@@ -4214,6 +4215,9 @@ export const SidebarChat = () => {
 	) : null
 
 	const threadPageInput = <div key={'input' + chatThreadsState.currentThreadId}>
+		<ErrorBoundary>
+			<EngineeringIntelligenceStatus variant='chat' />
+		</ErrorBoundary>
 		<LiveActivityStrip threadId={threadId} isRunning={isRunning} />
 		{queuedMessagesTray}
 		<div className='px-4'>
@@ -4243,7 +4247,12 @@ export const SidebarChat = () => {
 	</div>
 
 	const landingPageInput = <div>
-		<div className='pt-8'>
+		<div className='pt-4'>
+			<ErrorBoundary>
+				<EngineeringIntelligenceStatus variant='chat' />
+			</ErrorBoundary>
+		</div>
+		<div className='pt-4'>
 			{inputChatArea}
 			{/* Remodify Prompt button */}
 			{!isRunning && (

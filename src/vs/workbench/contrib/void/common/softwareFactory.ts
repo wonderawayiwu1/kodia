@@ -173,11 +173,12 @@ export function buildSoftwareFactoryPrompt(
 			`Target Deliverables: ${profile.deliverables.join(', ')}`,
 			reqLines,
 			`Autonomous Mobile Engineering Protocol:`,
-			`1. Open Mobile Studio (mobile_open_studio) and probe real host SDKs/devices (mobile_probe_environment) + inspect workspace (mobile_inspect_project).`,
-			`2. Design the Three-Engine architecture (mobile_design_architecture) coordinating Mobile + Universal Software + AI Engineering Engines, and create a structured Task Plan (create_task_plan).`,
-			`3. Scaffold and implement the complete mobile client (navigation, state, adaptive Material 3 / iOS HIG UI, offline sync, native integrations) AND full backend/database/AI proxy using mobile_scaffold_project and file tools — NEVER embed privileged API keys in mobile code.`,
-			`4. Execute real mobile & backend tests (mobile_build_and_test), device/emulator checks where installed (mobile_device_action), OWASP MASVS security audit (mobile_audit_security), performance audit (mobile_audit_performance), and independent store readiness (mobile_assess_readiness).`,
-			`5. Report verified vs environment-blocked results honestly with evidence.`,
+			`1. Run Live Engineering Intelligence freshness checks first (lei_assess_freshness, lei_discover_models if AI-powered, lei_check_dependency for key mobile SDKs/packages) so all chosen SDKs, APIs, and model IDs are verified current.`,
+			`2. Open Mobile Studio (mobile_open_studio) and probe real host SDKs/devices (mobile_probe_environment) + inspect workspace (mobile_inspect_project).`,
+			`3. Design the Three-Engine architecture (mobile_design_architecture) coordinating Mobile + Universal Software + AI Engineering Engines, and create a structured Task Plan (create_task_plan).`,
+			`4. Scaffold and implement the complete mobile client (navigation, state, adaptive Material 3 / iOS HIG UI, offline sync, native integrations) AND full backend/database/AI proxy using mobile_scaffold_project and file tools — NEVER embed privileged API keys in mobile code.`,
+			`5. Execute real mobile & backend tests (mobile_build_and_test), device/emulator checks where installed (mobile_device_action), OWASP MASVS security audit (mobile_audit_security), performance audit (mobile_audit_performance), and independent store readiness (mobile_assess_readiness).`,
+			`6. Report verified vs environment-blocked results honestly with evidence.`,
 		].join('\n');
 	}
 
@@ -188,11 +189,12 @@ export function buildSoftwareFactoryPrompt(
 		`Target Deliverables: ${profile.deliverables.join(', ')}`,
 		reqLines,
 		`Execution Protocol:`,
-		`1. Inspect the existing workspace first (ls_dir, env_inspect, project_health_scan).`,
-		`2. Create a structured Task Plan (create_task_plan) decomposing architecture, backend, frontend, database, tests, and verification.`,
-		`3. Record key architectural decisions (record_architecture_decision) and keep requirements updated (factory_manage_requirements).`,
-		`4. Implement all files directly using filesystem tools — never merely describe code.`,
-		`5. Run real build, lint, tests, and evaluate_quality_gates; record verification proof via record_verification_evidence before finishing.`,
+		`1. Run Live Engineering Intelligence (lei_assess_freshness, lei_discover_models for any AI providers, lei_check_dependency / lei_check_security for dependencies) to verify current APIs, models, and versions before implementation.`,
+		`2. Inspect the existing workspace (ls_dir, env_inspect, project_health_scan).`,
+		`3. Create a structured Task Plan (create_task_plan) decomposing architecture, backend, frontend, database, tests, and verification.`,
+		`4. Record key architectural decisions (record_architecture_decision) with verified LEI evidence and keep requirements updated (factory_manage_requirements).`,
+		`5. Implement all files directly using filesystem tools — never merely describe code.`,
+		`6. Run real build, lint, tests, and evaluate_quality_gates; if any SDK/API/model fails, use lei_diagnose_error instead of retrying obsolete calls; record verification proof via record_verification_evidence before finishing.`,
 	].join('\n');
 }
 

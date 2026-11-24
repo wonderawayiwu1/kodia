@@ -185,6 +185,18 @@ import {
 } from '../common/correctnessTypes.js'
 import { IEvolutionService } from './evolutionService.js'
 import { IMobileEngineeringService } from './mobileEngineeringService.js'
+import { ILiveIntelligenceService, LeiDashboardTab } from './liveIntelligenceService.js'
+import { IKodiaLiveIntelligenceMainService, KODIA_LEI_CHANNEL, LeiDomain, LeiModelTaskRequirements, LeiPackageEcosystem } from '../common/liveIntelligenceTypes.js'
+import {
+	formatDependencyReportForLLM,
+	formatFailureDiagnosisForLLM,
+	formatFreshnessReportForLLM,
+	formatModelDiscoveryForLLM,
+	formatModelVerificationForLLM,
+	formatResearchResultForLLM,
+	formatSecurityAuditForLLM,
+	formatVerificationBadge,
+} from '../common/liveIntelligenceEngine.js'
 import { IKodiaWorkflowsService } from '../common/kodiaWorkflows.js'
 import {
 	DEFAULT_EVOLUTION_ENGINE_SETTINGS,
@@ -519,6 +531,7 @@ export class ToolsService implements IToolsService {
 		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
 		const mobileMainService = ProxyChannel.toService<IKodiaMobileMainService>(mainProcessService.getChannel(KODIA_MOBILE_CHANNEL))
+		const leiMainService = ProxyChannel.toService<IKodiaLiveIntelligenceMainService>(mainProcessService.getChannel(KODIA_LEI_CHANNEL))
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
 		const getNotebookEditHistory = (uri: URI): NotebookEditHistoryState => {
@@ -634,6 +647,9 @@ export class ToolsService implements IToolsService {
 		}
 		const getMobileService = (): IMobileEngineeringService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IMobileEngineeringService)) } catch { return undefined }
+		}
+		const getLeiService = (): ILiveIntelligenceService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(ILiveIntelligenceService)) } catch { return undefined }
 		}
 		const getWorkflowsService = (): IKodiaWorkflowsService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IKodiaWorkflowsService)) } catch { return undefined }
@@ -2600,6 +2616,89 @@ export class ToolsService implements IToolsService {
 				category: (validateOptionalStr('category', params.category) ?? undefined) as MobileCapabilityEntry['category'] | undefined,
 			}),
 			mobile_workspace_overview: () => ({}),
+			// Kodia Live Engineering Intelligence (LEI)
+			lei_open_dashboard: (params: RawToolParamsObj) => {
+				const raw = validateOptionalStr('tab', params.tab) ?? undefined
+				const allowed: readonly LeiDashboardTab[] = ['overview', 'research', 'models', 'dependencies', 'evidence', 'policies']
+				const tab = raw && (allowed as readonly string[]).includes(raw) ? raw as LeiDashboardTab : undefined
+				return { tab }
+			},
+			lei_assess_freshness: (params: RawToolParamsObj) => ({
+				topic: validateStr('topic', params.topic),
+				technology: validateOptionalStr('technology', params.technology) ?? undefined,
+				current_version_or_id: validateOptionalStr('current_version_or_id', params.current_version_or_id) ?? undefined,
+			}),
+			lei_research_technology: (params: RawToolParamsObj) => {
+				let official_urls: string[] | undefined
+				if (Array.isArray(params.official_urls)) {
+					official_urls = params.official_urls.map(String).filter(Boolean)
+				} else if (typeof params.official_urls === 'string' && params.official_urls.trim()) {
+					official_urls = params.official_urls.split(',').map(s => s.trim()).filter(Boolean)
+				}
+				return {
+					topic: validateStr('topic', params.topic),
+					technology: validateOptionalStr('technology', params.technology) ?? undefined,
+					domain: (validateOptionalStr('domain', params.domain) ?? undefined) as LeiDomain | undefined,
+					current_version_or_id: validateOptionalStr('current_version_or_id', params.current_version_or_id) ?? undefined,
+					force_refresh: validateBoolean(params.force_refresh, { default: false }) ?? false,
+					official_urls,
+				}
+			},
+			lei_discover_models: (params: RawToolParamsObj) => ({
+				provider: validateStr('provider', params.provider),
+				task_type: (validateOptionalStr('task_type', params.task_type) ?? undefined) as LeiModelTaskRequirements['taskType'],
+				requires_vision: params.requires_vision !== undefined ? (validateBoolean(params.requires_vision, { default: false }) ?? false) : undefined,
+				requires_tool_calling: params.requires_tool_calling !== undefined ? (validateBoolean(params.requires_tool_calling, { default: false }) ?? false) : undefined,
+				requires_reasoning: params.requires_reasoning !== undefined ? (validateBoolean(params.requires_reasoning, { default: false }) ?? false) : undefined,
+				min_context_window: params.min_context_window !== undefined ? (validateNumber(params.min_context_window, { default: 0 }) || undefined) : undefined,
+				user_selected_model_id: validateOptionalStr('user_selected_model_id', params.user_selected_model_id) ?? undefined,
+				force_refresh: validateBoolean(params.force_refresh, { default: false }) ?? false,
+			}),
+			lei_verify_model: (params: RawToolParamsObj) => ({
+				provider: validateStr('provider', params.provider),
+				model_id: validateStr('model_id', params.model_id),
+				task_type: (validateOptionalStr('task_type', params.task_type) ?? undefined) as LeiModelTaskRequirements['taskType'],
+				requires_vision: params.requires_vision !== undefined ? (validateBoolean(params.requires_vision, { default: false }) ?? false) : undefined,
+				requires_tool_calling: params.requires_tool_calling !== undefined ? (validateBoolean(params.requires_tool_calling, { default: false }) ?? false) : undefined,
+				test_endpoint: validateBoolean(params.test_endpoint, { default: false }) ?? false,
+				force_refresh: validateBoolean(params.force_refresh, { default: false }) ?? false,
+			}),
+			lei_check_dependency: (params: RawToolParamsObj) => {
+				const rawEco = validateStr('ecosystem', params.ecosystem).toLowerCase()
+				const allowed: readonly LeiPackageEcosystem[] = ['npm', 'pypi', 'pub', 'crates', 'packagist', 'maven', 'nuget']
+				const ecosystem: LeiPackageEcosystem = (allowed as readonly string[]).includes(rawEco) ? rawEco as LeiPackageEcosystem : 'npm'
+				return {
+					package_name: validateStr('package_name', params.package_name),
+					ecosystem,
+					current_version: validateOptionalStr('current_version', params.current_version) ?? undefined,
+					force_refresh: validateBoolean(params.force_refresh, { default: false }) ?? false,
+				}
+			},
+			lei_check_security: (params: RawToolParamsObj) => {
+				const rawEco = validateOptionalStr('ecosystem', params.ecosystem)?.toLowerCase()
+				const allowed: readonly LeiPackageEcosystem[] = ['npm', 'pypi', 'pub', 'crates', 'packagist', 'maven', 'nuget']
+				const ecosystem = rawEco && (allowed as readonly string[]).includes(rawEco) ? rawEco as LeiPackageEcosystem : undefined
+				return {
+					target: validateStr('target', params.target),
+					ecosystem,
+					version: validateOptionalStr('version', params.version) ?? undefined,
+					force_refresh: validateBoolean(params.force_refresh, { default: false }) ?? false,
+				}
+			},
+			lei_diagnose_error: (params: RawToolParamsObj) => ({
+				error_message: validateStr('error_message', params.error_message),
+				technology: validateOptionalStr('technology', params.technology) ?? undefined,
+				current_version: validateOptionalStr('current_version', params.current_version) ?? undefined,
+			}),
+			lei_inspect_evidence: (params: RawToolParamsObj) => ({
+				technology: validateOptionalStr('technology', params.technology) ?? undefined,
+				domain: (validateOptionalStr('domain', params.domain) ?? undefined) as LeiDomain | undefined,
+				include_stale: validateBoolean(params.include_stale, { default: false }) ?? false,
+			}),
+			lei_refresh_knowledge: (params: RawToolParamsObj) => ({
+				technology: validateOptionalStr('technology', params.technology) ?? undefined,
+				reason: validateOptionalStr('reason', params.reason) ?? undefined,
+			}),
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -5495,6 +5594,120 @@ export class ToolsService implements IToolsService {
 				const snap = await mobileMainService.loadWorkspaceSnapshot(root)
 				return { result: snap }
 			},
+			// Kodia Live Engineering Intelligence (LEI)
+			lei_open_dashboard: async (p) => {
+				const tab = p.tab ?? 'overview'
+				const svc = getLeiService()
+				if (svc) await svc.openDashboard(tab)
+				return { result: { opened: !!svc, tab } }
+			},
+			lei_assess_freshness: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.assessFreshness(p.topic, p.technology, p.current_version_or_id, root)
+				return { result: res }
+			},
+			lei_research_technology: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.researchTechnology({
+					topic: p.topic,
+					technology: p.technology,
+					domain: p.domain,
+					currentVersionOrId: p.current_version_or_id,
+					forceRefresh: p.force_refresh,
+					officialUrls: p.official_urls,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_discover_models: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.discoverProviderModels({
+					provider: p.provider,
+					requirements: {
+						taskType: p.task_type,
+						requiresVision: p.requires_vision,
+						requiresToolCalling: p.requires_tool_calling,
+						requiresReasoning: p.requires_reasoning,
+						minContextWindow: p.min_context_window,
+						userSelectedModelId: p.user_selected_model_id,
+					},
+					forceRefresh: p.force_refresh,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_verify_model: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.verifyModelSelection({
+					provider: p.provider,
+					modelId: p.model_id,
+					requirements: {
+						taskType: p.task_type,
+						requiresVision: p.requires_vision,
+						requiresToolCalling: p.requires_tool_calling,
+					},
+					testEndpoint: p.test_endpoint,
+					forceRefresh: p.force_refresh,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_check_dependency: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.checkDependency({
+					packageName: p.package_name,
+					ecosystem: p.ecosystem,
+					currentVersion: p.current_version,
+					forceRefresh: p.force_refresh,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_check_security: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.checkSecurityAdvisories({
+					target: p.target,
+					ecosystem: p.ecosystem,
+					version: p.version,
+					forceRefresh: p.force_refresh,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_diagnose_error: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const res = await leiMainService.diagnoseFailureWithResearch({
+					errorMessage: p.error_message,
+					technology: p.technology,
+					currentVersion: p.current_version,
+					projectRoot: root,
+				})
+				return { result: res }
+			},
+			lei_inspect_evidence: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				const records = [...await leiMainService.inspectEvidence({
+					technology: p.technology,
+					domain: p.domain,
+					includeStale: p.include_stale,
+					projectRoot: root,
+				})]
+				return { result: { records } }
+			},
+			lei_refresh_knowledge: async (p) => {
+				const root = workspaceFolderPaths()[0]
+				let invalidated = 0
+				if (p.technology) {
+					const inv = await leiMainService.invalidateKnowledge({
+						technology: p.technology,
+						reason: p.reason ?? 'Explicit user/agent refresh request',
+						projectRoot: root,
+					})
+					invalidated = inv.invalidated
+				}
+				const ref = await leiMainService.refreshStaleKnowledge(root)
+				return { result: { refreshed: ref.refreshed, failed: ref.failed, invalidated } }
+			},
 
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
@@ -7311,6 +7524,21 @@ export class ToolsService implements IToolsService {
 				`- OWASP MASVS security: ${r.securityAudit ? `${r.securityAudit.score}/100` : 'not audited'}`,
 				`- Store readiness: ${r.readinessReport ? `${r.readinessReport.overallStatus} (${r.readinessReport.readinessScore}/100)` : 'not assessed'}`,
 			].join('\n'),
+			// Kodia Live Engineering Intelligence (LEI)
+			lei_open_dashboard: (_params, r) => r.opened
+				? `Opened Kodia Live Engineering Intelligence dashboard (${r.tab}).`
+				: `Live Engineering Intelligence dashboard service unavailable.`,
+			lei_assess_freshness: (_params, r) => formatFreshnessReportForLLM(r),
+			lei_research_technology: (_params, r) => formatResearchResultForLLM(r),
+			lei_discover_models: (_params, r) => formatModelDiscoveryForLLM(r),
+			lei_verify_model: (_params, r) => formatModelVerificationForLLM(r),
+			lei_check_dependency: (_params, r) => formatDependencyReportForLLM(r),
+			lei_check_security: (_params, r) => formatSecurityAuditForLLM(r),
+			lei_diagnose_error: (_params, r) => formatFailureDiagnosisForLLM(r),
+			lei_inspect_evidence: (_params, r) => r.records.length === 0
+				? 'No persisted verified evidence records matched the query.'
+				: r.records.slice(0, 10).map(rec => `- **${rec.technology}** (\`${rec.exactIdentifierOrVersion}\`) — ${formatVerificationBadge(rec.verificationStatus)} [${rec.researchDate}]: ${rec.finding}${rec.sources[0] ? ` (Source: ${rec.sources[0].url})` : ''}`).join('\n'),
+			lei_refresh_knowledge: (_params, r) => `Knowledge refresh complete: refreshed=${r.refreshed}, failed=${r.failed}, invalidated=${r.invalidated}.`,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

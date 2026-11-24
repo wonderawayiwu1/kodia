@@ -30,6 +30,7 @@ import {
 	RequirementStatus,
 } from '../../../../common/softwareFactory.js';
 import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
+import { EngineeringIntelligenceStatus } from './EngineeringIntelligenceStatus.js';
 import { KodiaBadge, KodiaCard, KodiaEmptyState, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 
 type FactorySubTab = 'build' | 'requirements' | 'autopilot' | 'council';
@@ -172,6 +173,9 @@ export const FactoryPanel = ({ onOpenChat }: { onOpenChat?: () => void }) => {
 			</div>
 
 			<div className='flex-1 overflow-y-auto p-3 flex flex-col gap-3'>
+				{/* Live Engineering Intelligence Status System (Part 14.5) */}
+				<EngineeringIntelligenceStatus variant='factory' contextTopic={idea || undefined} />
+
 				{/* SUBTAB 1: IDEA -> APP SOFTWARE FACTORY */}
 				{subTab === 'build' && (
 					<>

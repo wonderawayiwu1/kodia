@@ -24,6 +24,8 @@ import './apiStudioPane.js'
 import './correctnessPane.js'
 import './evolutionPane.js'
 import './mobileStudioPane.js'
+import './liveIntelligencePane.js'
+import './liveIntelligenceService.js'
 
 // register css
 import './media/void.css'

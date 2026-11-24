@@ -333,6 +333,16 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	mobile_assess_readiness: { done: 'Assessed store readiness', proposed: 'Assess mobile store readiness', running: 'Evaluating Android/iOS production & store gates' },
 	mobile_discover_capabilities: { done: 'Discovered mobile capabilities', proposed: 'Discover mobile capabilities', running: 'Querying mobile technology catalogue' },
 	mobile_workspace_overview: { done: 'Loaded Mobile Studio snapshot', proposed: 'Load mobile overview', running: 'Loading persisted .kodia/mobile/ state' },
+	lei_open_dashboard: { done: 'Opened Live Engineering Intelligence', proposed: 'Open Live Engineering Intelligence', running: 'Opening Live Engineering Intelligence dashboard' },
+	lei_assess_freshness: { done: 'Assessed knowledge freshness', proposed: 'Assess freshness risk', running: 'Evaluating information freshness category (A–D)' },
+	lei_research_technology: { done: 'Completed live technology research', proposed: 'Research official documentation', running: 'Researching current official documentation' },
+	lei_discover_models: { done: 'Discovered current AI models', proposed: 'Discover provider model catalog', running: 'Querying current AI provider model catalog' },
+	lei_verify_model: { done: 'Verified AI model selection', proposed: 'Verify AI model identifier', running: 'Checking model availability, deprecation & capabilities' },
+	lei_check_dependency: { done: 'Verified dependency metadata', proposed: 'Verify package registry & security', running: 'Inspecting package registry & OSV advisories' },
+	lei_check_security: { done: 'Checked security advisories', proposed: 'Check OSV/CVE security advisories', running: 'Querying official security advisory databases' },
+	lei_diagnose_error: { done: 'Diagnosed failure with live docs', proposed: 'Research failure root cause', running: 'Researching current docs for failure migration' },
+	lei_inspect_evidence: { done: 'Loaded verified research evidence', proposed: 'Inspect research evidence', running: 'Loading persisted verification evidence' },
+	lei_refresh_knowledge: { done: 'Refreshed stale knowledge cache', proposed: 'Refresh stale engineering cache', running: 'Refreshing expired engineering intelligence' },
 };
 
 function humanizeToolName(toolName: string): string {
