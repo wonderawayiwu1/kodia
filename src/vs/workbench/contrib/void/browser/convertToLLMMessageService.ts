@@ -20,6 +20,8 @@ import { IMCPService } from '../common/mcpService.js';
 import { fitMemoryToBudget, IProjectMemoryService, PROJECT_MEMORY_FILE_PATH } from '../common/projectMemoryService.js';
 import { IDesignIntelligenceService } from './designIntelligenceService.js';
 import { IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js';
+import { IFileService } from '../../../../platform/files/common/files.js';
+import { parseScopedRuleFile } from '../common/cursorAntigravityEngines.js';
 
 // the share of the model's context window the project memory may take in the system prompt
 const MEMORY_SHARE_OF_CONTEXT = 0.15
@@ -39,7 +41,7 @@ export interface IConvertToLLMMessageService {
 	// wasStillOverBudgetAfterTrimming: the history still exceeds the estimated budget after trimming
 	// wasTrimmed: whether any message content was modified by the trimming loop
 	// subagent: the thread is a subagent's — it is offered exactly `tools`, and told its role
-	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string, subagent?: { tools: InternalToolInfo[], role: string } }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean }>
+	prepareLLMChatMessages: (opts: { chatMessages: ChatMessage[], chatMode: ChatMode, modelSelection: ModelSelection | null, turnId?: string, subagent?: { tools?: InternalToolInfo[], role: string } }) => Promise<{ messages: LLMChatMessage[], separateSystemMessage: string | undefined, estimatedInputTokens: number, wasInitiallyOverBudget: boolean, wasStillOverBudgetAfterTrimming: boolean, wasTrimmed: boolean }>
 	// calibrates token estimates for this model with the input tokens the provider reported for that request
 	recordInputTokens(modelSelection: ModelSelection, estimatedInputTokens: number, actualInputTokens: number): void
 	// the provider rejected a request as longer than the model's context window: from now on (this session), budget
@@ -115,6 +117,36 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 		return [globalAIInstructions, rulesFileContent].filter(s => !!s).join('\n\n')
 	}
 
+	/** Reads scoped rules from `.kodia/rules/*.md` and Cursor `.cursor/rules/*.mdc` (alwaysApply rules). */
+	private async _getScopedRulesBlock(): Promise<string> {
+		try {
+			if (!this.instantiationService) return '';
+			let fileService: IFileService | undefined;
+			try { fileService = this.instantiationService.invokeFunction(a => a.get(IFileService)); } catch { return ''; }
+			if (!fileService) return '';
+			const folders = this.workspaceContextService.getWorkspace().folders;
+			const parts: string[] = [];
+			for (const folder of folders) {
+				for (const [relDir, source] of [['.kodia/rules', 'kodia'], ['.cursor/rules', 'cursor']] as const) {
+					try {
+						const stat = await fileService.resolve(URI.joinPath(folder.uri, relDir));
+						for (const child of (stat.children ?? []).slice(0, 20)) {
+							if (child.isDirectory || !/\.(md|mdc)$/i.test(child.name)) continue;
+							const raw = (await fileService.readFile(child.resource)).value.toString();
+							const parsed = parseScopedRuleFile(child.name.replace(/\.(md|mdc)$/i, ''), child.resource.fsPath, source, raw);
+							if (parsed.alwaysApply && parsed.body) {
+								parts.push(`From ${relDir}/${child.name}${parsed.globs?.length ? ` (globs: ${parsed.globs.join(', ')})` : ''}:\n${parsed.body.slice(0, 4000)}`);
+							}
+						}
+					} catch { }
+				}
+			}
+			return parts.join('\n\n');
+		} catch {
+			return '';
+		}
+	}
+
 	// Get combined AI instructions from settings, the project's rules files, and saved project memory
 	private _getCombinedAIInstructions(rulesFileNames?: readonly string[], withFrameworks = true): string {
 		const { aiInstructions, instructionsFrameworks } = this.voidSettingsService.state.globalSettings;
@@ -133,7 +165,7 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 	// The chat system prompt, from the most stable part to the most changing one, so that a provider's
 	// prompt cache keeps the longest possible prefix:
 	//   static instructions -> the user's guidelines -> skills (change when one is installed) -> project memory (the agent writes it) -> file tree (changes when files are created)
-	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) => {
+	private _generateChatSystemMessage = async (chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools?: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) => {
 		const sections: string[] = []
 
 		if (!disableSystemMessage) {
@@ -146,7 +178,9 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 		if (subagent?.role) sections.push(subagent.role)
 
 		const guidelines = this._getGuidelines()
-		if (guidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${guidelines}`)
+		const scopedRules = await this._getScopedRulesBlock()
+		const combinedGuidelines = [guidelines, scopedRules].filter(Boolean).join('\n\n')
+		if (combinedGuidelines) sections.push(`GUIDELINES (from the user's settings and the project's rules files):\n${combinedGuidelines}`)
 
 		// Inject active project Brand System & user Design Intelligence preferences when configured
 		try {
@@ -199,8 +233,8 @@ export class ConvertToLLMMessageService extends Disposable implements IConvertTo
 	// memory while it works; rebuilding the system prompt for each request of the turn would then miss the
 	// cache for the whole thread. The model already knows what it just changed, and tools read the rest.
 	private _systemMessageOfTurn: { key: string, systemMessage: string } | undefined = undefined
-	private async _chatSystemMessage(turnId: string | undefined, chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) {
-		const key = `${turnId}|${chatMode}|${specialToolFormat}|${disableSystemMessage}|${subagent ? subagent.tools.map(t => t.name).join(',') : ''}|${memoryBudgetTokens}`
+	private async _chatSystemMessage(turnId: string | undefined, chatMode: ChatMode, specialToolFormat: 'openai-style' | 'anthropic-style' | 'gemini-style' | undefined, disableSystemMessage: boolean, subagent: { tools?: InternalToolInfo[], role: string } | undefined, memoryBudgetTokens: number) {
+		const key = `${turnId}|${chatMode}|${specialToolFormat}|${disableSystemMessage}|${subagent?.tools ? subagent.tools.map(t => t.name).join(',') : ''}|${subagent?.role ? subagent.role.length : 0}|${memoryBudgetTokens}`
 		if (turnId && this._systemMessageOfTurn?.key === key) return this._systemMessageOfTurn.systemMessage
 
 		const systemMessage = await this._generateChatSystemMessage(chatMode, specialToolFormat, disableSystemMessage, subagent, memoryBudgetTokens)

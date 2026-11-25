@@ -4,6 +4,8 @@
  *--------------------------------------------------------------------------------------*/
 
 import type {
+	UaepAiProviderId,
+	UaepAiProviderPreset,
 	UaepCodegenTarget,
 	UaepCodeSyncReport,
 	UaepCompileReport,
@@ -15,6 +17,93 @@ import type {
 	UaepWorkflowEdge,
 	UaepWorkflowNode,
 } from './universalAutomationTypes.js';
+
+// ── 0. Free-First & Multi-Provider AI Presets (NVIDIA, Groq, OpenRouter, Gemini, Ollama) ──
+
+export const UAEP_AI_PROVIDER_PRESETS: readonly UaepAiProviderPreset[] = [
+	{
+		id: 'nvidia',
+		label: 'NVIDIA NIM (Free Tier)',
+		freeTier: true,
+		requiresApiKey: true,
+		endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions',
+		envKey: 'NVIDIA_API_KEY',
+		defaultModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
+		docsUrl: 'https://build.nvidia.com',
+		note: 'Free developer credits with vision, reasoning & tool calling — click Discover Live Models (LEI) for latest catalog.',
+	},
+	{
+		id: 'groq',
+		label: 'Groq Cloud (Free Tier)',
+		freeTier: true,
+		requiresApiKey: true,
+		endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+		envKey: 'GROQ_API_KEY',
+		defaultModel: 'llama-3.3-70b-versatile',
+		docsUrl: 'https://console.groq.com/keys',
+		note: 'Ultra-fast free-tier LPU inference with OpenAI-compatible tool calling.',
+	},
+	{
+		id: 'openrouter',
+		label: 'OpenRouter (Free Models)',
+		freeTier: true,
+		requiresApiKey: true,
+		endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+		envKey: 'OPENROUTER_API_KEY',
+		defaultModel: 'meta-llama/llama-3.3-70b-instruct:free',
+		docsUrl: 'https://openrouter.ai/models?max_price=0',
+		note: 'Unified gateway with dozens of :free models — discover live :free IDs via LEI.',
+	},
+	{
+		id: 'gemini',
+		label: 'Google Gemini (Free Tier)',
+		freeTier: true,
+		requiresApiKey: true,
+		endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+		envKey: 'GEMINI_API_KEY',
+		defaultModel: 'gemini-2.5-flash',
+		docsUrl: 'https://aistudio.google.com/apikey',
+		note: 'Generous free tier via OpenAI-compatible Gemini endpoint.',
+	},
+	{
+		id: 'ollama',
+		label: 'Ollama (Local Free — No Key)',
+		freeTier: true,
+		requiresApiKey: false,
+		endpoint: 'http://127.0.0.1:11434/v1/chat/completions',
+		envKey: '',
+		defaultModel: 'llama3.2',
+		docsUrl: 'https://ollama.com',
+		note: '100% free offline local inference on your machine with zero API key needed.',
+	},
+	{
+		id: 'openai',
+		label: 'OpenAI (Paid BYOK)',
+		freeTier: false,
+		requiresApiKey: true,
+		endpoint: 'https://api.openai.com/v1/chat/completions',
+		envKey: 'OPENAI_API_KEY',
+		defaultModel: 'gpt-4o-mini',
+		docsUrl: 'https://platform.openai.com/api-keys',
+		note: 'Optional paid BYOK OpenAI endpoint.',
+	},
+	{
+		id: 'custom',
+		label: 'Custom OpenAI-Compatible Endpoint',
+		freeTier: true,
+		requiresApiKey: false,
+		endpoint: '',
+		envKey: 'CUSTOM_AI_API_KEY',
+		defaultModel: '',
+		docsUrl: '',
+		note: 'Any self-hosted vLLM, LM Studio, Together, Fireworks, or enterprise gateway.',
+	},
+];
+
+export function getUaepAiProviderPreset(providerId: string | undefined): UaepAiProviderPreset {
+	const id = (providerId || 'nvidia').toLowerCase() as UaepAiProviderId;
+	return UAEP_AI_PROVIDER_PRESETS.find(p => p.id === id) ?? UAEP_AI_PROVIDER_PRESETS[0];
+}
 
 // ── 1. Formal Typed Node Library (Section 8: Triggers, Actions, Logic, Data, Dev, AI) ──
 
@@ -56,10 +145,10 @@ export const UAEP_NODE_LIBRARY: readonly UaepNodeTypeSpec[] = [
 	{ type: 'dev.sandbox_js', label: 'Sandboxed JavaScript / TS', category: 'developer', description: 'Executes custom JS logic inside an isolated VM sandbox with strict timeout and zero host filesystem access.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { code: 'return { ...input, processed: true };' }, version: '1.0.0' },
 	{ type: 'dev.sql_script', label: 'Parameterized SQL Module', category: 'developer', description: 'Runs verified parameterized SQL statement.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { sql: 'SELECT 1 AS ok' }, requiresCredential: true, version: '1.0.0' },
 
-	// AI & Multi-Agent (BYOK)
-	{ type: 'ai.llm_completion', label: 'AI LLM Completion (BYOK)', category: 'ai', description: 'Calls user-configured BYOK provider (NVIDIA NIM, OpenAI, Anthropic, Gemini, Groq, Ollama) with token budget.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'openai', model: 'verify-via-lei', prompt: '', maxTokens: 1024 }, requiresCredential: true, version: '1.0.0' },
-	{ type: 'ai.structured_extract', label: 'AI Structured Extraction', category: 'ai', description: 'Extracts schema-validated JSON entities from unstructured documents or emails.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'nvidia', schemaFields: ['summary', 'priority', 'category'] }, requiresCredential: true, version: '1.0.0' },
-	{ type: 'ai.agent_orchestrator', label: 'Autonomous AI Agent Node', category: 'ai', description: 'Runs a bounded tool-calling AI agent with strict permission boundaries and loop/cost limits.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'nvidia', maxSteps: 6, allowedTools: ['http_get', 'kb_search'], requireApprovalForWrites: true }, requiresCredential: true, version: '1.0.0' },
+	// AI & Multi-Agent (Free-First BYOK: NVIDIA NIM, Groq, OpenRouter, Gemini, Ollama)
+	{ type: 'ai.llm_completion', label: 'AI LLM Completion (BYOK)', category: 'ai', description: 'Calls free-tier or BYOK provider (NVIDIA NIM, Groq, OpenRouter, Google Gemini, local Ollama, or OpenAI) with live LEI model discovery.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'nvidia', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'nvidia/nemotron-3.5-super-vl-120b-a12b', prompt: '', maxTokens: 1024 }, requiresCredential: true, version: '1.0.0' },
+	{ type: 'ai.structured_extract', label: 'AI Structured Extraction', category: 'ai', description: 'Extracts schema-validated JSON entities using NVIDIA NIM, Groq, OpenRouter, Gemini, or Ollama.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'nvidia', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'nvidia/nemotron-3.5-super-vl-120b-a12b', schemaFields: ['summary', 'priority', 'category'] }, requiresCredential: true, version: '1.0.0' },
+	{ type: 'ai.agent_orchestrator', label: 'Autonomous AI Agent Node', category: 'ai', description: 'Runs a bounded tool-calling AI agent on NVIDIA NIM, Groq, OpenRouter, Gemini, or local Ollama with strict permission boundaries.', inputs: ['default'], outputs: ['default', 'error'], defaultConfig: { provider: 'nvidia', endpoint: 'https://integrate.api.nvidia.com/v1/chat/completions', model: 'nvidia/nemotron-3.5-super-vl-120b-a12b', maxSteps: 6, allowedTools: ['http_get', 'kb_search'], requireApprovalForWrites: true }, requiresCredential: true, version: '1.0.0' },
 	{ type: 'ai.rag_retrieve', label: 'RAG Vector Retrieval', category: 'ai', description: 'Retrieves grounded citations from tenant-scoped knowledge index.', inputs: ['default'], outputs: ['default'], defaultConfig: { topK: 5, tenantScoped: true }, version: '1.0.0' },
 ];
 
@@ -68,8 +157,12 @@ export const UAEP_CONNECTOR_CATALOG: readonly UaepConnectorSpec[] = [
 	{ id: 'postgresql', name: 'PostgreSQL', category: 'database', version: '2.0.0', authType: 'connection_string', operations: ['query', 'insert', 'update', 'transaction'], description: 'Parameterized PostgreSQL queries, transactional outbox & migrations.', officialDocsUrl: 'https://www.postgresql.org/docs/', supportsSandbox: true },
 	{ id: 'mongodb', name: 'MongoDB / Atlas', category: 'database', version: '2.0.0', authType: 'connection_string', operations: ['find', 'insertOne', 'updateOne', 'aggregate'], description: 'Document storage and change streams for MongoDB.', officialDocsUrl: 'https://www.mongodb.com/docs/', supportsSandbox: true },
 	{ id: 'redis_queue', name: 'Redis & BullMQ Queues', category: 'database', version: '2.0.0', authType: 'connection_string', operations: ['enqueue', 'consume', 'rate_limit', 'cache'], description: 'Distributed job queues, leases, retries, and rate limiting.', officialDocsUrl: 'https://redis.io/docs/', supportsSandbox: true },
-	{ id: 'nvidia_nim', name: 'NVIDIA NIM (BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'structured_output', 'embeddings', 'vision'], description: 'OpenAI-compatible NVIDIA Build/NIM inference (verify current model IDs via LEI).', officialDocsUrl: 'https://docs.api.nvidia.com/', supportsSandbox: false },
-	{ id: 'openai_compat', name: 'OpenAI / Ollama / vLLM (BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'tool_calling', 'structured_output', 'embeddings'], description: 'Model-agnostic cloud or local OpenAI-compatible AI inference.', officialDocsUrl: 'https://platform.openai.com/docs', supportsSandbox: true },
+	{ id: 'nvidia_nim', name: 'NVIDIA NIM (Free Tier BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'tool_calling', 'structured_output', 'vision', 'embeddings'], description: 'Free-tier NVIDIA Build/NIM inference (e.g. nvidia/nemotron-3.5-super-vl-120b-a12b — live-verified via LEI).', officialDocsUrl: 'https://build.nvidia.com/', supportsSandbox: true },
+	{ id: 'groq_cloud', name: 'Groq Cloud (Free Tier BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'tool_calling', 'structured_output', 'fast_inference'], description: 'Ultra-low-latency free-tier Groq LPU OpenAI-compatible inference.', officialDocsUrl: 'https://console.groq.com/docs', supportsSandbox: true },
+	{ id: 'openrouter', name: 'OpenRouter (Free & Multi-Model)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'free_models', 'tool_calling', 'routing'], description: 'Unified multi-model router with free (:free) frontier open-weight models.', officialDocsUrl: 'https://openrouter.ai/docs', supportsSandbox: true },
+	{ id: 'google_gemini', name: 'Google Gemini (Free Tier BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'vision', 'tool_calling', 'long_context'], description: 'Google AI Studio free-tier Gemini models via OpenAI-compatible endpoint.', officialDocsUrl: 'https://ai.google.dev/gemini-api/docs', supportsSandbox: true },
+	{ id: 'ollama_local', name: 'Ollama Local (100% Free Offline)', category: 'ai', version: '2.0.0', authType: 'none', operations: ['chat_completion', 'embeddings', 'offline_inference'], description: 'Zero-cost local OpenAI-compatible inference with no API key required.', officialDocsUrl: 'https://ollama.com/', supportsSandbox: true },
+	{ id: 'openai_compat', name: 'OpenAI / Custom Gateway (BYOK)', category: 'ai', version: '2.0.0', authType: 'api_key', operations: ['chat_completion', 'tool_calling', 'structured_output', 'embeddings'], description: 'Optional paid OpenAI or self-hosted vLLM/LM Studio OpenAI-compatible inference.', officialDocsUrl: 'https://platform.openai.com/docs', supportsSandbox: true },
 	{ id: 'stripe', name: 'Stripe Payments', category: 'business', version: '2.0.0', authType: 'api_key', operations: ['create_checkout', 'charge_idempotent', 'refund', 'verify_webhook'], description: 'Idempotent payments, subscriptions, and signed webhook verification.', officialDocsUrl: 'https://docs.stripe.com/', supportsSandbox: true },
 	{ id: 'resend_email', name: 'Resend / SMTP Email', category: 'communication', version: '2.0.0', authType: 'api_key', operations: ['send_email', 'send_template'], description: 'Transactional email delivery with local dev capture option.', officialDocsUrl: 'https://resend.com/docs', supportsSandbox: true },
 	{ id: 'slack_teams', name: 'Slack & Microsoft Teams', category: 'communication', version: '2.0.0', authType: 'oauth2', operations: ['post_message', 'send_approval_card'], description: 'Operational alerts and interactive human approval workflows.', officialDocsUrl: 'https://api.slack.com/docs', supportsSandbox: true },
@@ -384,16 +477,23 @@ export function generateWorkflowFromNaturalLanguage(
 		prev = chk;
 	}
 
-	// 4. AI / Agent / Extraction step
-	if (/\b(ai|llm|agent|classify|extract|summar|nvidia|openai|anthropic|gemini|support)\b/.test(lower)) {
-		const provider = /\bnvidia\b/.test(lower) ? 'nvidia' : /\banthropic|claude\b/.test(lower) ? 'anthropic' : /\bgemini\b/.test(lower) ? 'gemini' : /\bollama|local\b/.test(lower) ? 'ollama' : 'openai';
+	// 4. AI / Agent / Extraction step (defaults to free-tier NVIDIA NIM instead of paid OpenAI)
+	if (/\b(ai|llm|agent|classify|extract|summar|nvidia|groq|openrouter|openai|anthropic|gemini|ollama|support)\b/.test(lower)) {
+		const provider: UaepAiProviderId = /\bgroq\b/.test(lower) ? 'groq'
+			: /\bopenrouter\b/.test(lower) ? 'openrouter'
+				: /\bgemini\b/.test(lower) ? 'gemini'
+					: /\bollama|local\b/.test(lower) ? 'ollama'
+						: /\bopenai\b/.test(lower) ? 'openai'
+							: /\banthropic|claude\b/.test(lower) ? 'anthropic'
+								: 'nvidia';
+		const preset = getUaepAiProviderPreset(provider);
 		const aiNode = pushNode({
 			id: 'ai_1',
 			type: /\bagent\b/.test(lower) ? 'ai.agent_orchestrator' : 'ai.llm_completion',
 			category: 'ai',
-			label: /\bagent\b/.test(lower) ? 'AI Agent Workflow Node' : 'AI Reasoning & Extraction',
-			credentialRef: `${provider.toUpperCase()}_API_KEY`,
-			config: { provider, model: 'verify-via-lei', prompt: prompt.slice(0, 200), maxTokens: 1024 },
+			label: /\bagent\b/.test(lower) ? `AI Agent (${preset.label})` : `AI Reasoning (${preset.label})`,
+			credentialRef: preset.requiresApiKey ? preset.envKey : undefined,
+			config: { provider: preset.id, endpoint: preset.endpoint, model: preset.defaultModel, prompt: prompt.slice(0, 200), maxTokens: 1024 },
 			retryPolicy: { maxAttempts: 3, initialDelayMs: 500, backoffMultiplier: 2, maxDelayMs: 5000 },
 		});
 		connect(prev.id, aiNode.id, prev.type === 'logic.if_else' ? 'true' : 'default');

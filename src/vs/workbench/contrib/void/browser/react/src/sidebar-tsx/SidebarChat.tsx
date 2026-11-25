@@ -25,7 +25,7 @@ import { getModelCapabilities, getIsReasoningEnabledState, getUsageCost } from '
 import { estimateTokens } from '../../../../common/tokenizer.js';
 import { ILLMMessageService } from '../../../../common/sendLLMMessageService.js';
 import type { LLMChatMessage } from '../../../../common/sendLLMMessageTypes.js';
-import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText, Sparkles } from 'lucide-react';
+import { AlertTriangle, File, Ban, Check, ChevronRight, Circle, FileIcon, Pencil, X, CircleEllipsis, Folder, Text, Plus, FileText, Sparkles, Zap } from 'lucide-react';
 import { ChatMessage, CheckpointEntry, StagingSelectionItem, ToolMessage } from '../../../../common/chatThreadServiceTypes.js';
 import { dataURLOfChatImage } from '../util/chatImages.js';
 import { useAttachChatFiles } from '../util/chatAttachments.js';
@@ -46,6 +46,7 @@ import { SubagentReport } from '../../../../common/subagents.js';
 import { buildRemodifyPromptRequest, extractRewrittenPrompt } from '../../../../common/promptRewriter.js';
 import { EngineeringIntelligenceStatus } from './EngineeringIntelligenceStatus.js';
 import { AppBuilderChatBar } from './AppBuilderChatBar.js';
+import { AntigravityAgentUXStrip } from './AntigravityAgentUXStrip.js';
 
 
 
@@ -3806,9 +3807,13 @@ export const SidebarChat = () => {
 		: undefined
 
 	const [queuedMessages, setQueuedMessages] = useState<readonly string[]>(() => chatThreadsService.getQueuedMessages(chatThreadsState.currentThreadId))
+	const [editingQueueIdx, setEditingQueueIdx] = useState<number | null>(null)
+	const [editingQueueText, setEditingQueueText] = useState('')
 	useEffect(() => {
 		const tid = chatThreadsState.currentThreadId
 		setQueuedMessages([...chatThreadsService.getQueuedMessages(tid)])
+		setEditingQueueIdx(null)
+		setEditingQueueText('')
 		const d = chatThreadsService.onDidChangeQueuedMessages(({ threadId: changedId }) => {
 			if (changedId === tid) {
 				setQueuedMessages([...chatThreadsService.getQueuedMessages(tid)])
@@ -3853,6 +3858,22 @@ export const SidebarChat = () => {
 		const threadId = currentThread.id
 		await chatThreadsService.abortRunning(threadId)
 	}
+
+	const onSendNowFromInput = useCallback(async () => {
+		const threadId = chatThreadsService.state.currentThreadId
+		const userMessage = textAreaRef.current?.value?.trim() || ''
+		if (!userMessage) return
+		textAreaFnsRef.current?.setValue('')
+		setInstructionsAreEmpty(true)
+		setTokenEstimate(0)
+		setSelections([])
+		try {
+			await chatThreadsService.interruptAndSendNow(threadId, userMessage)
+		} catch (e) {
+			console.error('Error while interrupting and sending message:', e)
+		}
+		textAreaRef.current?.focus()
+	}, [chatThreadsService, setSelections])
 
 	// ----- Remodify Prompt -----
 	const llmMessageService = accessor.get('ILLMMessageService')
@@ -4142,6 +4163,11 @@ export const SidebarChat = () => {
 			selectSlashCommand(slashMatches[0])
 			return
 		}
+		if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && isRunning && !e.nativeEvent.isComposing) {
+			e.preventDefault()
+			void onSendNowFromInput()
+			return
+		}
 		if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
 			onSubmit()
 		} else if (e.key === 'Escape' && slashMatches.length > 0) {
@@ -4150,7 +4176,7 @@ export const SidebarChat = () => {
 		} else if (e.key === 'Escape' && isRunning) {
 			onAbort()
 		}
-	}, [onSubmit, onAbort, isRunning, slashMatches, slashPrefix, selectSlashCommand])
+	}, [onSubmit, onAbort, onSendNowFromInput, isRunning, slashMatches, slashPrefix, selectSlashCommand])
 
 	const slashAutocompleteHTML = slashPrefix !== null && slashMatches.length > 0 ? (
 		<div className='mb-1 rounded border border-void-border-2 bg-void-bg-1 shadow-md overflow-hidden'>
@@ -4233,28 +4259,98 @@ export const SidebarChat = () => {
 	const queuedMessagesTray = queuedMessages.length > 0 ? (
 		<div className='mx-4 mb-1.5 rounded border border-void-border-2 bg-void-bg-1 p-1.5 space-y-1'>
 			<div className='flex items-center justify-between text-[10px] text-void-fg-3 px-1'>
-				<span>Queued steering message{queuedMessages.length === 1 ? '' : 's'} ({queuedMessages.length}) — sends automatically when current turn finishes</span>
+				<span>Queued message{queuedMessages.length === 1 ? '' : 's'} ({queuedMessages.length}) — click <strong>Send Now</strong> to interrupt &amp; run immediately</span>
 				<button
 					type='button'
-					onClick={() => chatThreadsService.clearQueuedMessages(threadId)}
-					className='text-void-fg-4 hover:text-void-fg-1'
+					onClick={() => { setEditingQueueIdx(null); chatThreadsService.clearQueuedMessages(threadId) }}
+					className='text-void-fg-4 hover:text-void-fg-1 cursor-pointer'
 				>
 					Clear
 				</button>
 			</div>
-			{queuedMessages.map((msg, idx) => (
-				<div key={idx} className='flex items-center justify-between gap-2 px-1.5 py-0.5 rounded bg-void-bg-2 text-[11px] text-void-fg-1'>
-					<span className='truncate'>{idx + 1}. {msg}</span>
-					<button
-						type='button'
-						onClick={() => chatThreadsService.removeQueuedMessage(threadId, idx)}
-						className='text-void-fg-4 hover:text-red-400 flex-shrink-0'
-						title='Remove queued message'
-					>
-						<X size={11} />
-					</button>
-				</div>
-			))}
+			{queuedMessages.map((msg, idx) => {
+				const isEditingThis = editingQueueIdx === idx
+				return (
+					<div key={idx} className='flex items-center justify-between gap-1.5 px-1.5 py-1 rounded bg-void-bg-2 text-[11px] text-void-fg-1'>
+						{isEditingThis ? (
+							<div className='flex items-center gap-1 flex-1 min-w-0'>
+								<input
+									type='text'
+									autoFocus
+									value={editingQueueText}
+									onChange={e => setEditingQueueText(e.target.value)}
+									onKeyDown={e => {
+										if (e.key === 'Enter') {
+											e.preventDefault()
+											chatThreadsService.editQueuedMessage(threadId, idx, editingQueueText)
+											setEditingQueueIdx(null)
+										} else if (e.key === 'Escape') {
+											setEditingQueueIdx(null)
+										}
+									}}
+									className='flex-1 min-w-0 px-1.5 py-0.5 rounded bg-void-bg-1 border border-sky-500/60 text-[11px] text-void-fg-1 outline-none'
+								/>
+								<button
+									type='button'
+									onClick={() => {
+										chatThreadsService.editQueuedMessage(threadId, idx, editingQueueText)
+										setEditingQueueIdx(null)
+									}}
+									className='px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-[10px] cursor-pointer flex-shrink-0'
+									title='Save changes'
+								>
+									Save
+								</button>
+								<button
+									type='button'
+									onClick={() => setEditingQueueIdx(null)}
+									className='px-1 py-0.5 rounded text-void-fg-3 hover:text-void-fg-1 text-[10px] cursor-pointer flex-shrink-0'
+									title='Cancel edit'
+								>
+									Cancel
+								</button>
+							</div>
+						) : (
+							<>
+								<span
+									className='truncate flex-1 min-w-0 cursor-pointer hover:text-sky-300'
+									title={`${msg}\n(Click to edit)`}
+									onClick={() => { setEditingQueueIdx(idx); setEditingQueueText(msg) }}
+								>
+									{idx + 1}. {msg}
+								</span>
+								<div className='flex items-center gap-1 flex-shrink-0'>
+									<button
+										type='button'
+										onClick={() => { setEditingQueueIdx(null); void chatThreadsService.sendQueuedMessageNow(threadId, idx) }}
+										className='inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-sky-500/20 hover:bg-sky-500/35 border border-sky-500/40 text-sky-300 text-[10px] font-medium cursor-pointer transition-colors'
+										title='Stop current run and execute this message right now'
+									>
+										<Zap size={10} />
+										<span>Send Now</span>
+									</button>
+									<button
+										type='button'
+										onClick={() => { setEditingQueueIdx(idx); setEditingQueueText(msg) }}
+										className='p-0.5 rounded text-void-fg-4 hover:text-void-fg-1 hover:bg-void-bg-3 cursor-pointer'
+										title='Edit queued message'
+									>
+										<Pencil size={11} />
+									</button>
+									<button
+										type='button'
+										onClick={() => chatThreadsService.removeQueuedMessage(threadId, idx)}
+										className='p-0.5 rounded text-void-fg-4 hover:text-red-400 hover:bg-void-bg-3 cursor-pointer'
+										title='Remove queued message'
+									>
+										<X size={11} />
+									</button>
+								</div>
+							</>
+						)}
+					</div>
+				)
+			})}
 		</div>
 	) : null
 
@@ -4264,12 +4360,30 @@ export const SidebarChat = () => {
 			<EngineeringIntelligenceStatus variant='chat' />
 		</ErrorBoundary>
 		<LiveActivityStrip threadId={threadId} isRunning={isRunning} />
+		<ErrorBoundary>
+			<AntigravityAgentUXStrip threadId={threadId} isRunning={isRunning} />
+		</ErrorBoundary>
 		{queuedMessagesTray}
 		<div className='px-4'>
 			<CommandBarInChat messages={previousMessages} />
 		</div>
 		<div className='px-2 pb-2'>
 			{inputChatArea}
+			{/* While running: quick Send Now button to interrupt current turn & run new prompt immediately */}
+			{isRunning && !instructionsAreEmpty && (
+				<div className='flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
+					<span className='text-[10px] text-void-fg-3'>Press <kbd className='px-1 py-0.2 rounded bg-void-bg-2 border border-void-border-2'>Enter</kbd> to queue, or <kbd className='px-1 py-0.2 rounded bg-void-bg-2 border border-void-border-2'>Ctrl+Enter</kbd> to interrupt &amp; run now</span>
+					<button
+						type='button'
+						onClick={() => void onSendNowFromInput()}
+						className='inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-sky-500/50 bg-sky-500/20 text-sky-200 hover:bg-sky-500/30 font-medium cursor-pointer transition-colors'
+						title='Cancel the current running turn and send this prompt immediately'
+					>
+						<Zap size={12} />
+						<span>Send Now</span>
+					</button>
+				</div>
+			)}
 			{/* Remodify Prompt button */}
 			{!isRunning && (
 				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>

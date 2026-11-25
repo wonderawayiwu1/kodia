@@ -11,6 +11,7 @@ import { createDecorator } from '../../../../platform/instantiation/common/insta
 import { IFileService } from '../../../../platform/files/common/files.js';
 import { IWorkspaceContextService } from '../../../../platform/workspace/common/workspace.js';
 import {
+	BUILTIN_SLASH_COMMANDS,
 	commandNameFromRelativePath,
 	CustomSlashCommand,
 	expandCustomCommandPrompt,
@@ -59,6 +60,10 @@ export class CustomCommandsService extends Disposable implements ICustomCommands
 		}
 
 		const byName = new Map<string, CustomSlashCommand>();
+		// Seed built-in Antigravity + Cursor slash commands first; workspace files override same-named commands
+		for (const builtin of BUILTIN_SLASH_COMMANDS) {
+			byName.set(builtin.name, builtin);
+		}
 		const folders = this._workspaceContextService.getWorkspace().folders;
 
 		for (const folder of folders) {
@@ -98,7 +103,7 @@ export class CustomCommandsService extends Disposable implements ICustomCommands
 					const content = (await this._fileService.readFile(child.resource)).value.toString();
 					const name = commandNameFromRelativePath(rel);
 					const cmd = parseCustomCommandMarkdown(name, child.resource.fsPath, scope, content);
-					if (cmd && !out.has(cmd.name)) {
+					if (cmd && (!out.has(cmd.name) || out.get(cmd.name)?.scope === 'builtin')) {
 						out.set(cmd.name, cmd);
 					}
 				} catch {

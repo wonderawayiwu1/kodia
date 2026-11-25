@@ -12,6 +12,8 @@
  * that keep parallel agents from writing the same file, and the report.
  */
 
+import { dynamicSubagentRegistry } from './antigravityEngines.js';
+
 export type BuiltinSubagentType =
 	| 'general'
 	| 'explore'
@@ -517,12 +519,15 @@ export function resolveSubagentType(
 	const key = requested.trim().toLowerCase();
 	const custom = customAgents?.get(key);
 	if (custom) { return { type: custom.name, profile: custom }; }
+	const dynamicProfile = dynamicSubagentRegistry.toProfile(key);
+	if (dynamicProfile) { return { type: key, profile: dynamicProfile }; }
 	const builtin = SUBAGENT_TYPE_ALIASES[key];
 	if (builtin) { return { type: builtin, profile: SUBAGENT_TYPES[builtin] }; }
 	const validBuiltin = (Object.keys(SUBAGENT_TYPES) as BuiltinSubagentType[]).map(k => `"${k}" (${SUBAGENT_TYPES[k].description})`).join(', ');
-	const validCustom = customAgents && customAgents.size > 0
-		? `; custom agents: ${[...customAgents.keys()].map(k => `"${k}"`).join(', ')}`
-		: '';
+	const dynNames = dynamicSubagentRegistry.list().map(d => `"${d.name}"`);
+	const customNames = customAgents && customAgents.size > 0 ? [...customAgents.keys()].map(k => `"${k}"`) : [];
+	const allExtra = [...customNames, ...dynNames];
+	const validCustom = allExtra.length > 0 ? `; custom/defined agents: ${allExtra.join(', ')}` : '';
 	return { error: `Unknown subagent type "${requested}". Use one of: ${validBuiltin}${validCustom}.` };
 }
 
@@ -548,6 +553,7 @@ export function subagentToolNames(
 	const allowSet = resolvedProfile.allowedTools?.length ? new Set(resolvedProfile.allowedTools) : undefined;
 	return allTools.filter(name =>
 		name !== SUBAGENT_TOOL_NAME
+		&& name !== 'run_parallel_workflow'
 		&& (resolvedProfile.canChangeFiles || !needsApproval(name))
 		&& (!allowSet || allowSet.has(name))
 	);

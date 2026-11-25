@@ -3,7 +3,7 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------*/
 
-import { BrowserInspectResult, BrowserTabResult } from './browserServiceTypes.js';
+import { BrowserAccessibilitySnapshot, BrowserInspectResult, BrowserTabResult, NetworkLogEntry } from './browserServiceTypes.js';
 
 const MAX_TEXT_CHARS = 3000;
 const MAX_LISTED_ELEMENTS = 60;
@@ -62,6 +62,49 @@ export function formatBrowserInspection(result: BrowserInspectResult): string {
 	if (result.forms.length > 0) {
 		lines.push('\nForms:');
 		for (const f of result.forms) { lines.push(`  form ${f.selector} action="${f.action ?? ''}" method="${f.method ?? ''}"`); }
+	}
+	return lines.join('\n');
+}
+
+export function formatAccessibilitySnapshot(snap: BrowserAccessibilitySnapshot): string {
+	const lines: string[] = [
+		`Accessibility Snapshot: ${snap.url} — ${snap.title || '(no title)'}`,
+		`Summary: ${snap.summary}`,
+	];
+	if (snap.focusedElement) {
+		lines.push(`Focused: [${snap.focusedElement.role}] "${snap.focusedElement.name}" (${snap.focusedElement.selector ?? ''})`);
+	}
+	if (snap.landmarks.length > 0) {
+		lines.push('\nLandmarks:');
+		for (const l of snap.landmarks.slice(0, 20)) {
+			lines.push(`  [${l.role}] ${l.selector} — "${l.label}"`);
+		}
+	}
+	if (snap.nodes.length > 0) {
+		lines.push('\nSemantic Nodes:');
+		for (const n of snap.nodes.slice(0, 120)) {
+			const attrs = [
+				n.level ? `level=${n.level}` : '',
+				n.checked !== undefined ? `checked=${n.checked}` : '',
+				n.expanded !== undefined ? `expanded=${n.expanded}` : '',
+				n.disabled ? 'disabled' : '',
+				n.focused ? 'FOCUSED' : '',
+				n.value !== undefined ? `value="${n.value}"` : '',
+			].filter(Boolean);
+			lines.push(`  [${n.role}] ${n.selector ?? ''} "${n.name}"${attrs.length ? ` (${attrs.join(', ')})` : ''}`);
+		}
+	}
+	return lines.join('\n');
+}
+
+export function formatNetworkLog(entries: NetworkLogEntry[]): string {
+	if (entries.length === 0) return 'No network requests recorded for this tab.';
+	const lines = [`Network log (${entries.length} request${entries.length === 1 ? '' : 's'}):`];
+	for (const e of entries) {
+		const statusStr = e.status !== undefined ? `${e.status}` : (e.errorText ?? 'FAILED');
+		const dur = e.durationMs !== undefined ? ` ${e.durationMs}ms` : '';
+		const ct = e.contentType ? ` [${e.contentType}]` : '';
+		lines.push(`  ${e.method} ${statusStr}${dur} (${e.resourceType})${ct} ${e.url}`);
 	}
 	return lines.join('\n');
 }

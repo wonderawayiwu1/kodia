@@ -17,20 +17,26 @@ export const TOOLS_SHARE_OF_CONTEXT = 0.5;
 // What a coding agent needs most, most important first. Tools not listed come after, in their usual order.
 const TOOL_PRIORITY: readonly string[] = [
 	// read, find, change files
-	'read_file', 'edit_file', 'write_file', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
-	'code_semantic_search', 'code_keyword_search', 'rewrite_file', 'delete_file_or_folder', 'get_dir_tree', 'read_lint_errors',
+	'read_file', 'edit_file', 'multi_edit_file', 'write_file', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
+	'view_file_outline', 'view_code_item', 'code_semantic_search', 'code_keyword_search', 'rewrite_file', 'delete_file_or_folder', 'get_dir_tree', 'read_lint_errors',
 	// run things
 	'run_command', 'open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal',
-	// understand code
-	'go_to_definition', 'find_references', 'search_symbols',
-	// plan, remember, verify
-	'todo', 'write_project_memory', 'test_discover', 'test_run', 'test_rerun_failed',
+	// understand code & automated review
+	'go_to_definition', 'find_references', 'search_symbols', 'review_code_changes',
+	// plan, live progress, interactive clarification, artifacts, notepads, rules, widgets & verification
+	'update_focus', 'update_steps', 'ask_user_question', 'create_artifact', 'update_artifact', 'render_interactive_widget', 'manage_notepads', 'manage_rules', 'todo', 'write_project_memory', 'test_discover', 'test_run', 'test_rerun_failed',
 	// git basics
 	'git_status', 'git_diff', 'git_log', 'git_branch_create', 'git_branch_switch', 'git_stage', 'git_commit', 'git_continue', 'git_abort',
-	// delegate, look things up
-	'subagent', 'fetch_url', 'web_search',
-	// browser basics
-	'browser_launch', 'browser_new_tab', 'browser_navigate', 'browser_inspect_page', 'browser_click_element', 'browser_fill_element', 'browser_reload', 'browser_console', 'browser_close',
+	// delegate, workflows, scheduler, look things up & live engineering research (LEI)
+	'subagent', 'define_subagent', 'manage_subagents', 'run_parallel_workflow', 'schedule_task', 'manage_scheduled_tasks', 'fetch_url', 'web_search',
+	'lei_discover_models', 'lei_research_technology', 'lei_verify_model', 'lei_check_dependency', 'lei_diagnose_error',
+	// UI/UX Design Intelligence Engine (never drop design system & visual QA tools)
+	'generate_design_brief', 'generate_design_tokens', 'generate_page_architecture', 'inspect_existing_design_system',
+	'discover_visual_assets', 'download_visual_assets', 'inspect_visual_quality', 'critique_interface_design', 'audit_accessibility',
+	// Antigravity+ browser automation engine
+	'browser_launch', 'browser_new_tab', 'browser_navigate', 'browser_inspect_page', 'browser_accessibility_snapshot', 'browser_screenshot',
+	'browser_click_element', 'browser_click_at', 'browser_hover', 'browser_fill_element', 'browser_type_text', 'browser_press_key', 'browser_scroll',
+	'browser_evaluate', 'browser_wait_for_text', 'browser_wait_for_network_idle', 'browser_network_log', 'browser_console', 'browser_reload', 'browser_close',
 ];
 
 export type ToolBudgetResult = { tools: InternalToolInfo[]; omitted: string[]; usedTokens: number; fullTokens: number };

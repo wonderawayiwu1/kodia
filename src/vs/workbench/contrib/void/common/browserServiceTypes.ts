@@ -93,6 +93,66 @@ export type NetworkFailure = {
 	errorText: string;
 };
 
+export type NetworkLogEntry = {
+	id: string;
+	timestampMs: number;
+	method: string;
+	url: string;
+	resourceType: string;
+	status?: number;
+	ok?: boolean;
+	durationMs?: number;
+	contentType?: string;
+	errorText?: string;
+};
+
+export type BrowserDialogRecord = {
+	id: string;
+	timestampMs: number;
+	type: 'alert' | 'beforeunload' | 'confirm' | 'prompt';
+	message: string;
+	defaultValue?: string;
+	actionTaken: 'accepted' | 'dismissed';
+	promptText?: string;
+};
+
+export type AnnotatedElementRef = {
+	index: number;
+	selector: string;
+	type: BrowserElement['type'];
+	label: string;
+	bbox: { x: number; y: number; width: number; height: number };
+};
+
+export type BrowserAccessibilityNode = {
+	role: string;
+	name: string;
+	value?: string;
+	level?: number;
+	checked?: boolean | 'mixed';
+	expanded?: boolean;
+	disabled?: boolean;
+	focused?: boolean;
+	selector?: string;
+	children?: BrowserAccessibilityNode[];
+};
+
+export type BrowserAccessibilitySnapshot = {
+	url: string;
+	title: string;
+	focusedElement?: { role: string; name: string; selector?: string };
+	landmarks: Array<{ role: string; label: string; selector: string }>;
+	nodes: BrowserAccessibilityNode[];
+	summary: string;
+};
+
+export type BrowserStorageResult = {
+	url: string;
+	localStorage: Record<string, string>;
+	sessionStorage: Record<string, string>;
+	cookies: Array<{ name: string; domain: string; path: string; httpOnly: boolean; secure: boolean; sameSite?: string }>;
+};
+
 export type DownloadInfo = {
 	downloadId: string;
 	url: string;
@@ -136,6 +196,8 @@ export type BrowserScreenshotResult = {
 	type: ScreenshotType;
 	// the PNG on disk
 	path: string;
+	// present when captured with annotated: true (numbered [1]..[N] visual overlay badges)
+	annotatedElements?: AnnotatedElementRef[];
 };
 
 export type BrowserInspectResult = {
@@ -180,25 +242,41 @@ export interface IBrowserService {
 
 	// --- element interaction ---
 	clickElement(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult>;
+	clickAt(sessionId: string, tabId: string, x: number, y: number, opts?: { button?: 'left' | 'right' | 'middle'; clickCount?: number }): Promise<BrowserTabResult>;
+	hoverElement(sessionId: string, tabId: string, selector: string): Promise<void>;
 	fillElement(sessionId: string, tabId: string, selector: string, text: string): Promise<void>;
+	typeText(sessionId: string, tabId: string, opts: { selector?: string; text: string; delayMs?: number; clearFirst?: boolean; pressEnter?: boolean }): Promise<BrowserTabResult>;
+	pressKey(sessionId: string, tabId: string, key: string, opts?: { selector?: string }): Promise<BrowserTabResult>;
+	scrollPage(sessionId: string, tabId: string, opts: { direction?: 'up' | 'down' | 'left' | 'right' | 'top' | 'bottom'; amount?: number; selector?: string }): Promise<{ scrollX: number; scrollY: number; maxScrollY: number }>;
+	dragAndDrop(sessionId: string, tabId: string, sourceSelector: string, targetSelector: string): Promise<void>;
 	selectOption(sessionId: string, tabId: string, selector: string, value: string): Promise<void>;
 	checkElement(sessionId: string, tabId: string, selector: string, checked: boolean): Promise<void>;
 	submitForm(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult>;
+	uploadFile(sessionId: string, tabId: string, selector: string, filePaths: string[]): Promise<{ uploaded: string[] }>;
+
+	// --- JavaScript evaluation & ARIA inspection ---
+	evaluateScript(sessionId: string, tabId: string, expression: string): Promise<{ value: unknown; type: string }>;
+	getAccessibilitySnapshot(sessionId: string, tabId: string, opts?: { maxNodes?: number }): Promise<BrowserAccessibilitySnapshot>;
 
 	// --- waiting ---
 	waitForElement(sessionId: string, tabId: string, selector: string, opts: { timeoutMs?: number }): Promise<{ found: boolean }>;
+	waitForText(sessionId: string, tabId: string, text: string, opts?: { state?: 'visible' | 'hidden'; timeoutMs?: number }): Promise<{ matched: boolean }>;
+	waitForNetworkIdle(sessionId: string, tabId: string, opts?: { timeoutMs?: number }): Promise<{ settled: boolean }>;
 	setViewport(sessionId: string, tabId: string, viewport: { width: number; height: number }): Promise<void>;
 
-	// --- screenshots ---
-	takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string }): Promise<BrowserScreenshotResult>;
+	// --- screenshots (supports numbered annotated visual overlays) ---
+	takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string; annotated?: boolean }): Promise<BrowserScreenshotResult>;
 
 	// --- design intelligence visual QA, accessibility, responsive & performance audits ---
 	auditDesignVisuals(sessionId: string, tabId: string): Promise<BrowserVisualAuditResult>;
 	captureMultiViewportAudit(sessionId: string, tabId: string, opts?: { viewports?: ReadonlyArray<{ label: string; width: number; height: number }>; fullPage?: boolean }): Promise<MultiViewportAuditResult>;
 
-	// --- console / network ---
+	// --- console / network / dialogs / storage ---
 	getConsoleMessages(sessionId: string, tabId: string, opts: { level?: ConsoleLevel; limit?: number }): Promise<ConsoleMessage[]>;
 	getNetworkFailures(sessionId: string, tabId: string): Promise<NetworkFailure[]>;
+	getNetworkLog(sessionId: string, tabId: string, opts?: { urlFilter?: string; resourceType?: string; statusMin?: number; limit?: number }): Promise<NetworkLogEntry[]>;
+	handleDialog(sessionId: string, tabId: string, opts: { action: 'accept' | 'dismiss'; promptText?: string }): Promise<{ configured: { action: 'accept' | 'dismiss'; promptText?: string }; recentDialogs: BrowserDialogRecord[] }>;
+	inspectStorage(sessionId: string, tabId: string, opts?: { action?: 'read' | 'set_local' | 'remove_local' | 'clear_local' | 'set_session' | 'remove_session' | 'clear_session'; key?: string; value?: string }): Promise<BrowserStorageResult>;
 
 	// --- downloads ---
 	startDownload(sessionId: string, tabId: string, url: string): Promise<DownloadInfo>;

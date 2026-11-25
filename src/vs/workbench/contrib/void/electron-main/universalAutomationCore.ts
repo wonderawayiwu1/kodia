@@ -37,6 +37,7 @@ import {
 	detectWorkflowCodeSyncDrift,
 	generateWorkflowFromNaturalLanguage,
 	getBuiltinWorkflowTemplates,
+	getUaepAiProviderPreset,
 	modifyWorkflowFromInstruction,
 	UAEP_CONNECTOR_CATALOG,
 	UAEP_NODE_LIBRARY,
@@ -574,24 +575,29 @@ export class UniversalAutomationCoreService extends Disposable implements IKodia
 		}
 
 		if (node.category === 'ai') {
-			const endpoint = resolveTemplate(String(node.config.endpoint ?? ''), input).trim();
-			const provider = String(node.config.provider ?? 'openai');
-			const model = String(node.config.model ?? 'verify-via-lei');
-			const credKey = node.credentialRef || `${provider.toUpperCase()}_API_KEY`;
-			const apiKey = this._resolveTenantSecret(workspaceRoot, tenantId, credKey);
-			if (!apiKey && provider !== 'ollama') {
-				throw new Error(`Missing BYOK credential "${credKey}" in tenant "${tenantId}" vault — configure credential before live AI execution.`);
+			const provider = String(node.config.provider ?? 'nvidia').toLowerCase();
+			const preset = getUaepAiProviderPreset(provider);
+			const endpoint = resolveTemplate(String(node.config.endpoint ?? preset.endpoint ?? ''), input).trim();
+			const model = String(node.config.model ?? preset.defaultModel ?? 'nvidia/nemotron-3.5-super-vl-120b-a12b');
+			const credKey = node.credentialRef || preset.envKey || `${provider.toUpperCase()}_API_KEY`;
+			const apiKey = preset.requiresApiKey || node.credentialRef
+				? (this._resolveTenantSecret(workspaceRoot, tenantId, credKey) || process.env[credKey])
+				: undefined;
+			if (!apiKey && provider !== 'ollama' && preset.requiresApiKey) {
+				throw new Error(`Missing BYOK credential "${credKey}" in tenant "${tenantId}" vault — add your ${preset.label} key in Tenant Vault before live AI execution.`);
 			}
 			if (!endpoint) {
-				throw new Error(`AI node "${node.label}" requires a live provider endpoint URL (e.g. OpenAI-compatible /v1/chat/completions or local Ollama) to execute a real model call.`);
+				throw new Error(`AI node "${node.label}" requires a live provider endpoint URL (NVIDIA NIM, Groq, OpenRouter, Gemini, local Ollama, or custom OpenAI-compatible URL).`);
 			}
 			const promptText = resolveTemplate(String(node.config.prompt ?? 'Process input'), input);
+			const headers: Record<string, string> = {
+				'Content-Type': 'application/json',
+				...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+				...(provider === 'openrouter' ? { 'HTTP-Referer': 'https://kodia.dev', 'X-Title': 'Kodia Automation Studio' } : {}),
+			};
 			const resp = await fetch(endpoint, {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-				},
+				headers,
 				body: JSON.stringify({ model, messages: [{ role: 'user', content: promptText }], max_tokens: Number(node.config.maxTokens ?? 512) }),
 			});
 			const bodyText = await resp.text();

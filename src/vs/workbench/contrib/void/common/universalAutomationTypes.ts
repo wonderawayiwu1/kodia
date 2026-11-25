@@ -304,9 +304,25 @@ export interface UaepOperationsSnapshot {
 
 // ── Section 38: Automation Studio Global Settings ──────────────────────────────────────
 
+export type UaepAiProviderId = 'nvidia' | 'groq' | 'openrouter' | 'gemini' | 'ollama' | 'openai' | 'anthropic' | 'custom';
+
+export interface UaepAiProviderPreset {
+	readonly id: UaepAiProviderId;
+	readonly label: string;
+	readonly freeTier: boolean;
+	readonly requiresApiKey: boolean;
+	readonly endpoint: string;
+	readonly envKey: string;
+	readonly defaultModel: string;
+	readonly docsUrl: string;
+	readonly note: string;
+}
+
 export interface UaepEngineSettings {
 	readonly defaultExecutionModel: 'interpreted' | 'generated_code';
 	readonly defaultCodegenTarget: UaepCodegenTarget;
+	readonly defaultAiProvider: UaepAiProviderId;
+	readonly defaultAiModel: string;
 	readonly defaultRetryAttempts: number;
 	readonly defaultNodeTimeoutMs: number;
 	readonly enforceSandboxedCodeNodes: boolean;
@@ -319,6 +335,8 @@ export interface UaepEngineSettings {
 export const DEFAULT_UAEP_ENGINE_SETTINGS: UaepEngineSettings = {
 	defaultExecutionModel: 'interpreted',
 	defaultCodegenTarget: 'typescript',
+	defaultAiProvider: 'nvidia',
+	defaultAiModel: 'nvidia/nemotron-3.5-super-vl-120b-a12b',
 	defaultRetryAttempts: 3,
 	defaultNodeTimeoutMs: 15_000,
 	enforceSandboxedCodeNodes: true,

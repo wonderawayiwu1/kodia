@@ -12,7 +12,16 @@ import { IFileService } from '../../../../platform/files/common/files.js'
 import { registerSingleton, InstantiationType } from '../../../../platform/instantiation/common/extensions.js'
 import { createDecorator, IInstantiationService } from '../../../../platform/instantiation/common/instantiation.js'
 import { IBrowserService } from '../common/browserServiceTypes.js'
-import { formatBrowserInspection, formatBrowserPage } from '../common/browserFormatting.js'
+import { formatAccessibilitySnapshot, formatBrowserInspection, formatBrowserPage, formatNetworkLog } from '../common/browserFormatting.js'
+import {
+	analyzeGitDiffForBugs,
+	extractCodeItem,
+	extractCodeOutline,
+	formatScopedRuleMarkdown,
+	parseScopedRuleFile,
+	sanitizeWorkspaceDocName,
+	ScopedRuleDocument,
+} from '../common/cursorAntigravityEngines.js'
 import { formatSubagentReport } from '../common/subagents.js'
 import { formatArchitectureMapForLLM, formatProjectHealthForLLM } from '../common/projectHealth.js'
 import { runArchitectureMap, runProjectHealthScan } from './projectHealthScanner.js'
@@ -1050,7 +1059,118 @@ export class ToolsService implements IToolsService {
 				const tabId = validateStr('tabId', params.tab_id)
 				const type = params.type === 'viewport' || params.type === 'fullpage' || params.type === 'element' ? params.type : 'viewport'
 				const selector = validateOptionalStr('selector', params.selector) ?? undefined
-				return { sessionId, tabId, type, selector }
+				const annotated = validateBoolean(params.annotated, { default: false }) ?? false
+				return { sessionId, tabId, type, selector, annotated }
+			},
+			browser_click_at: (params: RawToolParamsObj) => {
+				const sessionId = validateStr('sessionId', params.session_id)
+				const tabId = validateStr('tabId', params.tab_id)
+				const x = validateNumber(params.x, { default: null })
+				const y = validateNumber(params.y, { default: null })
+				if (x === null || y === null) throw new Error('Invalid LLM output: x and y are required numbers.')
+				const button = params.button === 'right' || params.button === 'middle' ? params.button : 'left'
+				const clickCount = validateNumber(params.click_count, { default: 1 }) ?? 1
+				return { sessionId, tabId, x, y, button, clickCount }
+			},
+			browser_hover: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				selector: validateStr('selector', params.selector),
+			}),
+			browser_type_text: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				selector: validateOptionalStr('selector', params.selector) ?? undefined,
+				text: validateStr('text', params.text),
+				delayMs: params.delay_ms === undefined || params.delay_ms === null ? undefined : Number(params.delay_ms),
+				clearFirst: validateBoolean(params.clear_first, { default: false }) ?? false,
+				pressEnter: validateBoolean(params.press_enter, { default: false }) ?? false,
+			}),
+			browser_press_key: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				key: validateStr('key', params.key),
+				selector: validateOptionalStr('selector', params.selector) ?? undefined,
+			}),
+			browser_scroll: (params: RawToolParamsObj) => {
+				const dir = validateOptionalStr('direction', params.direction) ?? 'down'
+				const direction = (['up', 'down', 'left', 'right', 'top', 'bottom'].includes(dir) ? dir : 'down') as 'up' | 'down' | 'left' | 'right' | 'top' | 'bottom'
+				return {
+					sessionId: validateStr('sessionId', params.session_id),
+					tabId: validateStr('tabId', params.tab_id),
+					direction,
+					amount: params.amount === undefined || params.amount === null ? undefined : Number(params.amount),
+					selector: validateOptionalStr('selector', params.selector) ?? undefined,
+				}
+			},
+			browser_drag_and_drop: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				sourceSelector: validateStr('source_selector', params.source_selector),
+				targetSelector: validateStr('target_selector', params.target_selector),
+			}),
+			browser_upload_file: (params: RawToolParamsObj) => {
+				const raw = params.file_paths
+				let filePaths: string[] = []
+				if (Array.isArray(raw)) filePaths = raw.map(String).filter(Boolean)
+				else if (typeof raw === 'string') {
+					try { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) filePaths = parsed.map(String) } catch { }
+					if (filePaths.length === 0) filePaths = raw.split(',').map(s => s.trim()).filter(Boolean)
+				}
+				if (filePaths.length === 0) throw new Error('Invalid LLM output: file_paths must contain at least one file path.')
+				return {
+					sessionId: validateStr('sessionId', params.session_id),
+					tabId: validateStr('tabId', params.tab_id),
+					selector: validateStr('selector', params.selector),
+					filePaths,
+				}
+			},
+			browser_evaluate: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				expression: validateStr('expression', params.expression),
+			}),
+			browser_accessibility_snapshot: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				maxNodes: params.max_nodes === undefined || params.max_nodes === null ? undefined : Number(params.max_nodes),
+			}),
+			browser_wait_for_text: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				text: validateStr('text', params.text),
+				state: (params.state === 'hidden' ? 'hidden' : 'visible') as 'visible' | 'hidden',
+				timeoutMs: params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms),
+			}),
+			browser_wait_for_network_idle: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				timeoutMs: params.timeout_ms === undefined || params.timeout_ms === null ? undefined : Number(params.timeout_ms),
+			}),
+			browser_network_log: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				urlFilter: validateOptionalStr('url_filter', params.url_filter) ?? undefined,
+				resourceType: validateOptionalStr('resource_type', params.resource_type) ?? undefined,
+				statusMin: params.status_min === undefined || params.status_min === null ? undefined : Number(params.status_min),
+				limit: params.limit === undefined || params.limit === null ? undefined : Number(params.limit),
+			}),
+			browser_handle_dialog: (params: RawToolParamsObj) => ({
+				sessionId: validateStr('sessionId', params.session_id),
+				tabId: validateStr('tabId', params.tab_id),
+				action: (params.action === 'dismiss' ? 'dismiss' : 'accept') as 'accept' | 'dismiss',
+				promptText: validateOptionalStr('prompt_text', params.prompt_text) ?? undefined,
+			}),
+			browser_storage: (params: RawToolParamsObj) => {
+				const act = validateOptionalStr('action', params.action) ?? 'read'
+				const validActs = ['read', 'set_local', 'remove_local', 'clear_local', 'set_session', 'remove_session', 'clear_session']
+				return {
+					sessionId: validateStr('sessionId', params.session_id),
+					tabId: validateStr('tabId', params.tab_id),
+					action: (validActs.includes(act) ? act : 'read') as 'read' | 'set_local' | 'remove_local' | 'clear_local' | 'set_session' | 'remove_session' | 'clear_session',
+					key: validateOptionalStr('key', params.key) ?? undefined,
+					value: validateOptionalStr('value', params.value) ?? undefined,
+				}
 			},
 			browser_console: (params: RawToolParamsObj) => {
 				const sessionId = validateStr('sessionId', params.session_id)
@@ -3078,6 +3198,166 @@ export class ToolsService implements IToolsService {
 				branding_color: validateOptionalStr('branding_color', params.branding_color) ?? undefined,
 			}),
 
+			// Antigravity Live Focus, Steps Checklist, Questions, Artifacts, Scheduler & Dynamic Subagents
+			update_focus: (params: RawToolParamsObj) => ({
+				focus: validateStr('focus', params.focus),
+			}),
+			update_steps: (params: RawToolParamsObj) => {
+				let raw = params.steps
+				if (typeof raw === 'string') { try { raw = JSON.parse(raw) } catch { } }
+				if (!Array.isArray(raw)) throw new Error('Invalid LLM output: steps must be an array of { title, status }.')
+				const validStatus = new Set(['pending', 'in_progress', 'done', 'skipped', 'failed'])
+				const steps = raw.map((item: any) => ({
+					title: String(item?.title ?? '').trim() || 'Step',
+					status: (validStatus.has(item?.status) ? item.status : 'pending') as 'pending' | 'in_progress' | 'done' | 'skipped' | 'failed',
+				}))
+				return { steps }
+			},
+			ask_user_question: (params: RawToolParamsObj) => {
+				let raw = params.questions
+				if (typeof raw === 'string') { try { raw = JSON.parse(raw) } catch { } }
+				if (!Array.isArray(raw) || raw.length === 0) throw new Error('Invalid LLM output: questions must be a non-empty array.')
+				const questions = raw.map((q: any) => ({
+					question: String(q?.question ?? '').trim(),
+					options: Array.isArray(q?.options) ? q.options.map(String).filter(Boolean) : [],
+					is_multi_select: Boolean(q?.is_multi_select),
+				})).filter(q => q.question && q.options.length > 0)
+				if (questions.length === 0) throw new Error('Invalid LLM output: each question must have non-empty question and options.')
+				return { questions }
+			},
+			create_artifact: (params: RawToolParamsObj) => ({
+				name: validateStr('name', params.name),
+				title: validateOptionalStr('title', params.title) ?? undefined,
+				kind: (['plan', 'walkthrough', 'report', 'checklist', 'other'].includes(String(params.kind)) ? params.kind : 'report') as 'plan' | 'walkthrough' | 'report' | 'checklist' | 'other',
+				summary: validateStr('summary', params.summary),
+				content: validateStr('content', params.content),
+				request_feedback: validateBoolean(params.request_feedback, { default: false }) ?? false,
+			}),
+			update_artifact: (params: RawToolParamsObj) => ({
+				name: validateStr('name', params.name),
+				title: validateOptionalStr('title', params.title) ?? undefined,
+				kind: (['plan', 'walkthrough', 'report', 'checklist', 'other'].includes(String(params.kind)) ? params.kind : 'report') as 'plan' | 'walkthrough' | 'report' | 'checklist' | 'other',
+				summary: validateStr('summary', params.summary),
+				content: validateStr('content', params.content),
+				request_feedback: validateBoolean(params.request_feedback, { default: false }) ?? false,
+			}),
+			read_artifact: (params: RawToolParamsObj) => ({
+				name: validateStr('name', params.name),
+			}),
+			list_artifacts: () => ({}),
+			schedule_task: (params: RawToolParamsObj) => ({
+				prompt: validateStr('prompt', params.prompt),
+				duration_seconds: params.duration_seconds === undefined || params.duration_seconds === null ? undefined : Number(params.duration_seconds),
+				cron_expression: validateOptionalStr('cron_expression', params.cron_expression) ?? undefined,
+				max_iterations: params.max_iterations === undefined || params.max_iterations === null ? undefined : Number(params.max_iterations),
+			}),
+			manage_scheduled_tasks: (params: RawToolParamsObj) => {
+				const act = validateOptionalStr('action', params.action) ?? 'list'
+				const action = (['list', 'status', 'pause', 'resume', 'cancel'].includes(act) ? act : 'list') as 'list' | 'status' | 'pause' | 'resume' | 'cancel'
+				return { action, task_id: validateOptionalStr('task_id', params.task_id) ?? undefined }
+			},
+			define_subagent: (params: RawToolParamsObj) => {
+				let allowed_tools: string[] | undefined
+				if (Array.isArray(params.allowed_tools)) allowed_tools = params.allowed_tools.map(String).filter(Boolean)
+				else if (typeof params.allowed_tools === 'string') {
+					try { const p = JSON.parse(params.allowed_tools); if (Array.isArray(p)) allowed_tools = p.map(String) } catch { allowed_tools = params.allowed_tools.split(',').map(s => s.trim()).filter(Boolean) }
+				}
+				return {
+					name: validateStr('name', params.name),
+					description: validateStr('description', params.description),
+					system_prompt: validateStr('system_prompt', params.system_prompt),
+					can_change_files: validateBoolean(params.can_change_files, { default: false }) ?? false,
+					allowed_tools,
+					default_model: validateOptionalStr('default_model', params.default_model) ?? undefined,
+					persist: validateBoolean(params.persist, { default: false }) ?? false,
+				}
+			},
+			manage_subagents: (params: RawToolParamsObj) => {
+				const act = validateOptionalStr('action', params.action) ?? 'list'
+				const action = (['list', 'cancel', 'cancel_all'].includes(act) ? act : 'list') as 'list' | 'cancel' | 'cancel_all'
+				let session_ids: string[] | undefined
+				if (Array.isArray(params.session_ids)) session_ids = params.session_ids.map(String).filter(Boolean)
+				else if (typeof params.session_ids === 'string') {
+					try { const p = JSON.parse(params.session_ids); if (Array.isArray(p)) session_ids = p.map(String) } catch { session_ids = params.session_ids.split(',').map(s => s.trim()).filter(Boolean) }
+				}
+				return { action, session_ids }
+			},
+			run_parallel_workflow: (params: RawToolParamsObj) => {
+				let rawStages = params.stages
+				if (typeof rawStages === 'string') { try { rawStages = JSON.parse(rawStages) } catch { } }
+				if (!Array.isArray(rawStages) || rawStages.length === 0) throw new Error('Invalid LLM output: stages must be a non-empty array.')
+				const stages = rawStages.map((s: any, idx: number) => ({
+					name: String(s?.name ?? `Stage ${idx + 1}`),
+					tasks: Array.isArray(s?.tasks) ? s.tasks.map((t: any) => ({
+						agent: String(t?.agent ?? 'general'),
+						description: String(t?.description ?? 'Subtask'),
+						prompt: String(t?.prompt ?? ''),
+						model: t?.model ? String(t.model) : undefined,
+					})).filter((t: any) => t.prompt) : [],
+				})).filter(s => s.tasks.length > 0)
+				if (stages.length === 0) throw new Error('Invalid LLM output: stages must include at least one task with a prompt.')
+				return { description: validateStr('description', params.description), stages }
+			},
+
+			// Cursor + Antigravity Superpower Tools
+			multi_edit_file: (params: RawToolParamsObj) => {
+				let rawEdits = params.edits
+				if (typeof rawEdits === 'string') { try { rawEdits = JSON.parse(rawEdits) } catch { } }
+				if (!Array.isArray(rawEdits) || rawEdits.length === 0) {
+					throw new Error('Invalid LLM output: edits must be a non-empty array of { uri, target, replacement }.')
+				}
+				const edits = rawEdits.map((e: any) => ({
+					uri: validateURI(e?.uri, workspaceContextService),
+					target: validateStr('target', e?.target),
+					replacement: typeof e?.replacement === 'string' ? e.replacement : String(e?.replacement ?? ''),
+				}))
+				return { edits }
+			},
+			view_file_outline: (params: RawToolParamsObj) => ({
+				uri: validateURI(params.uri, workspaceContextService),
+			}),
+			view_code_item: (params: RawToolParamsObj) => ({
+				uri: validateURI(params.uri, workspaceContextService),
+				symbol_name: validateStr('symbol_name', params.symbol_name),
+			}),
+			review_code_changes: (params: RawToolParamsObj) => {
+				const rawScope = validateOptionalStr('scope', params.scope) ?? 'unstaged'
+				const scope = (['unstaged', 'staged', 'all', 'ref'].includes(rawScope) ? rawScope : 'unstaged') as 'unstaged' | 'staged' | 'all' | 'ref'
+				return { scope, ref: validateOptionalStr('ref', params.ref) ?? undefined }
+			},
+			manage_notepads: (params: RawToolParamsObj) => {
+				const rawAct = validateOptionalStr('action', params.action) ?? 'list'
+				const action = (['list', 'read', 'save', 'delete'].includes(rawAct) ? rawAct : 'list') as 'list' | 'read' | 'save' | 'delete'
+				return {
+					action,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					content: params.content === undefined || params.content === null ? undefined : String(params.content),
+				}
+			},
+			manage_rules: (params: RawToolParamsObj) => {
+				const rawAct = validateOptionalStr('action', params.action) ?? 'list'
+				const action = (['list', 'read', 'save', 'delete'].includes(rawAct) ? rawAct : 'list') as 'list' | 'read' | 'save' | 'delete'
+				let globs: string[] | undefined
+				if (Array.isArray(params.globs)) globs = params.globs.map(String).filter(Boolean)
+				else if (typeof params.globs === 'string') {
+					try { const p = JSON.parse(params.globs); if (Array.isArray(p)) globs = p.map(String) } catch { globs = params.globs.split(',').map(s => s.trim()).filter(Boolean) }
+				}
+				return {
+					action,
+					name: validateOptionalStr('name', params.name) ?? undefined,
+					description: validateOptionalStr('description', params.description) ?? undefined,
+					globs,
+					always_apply: validateBoolean(params.always_apply, { default: true }) ?? true,
+					body: params.body === undefined || params.body === null ? undefined : String(params.body),
+				}
+			},
+			render_interactive_widget: (params: RawToolParamsObj) => ({
+				title: validateStr('title', params.title),
+				kind: (['diagram', 'chart', 'ui_preview', 'interactive', 'table', 'other'].includes(String(params.kind)) ? params.kind : 'interactive') as 'diagram' | 'chart' | 'ui_preview' | 'interactive' | 'table' | 'other',
+				html: validateStr('html', params.html),
+				height_px: params.height_px === undefined || params.height_px === null ? 340 : Math.max(140, Math.min(680, Number(params.height_px) || 340)),
+			}),
+
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
 				const { uri: uriUnknown, start_cell: startCellUnknown, end_cell: endCellUnknown, cell_index: cellIndexUnknown, summary_only: summaryOnlyUnknown } = params
@@ -3472,9 +3752,54 @@ export class ToolsService implements IToolsService {
 				await browserService.setViewport(sessionId, tabId, { width, height })
 				return { result: { width, height } }
 			},
-			browser_screenshot: async ({ sessionId, tabId, type, selector }) => {
-				const result = await browserService.takeScreenshot(sessionId, tabId, { type, selector })
-				return { result: { dataUrl: result.dataUrl, width: result.width, height: result.height, type: result.type, path: result.path } }
+			browser_screenshot: async ({ sessionId, tabId, type, selector, annotated }) => {
+				const result = await browserService.takeScreenshot(sessionId, tabId, { type, selector, annotated })
+				return { result: { dataUrl: result.dataUrl, width: result.width, height: result.height, type: result.type, path: result.path, annotatedElements: result.annotatedElements } }
+			},
+			browser_click_at: async ({ sessionId, tabId, x, y, button, clickCount }) => {
+				return { result: await browserService.clickAt(sessionId, tabId, x, y, { button, clickCount }) }
+			},
+			browser_hover: async ({ sessionId, tabId, selector }) => {
+				await browserService.hoverElement(sessionId, tabId, selector)
+				return { result: {} }
+			},
+			browser_type_text: async ({ sessionId, tabId, selector, text, delayMs, clearFirst, pressEnter }) => {
+				return { result: await browserService.typeText(sessionId, tabId, { selector, text, delayMs, clearFirst, pressEnter }) }
+			},
+			browser_press_key: async ({ sessionId, tabId, key, selector }) => {
+				return { result: await browserService.pressKey(sessionId, tabId, key, { selector }) }
+			},
+			browser_scroll: async ({ sessionId, tabId, direction, amount, selector }) => {
+				return { result: await browserService.scrollPage(sessionId, tabId, { direction, amount, selector }) }
+			},
+			browser_drag_and_drop: async ({ sessionId, tabId, sourceSelector, targetSelector }) => {
+				await browserService.dragAndDrop(sessionId, tabId, sourceSelector, targetSelector)
+				return { result: {} }
+			},
+			browser_upload_file: async ({ sessionId, tabId, selector, filePaths }) => {
+				return { result: await browserService.uploadFile(sessionId, tabId, selector, filePaths) }
+			},
+			browser_evaluate: async ({ sessionId, tabId, expression }) => {
+				return { result: await browserService.evaluateScript(sessionId, tabId, expression) }
+			},
+			browser_accessibility_snapshot: async ({ sessionId, tabId, maxNodes }) => {
+				return { result: await browserService.getAccessibilitySnapshot(sessionId, tabId, { maxNodes }) }
+			},
+			browser_wait_for_text: async ({ sessionId, tabId, text, state, timeoutMs }) => {
+				return { result: await browserService.waitForText(sessionId, tabId, text, { state, timeoutMs }) }
+			},
+			browser_wait_for_network_idle: async ({ sessionId, tabId, timeoutMs }) => {
+				return { result: await browserService.waitForNetworkIdle(sessionId, tabId, { timeoutMs }) }
+			},
+			browser_network_log: async ({ sessionId, tabId, urlFilter, resourceType, statusMin, limit }) => {
+				const entries = await browserService.getNetworkLog(sessionId, tabId, { urlFilter, resourceType, statusMin, limit })
+				return { result: { entries } }
+			},
+			browser_handle_dialog: async ({ sessionId, tabId, action, promptText }) => {
+				return { result: await browserService.handleDialog(sessionId, tabId, { action, promptText }) }
+			},
+			browser_storage: async ({ sessionId, tabId, action, key, value }) => {
+				return { result: await browserService.inspectStorage(sessionId, tabId, { action, key, value }) }
 			},
 			browser_console: async ({ sessionId, tabId, level, limit }) => {
 				const messages = await browserService.getConsoleMessages(sessionId, tabId, { level, limit })
@@ -6410,6 +6735,178 @@ export class ToolsService implements IToolsService {
 				return { result: res }
 			},
 
+			// Antigravity thread-scoped engines (handled directly in ChatThreadService)
+			update_focus: async () => { throw new Error('update_focus handled in chatThreadService') },
+			update_steps: async () => { throw new Error('update_steps handled in chatThreadService') },
+			ask_user_question: async () => { throw new Error('ask_user_question handled in chatThreadService') },
+			create_artifact: async () => { throw new Error('create_artifact handled in chatThreadService') },
+			update_artifact: async () => { throw new Error('update_artifact handled in chatThreadService') },
+			read_artifact: async () => { throw new Error('read_artifact handled in chatThreadService') },
+			list_artifacts: async () => { throw new Error('list_artifacts handled in chatThreadService') },
+			schedule_task: async () => { throw new Error('schedule_task handled in chatThreadService') },
+			manage_scheduled_tasks: async () => { throw new Error('manage_scheduled_tasks handled in chatThreadService') },
+			define_subagent: async () => { throw new Error('define_subagent handled in chatThreadService') },
+			manage_subagents: async () => { throw new Error('manage_subagents handled in chatThreadService') },
+			run_parallel_workflow: async () => { throw new Error('run_parallel_workflow handled in chatThreadService') },
+			render_interactive_widget: async () => { throw new Error('render_interactive_widget handled in chatThreadService') },
+
+			// Cursor + Antigravity Superpower Tools
+			multi_edit_file: async ({ edits }) => {
+				// Phase 1: pre-load and validate every edit across all target files BEFORE writing anything (all-or-nothing atomicity)
+				const byPath = new Map<string, { uri: URI; content: string; replacements: number }>()
+				for (const edit of edits) {
+					const key = edit.uri.toString()
+					let entry = byPath.get(key)
+					if (!entry) {
+						const buf = await fileService.readFile(edit.uri)
+						entry = { uri: edit.uri, content: buf.value.toString(), replacements: 0 }
+						byPath.set(key, entry)
+					}
+					if (!entry.content.includes(edit.target)) {
+						throw new Error(`multi_edit_file aborted (zero files modified): target text not found in ${edit.uri.fsPath}:\n${edit.target.slice(0, 160)}`)
+					}
+					entry.content = entry.content.split(edit.target).join(edit.replacement)
+					entry.replacements += 1
+				}
+				// Phase 2: commit all validated file edits
+				const filesEdited: string[] = []
+				let totalReplacements = 0
+				for (const entry of byPath.values()) {
+					await fileService.writeFile(entry.uri, VSBuffer.fromString(entry.content))
+					filesEdited.push(entry.uri.fsPath)
+					totalReplacements += entry.replacements
+				}
+				return { result: { filesEdited, totalReplacements, lintErrors: null } }
+			},
+			view_file_outline: async ({ uri }) => {
+				const buf = await fileService.readFile(uri)
+				const content = buf.value.toString()
+				const items = extractCodeOutline(content, uri.fsPath)
+				return { result: { uri: uri.fsPath, totalLines: content.split(/\r?\n/).length, items } }
+			},
+			view_code_item: async ({ uri, symbol_name }) => {
+				const buf = await fileService.readFile(uri)
+				const content = buf.value.toString()
+				const found = extractCodeItem(content, symbol_name, uri.fsPath)
+				if (!found) {
+					return { result: { uri: uri.fsPath, item: null, code: `Symbol "${symbol_name}" not found in ${uri.fsPath}. Call view_file_outline to list available symbols.` } }
+				}
+				return { result: { uri: uri.fsPath, item: found.item, code: found.code } }
+			},
+			review_code_changes: async ({ scope, ref }) => {
+				const git = this.gitToolService
+				const root = await git.workspaceRepositoryRoot()
+				const flattenDiff = (res: { files: Array<{ uri: string; hunks: Array<{ oldStart: number; oldLines: number; newStart: number; newLines: number; body: string }> }> }): string =>
+					res.files.map(f =>
+						`+++ b/${f.uri}\n` + f.hunks.map(h => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n${h.body}`).join('\n')
+					).join('\n')
+				const mode = scope ?? 'unstaged'
+				let diffText = ''
+				if (mode === 'staged') {
+					diffText = flattenDiff(await git.ops.diff(root, { staged: true }))
+				} else if (mode === 'ref' && ref) {
+					diffText = flattenDiff(await git.ops.diff(root, { ref }))
+				} else if (mode === 'all') {
+					const [u, s] = await Promise.all([git.ops.diff(root, { staged: false }), git.ops.diff(root, { staged: true })])
+					diffText = [flattenDiff(u), flattenDiff(s)].filter(Boolean).join('\n')
+				} else {
+					diffText = flattenDiff(await git.ops.diff(root, { staged: false }))
+					if (!diffText.trim()) {
+						diffText = flattenDiff(await git.ops.diff(root, { staged: true }))
+					}
+				}
+				return { result: analyzeGitDiffForBugs(diffText, mode === 'ref' && ref ? `ref:${ref}` : mode) }
+			},
+			manage_notepads: async ({ action, name, content }) => {
+				const folder = workspaceContextService.getWorkspace().folders[0]
+				if (!folder) throw new Error('No workspace folder open for Notepads.')
+				const dir = URI.joinPath(folder.uri, '.kodia', 'notepads')
+				if (action === 'list') {
+					const notepads: Array<{ name: string; path: string }> = []
+					try {
+						const stat = await fileService.resolve(dir)
+						for (const child of stat.children ?? []) {
+							if (!child.isDirectory && child.name.endsWith('.md')) {
+								notepads.push({ name: child.name.replace(/\.md$/, ''), path: child.resource.fsPath })
+							}
+						}
+					} catch { }
+					return { result: { action, notepads } }
+				}
+				if (!name) throw new Error(`manage_notepads "${action}" requires name.`)
+				const filename = sanitizeWorkspaceDocName(name, '.md')
+				const target = URI.joinPath(dir, filename)
+				if (action === 'read') {
+					const buf = await fileService.readFile(target)
+					return { result: { action, name: filename.replace(/\.md$/, ''), path: target.fsPath, content: buf.value.toString() } }
+				}
+				if (action === 'save') {
+					await fileService.createFolder(dir).catch(() => { })
+					await fileService.writeFile(target, VSBuffer.fromString(content ?? ''))
+					return { result: { action, name: filename.replace(/\.md$/, ''), path: target.fsPath, content: content ?? '' } }
+				}
+				if (action === 'delete') {
+					await fileService.del(target)
+					return { result: { action, name: filename.replace(/\.md$/, ''), path: target.fsPath, deleted: true } }
+				}
+				throw new Error(`Unknown manage_notepads action: ${action}`)
+			},
+			manage_rules: async ({ action, name, description, globs, always_apply, body }) => {
+				const folder = workspaceContextService.getWorkspace().folders[0]
+				if (!folder) throw new Error('No workspace folder open for Rules.')
+				const kodiaRulesDir = URI.joinPath(folder.uri, '.kodia', 'rules')
+				const cursorRulesDir = URI.joinPath(folder.uri, '.cursor', 'rules')
+				if (action === 'list') {
+					const rules: ScopedRuleDocument[] = []
+					const scanDir = async (dir: URI, source: 'kodia' | 'cursor') => {
+						try {
+							const stat = await fileService.resolve(dir)
+							for (const child of stat.children ?? []) {
+								if (!child.isDirectory && /\.(md|mdc)$/i.test(child.name)) {
+									const raw = (await fileService.readFile(child.resource)).value.toString()
+									rules.push(parseScopedRuleFile(child.name.replace(/\.(md|mdc)$/i, ''), child.resource.fsPath, source, raw))
+								}
+							}
+						} catch { }
+					}
+					await scanDir(kodiaRulesDir, 'kodia')
+					await scanDir(cursorRulesDir, 'cursor')
+					return { result: { action, rules } }
+				}
+				if (!name) throw new Error(`manage_rules "${action}" requires name.`)
+				const filename = sanitizeWorkspaceDocName(name, '.md')
+				const target = URI.joinPath(kodiaRulesDir, filename)
+				if (action === 'read') {
+					let raw: string
+					let resolvedUri = target
+					let source: 'kodia' | 'cursor' = 'kodia'
+					try {
+						raw = (await fileService.readFile(target)).value.toString()
+					} catch {
+						resolvedUri = URI.joinPath(cursorRulesDir, sanitizeWorkspaceDocName(name, '.mdc'))
+						source = 'cursor'
+						raw = (await fileService.readFile(resolvedUri)).value.toString()
+					}
+					return { result: { action, rule: parseScopedRuleFile(name, resolvedUri.fsPath, source, raw) } }
+				}
+				if (action === 'save') {
+					await fileService.createFolder(kodiaRulesDir).catch(() => { })
+					const formatted = formatScopedRuleMarkdown({
+						description: description || name,
+						globs,
+						alwaysApply: always_apply ?? true,
+						body: body ?? '',
+					})
+					await fileService.writeFile(target, VSBuffer.fromString(formatted))
+					return { result: { action, rule: parseScopedRuleFile(filename.replace(/\.md$/, ''), target.fsPath, 'kodia', formatted) } }
+				}
+				if (action === 'delete') {
+					await fileService.del(target)
+					return { result: { action, deleted: true } }
+				}
+				throw new Error(`Unknown manage_rules action: ${action}`)
+			},
+
 			// Notebook operations
 			read_notebook: async ({ uri, start_cell, end_cell, cell_index, summary_only }) => {
 				const compactOutputForRead = (out: any) => {
@@ -7121,7 +7618,28 @@ export class ToolsService implements IToolsService {
 			browser_wait_for_element: (_params, result) => result.found ? 'Element found.' : 'Element not found within the timeout.',
 			browser_set_viewport: (_params, result) => `Viewport resized to ${result.width}x${result.height}.`,
 			// the model only receives this text, not the image: say so, and point at what it can read instead
-			browser_screenshot: (_params, result) => `Screenshot captured (${result.type}, ${result.width}x${result.height}) and saved to ${result.path}. The image itself is not part of this result; use browser_inspect_page for the page's text, controls and measured layout problems.`,
+			browser_screenshot: (_params, result) => {
+				const base = `Screenshot captured (${result.type}, ${result.width}x${result.height}) and saved to ${result.path}.`
+				if (result.annotatedElements && result.annotatedElements.length > 0) {
+					const mapLines = result.annotatedElements.slice(0, 80).map(e => `  @${e.index} [${e.type}] ${e.selector} — "${e.label || '(no label)'}" (${e.bbox.x},${e.bbox.y} ${e.bbox.width}x${e.bbox.height})`)
+					return `${base}\nAnnotated interactive element map (${result.annotatedElements.length} elements — pass "@N" as selector to click/fill/hover):\n${mapLines.join('\n')}`
+				}
+				return `${base} Use browser_inspect_page, browser_accessibility_snapshot, or browser_screenshot(annotated=true) to inspect interactive controls.`
+			},
+			browser_click_at: (_params, result) => result.navigated ? `Clicked coordinates; navigated to ${formatBrowserPage(result)}` : `Clicked coordinates (still on ${result.url}).`,
+			browser_hover: () => 'Hovered over element.',
+			browser_type_text: (_params, result) => result.navigated ? `Typed text; navigated to ${formatBrowserPage(result)}` : `Typed text into page (still on ${result.url}).`,
+			browser_press_key: (_params, result) => result.navigated ? `Pressed key; navigated to ${formatBrowserPage(result)}` : `Pressed key (still on ${result.url}).`,
+			browser_scroll: (_params, result) => `Scrolled to x=${result.scrollX}, y=${result.scrollY} (maxY=${result.maxScrollY}).`,
+			browser_drag_and_drop: () => 'Dragged source element onto target element.',
+			browser_upload_file: (_params, result) => `Uploaded ${result.uploaded.length} file(s): ${result.uploaded.join(', ')}.`,
+			browser_evaluate: (_params, result) => `Evaluated (${result.type}): ${typeof result.value === 'string' ? result.value : JSON.stringify(result.value, null, 2)}`,
+			browser_accessibility_snapshot: (_params, result) => formatAccessibilitySnapshot(result),
+			browser_wait_for_text: (_params, result) => result.matched ? 'Target text condition met.' : 'Timed out waiting for text condition.',
+			browser_wait_for_network_idle: (_params, result) => result.settled ? 'Network activity settled.' : 'Timed out waiting for network idle.',
+			browser_network_log: (_params, result) => formatNetworkLog(result.entries),
+			browser_handle_dialog: (_params, result) => `Dialog handler set to ${result.configured.action}${result.configured.promptText ? ` ("${result.configured.promptText}")` : ''}. Recent dialogs (${result.recentDialogs.length}): ${result.recentDialogs.map(d => `[${d.type}] "${d.message}" -> ${d.actionTaken}`).join('; ') || 'none'}.`,
+			browser_storage: (_params, result) => `Storage for ${result.url}:\nlocalStorage (${Object.keys(result.localStorage).length}): ${JSON.stringify(result.localStorage)}\nsessionStorage (${Object.keys(result.sessionStorage).length}): ${JSON.stringify(result.sessionStorage)}\ncookies (${result.cookies.length}): ${result.cookies.map(c => `${c.name}@${c.domain}`).join(', ') || 'none'}`,
 			browser_console: (_params, result) => {
 				if (!result.messages || result.messages.length === 0) return 'No console messages.'
 				return result.messages.map(m => `[${m.level}] ${m.text}`).join('\n')
@@ -8299,6 +8817,47 @@ export class ToolsService implements IToolsService {
 			uaep_save_credential: (_params, r) => `Saved encrypted tenant credential "${r.envKey}" (${r.maskedPreview}) for tenant "${r.tenantId}".`,
 			uaep_export_portable_package: (_params, r) => `${r.summary} Start: \`${r.startCommand}\``,
 			uaep_generate_embedded_platform: (_params, r) => `${r.summary} Start: \`${r.startCommand}\` | Test: \`${r.testCommand}\``,
+			update_focus: (_params, r) => `Focus updated: ${r.focus}`,
+			update_steps: (_params, r) => `Checklist updated (${r.completed}/${r.total} completed).`,
+			ask_user_question: (_params, r) => r.answers.map((a, i) => `Q${i + 1}: ${a.question} => ${a.selected.join(', ')}${a.otherText ? ` (${a.otherText})` : ''}`).join('\n'),
+			create_artifact: (_params, r) => `Created artifact "${r.artifact.title}" at ${r.artifact.path}.`,
+			update_artifact: (_params, r) => `Updated artifact "${r.artifact.title}" at ${r.artifact.path}.`,
+			read_artifact: (_params, r) => r.content,
+			list_artifacts: (_params, r) => r.artifacts.map(a => `- [${a.kind}] ${a.title} (${a.path})`).join('\n') || 'No artifacts.',
+			schedule_task: (_params, r) => `Scheduled ${r.task.kind} task ${r.task.id} (${r.task.cronExpression ?? `${r.task.durationSeconds}s`}).`,
+			manage_scheduled_tasks: (_params, r) => r.tasks ? `${r.tasks.length} scheduled task(s).` : r.cancelled ? `Cancelled ${r.taskId}.` : JSON.stringify(r.task ?? r),
+			define_subagent: (_params, r) => `Defined custom subagent "${r.subagent.name}" (${r.subagent.canChangeFiles ? 'read+write' : 'read-only'}).`,
+			manage_subagents: (_params, r) => r.cancelled ? `Cancelled ${r.cancelled.length} subagent(s).` : `${r.sessions?.length ?? 0} subagent session(s).`,
+			run_parallel_workflow: (_params, r) => `Parallel workflow "${r.description}": ${r.succeeded}/${r.totalTasks} tasks succeeded across ${r.totalStages} stage(s).`,
+			multi_edit_file: (_params, r) => `Atomically applied ${r.totalReplacements} edit(s) across ${r.filesEdited.length} file(s): ${r.filesEdited.join(', ')}.`,
+			view_file_outline: (_params, r) => {
+				if (r.items.length === 0) return `No top-level symbols found in ${r.uri} (${r.totalLines} lines).`
+				return `Outline of ${r.uri} (${r.totalLines} lines, ${r.items.length} symbol(s)):\n` +
+					r.items.map(i => `  L${i.startLine}-L${i.endLine} [${i.kind}] ${i.container ? `${i.container}.` : ''}${i.name} — ${i.signature}`).join('\n')
+			},
+			view_code_item: (_params, r) => r.item
+				? `${r.uri} L${r.item.startLine}-L${r.item.endLine} [${r.item.kind}] ${r.item.container ? `${r.item.container}.` : ''}${r.item.name}:\n${r.code}`
+				: r.code,
+			review_code_changes: (_params, r) => {
+				const lines = [r.summary]
+				for (const f of r.findings) {
+					lines.push(`  [${f.severity.toUpperCase()}/${f.category}] ${f.file}:${f.line} — ${f.message}\n    ${f.snippet}`)
+				}
+				return lines.join('\n')
+			},
+			manage_notepads: (_params, r) => {
+				if (r.action === 'list') return r.notepads?.length ? `Notepads (${r.notepads.length}):\n` + r.notepads.map(n => `- ${n.name} (${n.path})`).join('\n') : 'No notepads yet.'
+				if (r.action === 'read') return `Notepad "${r.name}" (${r.path}):\n\n${r.content ?? ''}`
+				if (r.action === 'save') return `Saved notepad "${r.name}" at ${r.path}.`
+				return `Deleted notepad "${r.name}".`
+			},
+			manage_rules: (_params, r) => {
+				if (r.action === 'list') return r.rules?.length ? `Scoped Rules (${r.rules.length}):\n` + r.rules.map(rule => `- [${rule.source}] ${rule.name}: ${rule.description}${rule.globs?.length ? ` (globs: ${rule.globs.join(', ')})` : rule.alwaysApply ? ' (alwaysApply)' : ''}`).join('\n') : 'No scoped rules in .kodia/rules/ or .cursor/rules/.'
+				if (r.action === 'read' && r.rule) return `Rule "${r.rule.name}" (${r.rule.path}):\n\n${r.rule.body}`
+				if (r.action === 'save' && r.rule) return `Saved rule "${r.rule.name}" to ${r.rule.path}.`
+				return 'Deleted rule.'
+			},
+			render_interactive_widget: (_params, r) => `Rendered interactive ${r.widget.kind} widget "${r.widget.title}" inline in chat.`,
 
 			// Notebook operations
 			read_notebook: (params, result) => {

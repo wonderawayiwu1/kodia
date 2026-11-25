@@ -63,6 +63,23 @@ import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
 import { isFallbackEligibleError, modelSelectionKey, resolveRoutedModelSelection, selectNextFallbackModel } from '../common/modelRouting.js';
 import { repairToolParams } from '../common/toolParamRepair.js';
 import { FailurePatternMemory } from '../common/failureMemory.js';
+import { formatDesignBriefForLLM, generateDesignBrief, generateDesignTokens } from '../common/designIntelligenceEngine.js';
+import {
+	AgentStepItem,
+	ArtifactKind,
+	dynamicSubagentRegistry,
+	KodiaTaskScheduler,
+	ParallelWorkflowReport,
+	ParallelWorkflowStage,
+	ParallelWorkflowTaskResult,
+	sanitizeArtifactFilename,
+	ScheduledTaskInfo,
+	SubagentSessionStatus,
+	ThreadAgentUXState,
+	ThreadArtifactMeta,
+	UserQuestionAnswer,
+	UserQuestionItem,
+} from '../common/antigravityEngines.js';
 
 
 // related to retrying when LLM message has error
@@ -321,10 +338,21 @@ export interface IChatThreadService {
 	onDidChangeCurrentThread: Event<void>;
 	onDidChangeStreamState: Event<{ threadId: string }>
 	onDidChangeQueuedMessages: Event<{ threadId: string }>;
+	onDidChangeAgentUX: Event<{ threadId: string }>;
+
+	// Antigravity Live Focus, Execution Steps, Interactive Questions, Artifacts & Scheduler
+	getAgentUXState(threadId: string): ThreadAgentUXState;
+	answerUserQuestion(threadId: string, questionId: string, answers: UserQuestionAnswer[]): void;
+	cancelUserQuestion(threadId: string, questionId: string): void;
+	approveArtifact(threadId: string, artifactId: string): Promise<void>;
+	getScheduledTasks(threadId?: string): ScheduledTaskInfo[];
 
 	// Queued steering messages (submitted while a turn is running; auto-dispatched when idle)
 	enqueueUserMessage(threadId: string, userMessage: string): void;
 	getQueuedMessages(threadId: string): readonly string[];
+	editQueuedMessage(threadId: string, index: number, newMessage: string): void;
+	sendQueuedMessageNow(threadId: string, index: number): Promise<void>;
+	interruptAndSendNow(threadId: string, userMessage: string): Promise<void>;
 	removeQueuedMessage(threadId: string, index: number): void;
 	clearQueuedMessages(threadId: string): void;
 
@@ -418,6 +446,79 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 	private readonly _queuedMessagesOfThread = new Map<string, string[]>();
 	private readonly _failureMemory = new FailurePatternMemory();
 
+	private readonly _onDidChangeAgentUX = this._register(new Emitter<{ threadId: string }>());
+	readonly onDidChangeAgentUX: Event<{ threadId: string }> = this._onDidChangeAgentUX.event;
+	private readonly _agentUXOfThread = new Map<string, ThreadAgentUXState>();
+	private readonly _pendingQuestionResolvers = new Map<string, { resolve: (answers: UserQuestionAnswer[]) => void; reject: (err: Error) => void }>();
+	private readonly _subagentSessions = new Map<string, SubagentSessionStatus>();
+	private readonly _taskScheduler: KodiaTaskScheduler;
+
+	private _ensureAgentUX(threadId: string): ThreadAgentUXState {
+		let ux = this._agentUXOfThread.get(threadId);
+		if (!ux) {
+			ux = { steps: [], artifacts: [], widgets: [] };
+			this._agentUXOfThread.set(threadId, ux);
+		}
+		return ux;
+	}
+
+	getAgentUXState(threadId: string): ThreadAgentUXState {
+		const ux = this._agentUXOfThread.get(threadId);
+		return ux ? {
+			focus: ux.focus,
+			focusUpdatedAt: ux.focusUpdatedAt,
+			steps: ux.steps.map(s => ({ ...s })),
+			pendingQuestion: ux.pendingQuestion ? { ...ux.pendingQuestion } : undefined,
+			artifacts: ux.artifacts.map(a => ({ ...a })),
+			widgets: ux.widgets.map(w => ({ ...w })),
+		} : { steps: [], artifacts: [], widgets: [] };
+	}
+
+	answerUserQuestion(threadId: string, questionId: string, answers: UserQuestionAnswer[]): void {
+		const ux = this._agentUXOfThread.get(threadId);
+		if (ux?.pendingQuestion?.id === questionId) {
+			ux.pendingQuestion = undefined;
+			this._onDidChangeAgentUX.fire({ threadId });
+		}
+		const pending = this._pendingQuestionResolvers.get(questionId);
+		if (pending) {
+			this._pendingQuestionResolvers.delete(questionId);
+			pending.resolve(answers);
+		}
+	}
+
+	cancelUserQuestion(threadId: string, questionId: string): void {
+		const ux = this._agentUXOfThread.get(threadId);
+		if (ux?.pendingQuestion?.id === questionId) {
+			ux.pendingQuestion = undefined;
+			this._onDidChangeAgentUX.fire({ threadId });
+		}
+		const pending = this._pendingQuestionResolvers.get(questionId);
+		if (pending) {
+			this._pendingQuestionResolvers.delete(questionId);
+			pending.reject(new Error('User dismissed the clarification question.'));
+		}
+	}
+
+	async approveArtifact(threadId: string, artifactId: string): Promise<void> {
+		const ux = this._agentUXOfThread.get(threadId);
+		const artifact = ux?.artifacts.find(a => a.id === artifactId);
+		if (!artifact) return;
+		artifact.approved = true;
+		artifact.requestFeedback = false;
+		this._onDidChangeAgentUX.fire({ threadId });
+		const msg = `Approved artifact "${artifact.title}" (${artifact.path}). Proceed with execution.`;
+		if (this.streamState[threadId]?.isRunning) {
+			this.enqueueUserMessage(threadId, msg);
+		} else {
+			await this.addUserMessageAndStreamResponse({ userMessage: msg, threadId });
+		}
+	}
+
+	getScheduledTasks(threadId?: string): ScheduledTaskInfo[] {
+		return this._taskScheduler.list(threadId);
+	}
+
 	enqueueUserMessage(threadId: string, userMessage: string): void {
 		const trimmed = userMessage.trim();
 		if (!trimmed) { return; }
@@ -440,6 +541,36 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		q.splice(index, 1);
 		if (q.length === 0) { this._queuedMessagesOfThread.delete(threadId); }
 		this._onDidChangeQueuedMessages.fire({ threadId });
+	}
+
+	editQueuedMessage(threadId: string, index: number, newMessage: string): void {
+		const q = this._queuedMessagesOfThread.get(threadId);
+		if (!q || index < 0 || index >= q.length) { return; }
+		const trimmed = newMessage.trim();
+		if (!trimmed) {
+			this.removeQueuedMessage(threadId, index);
+			return;
+		}
+		q[index] = trimmed;
+		this._onDidChangeQueuedMessages.fire({ threadId });
+	}
+
+	async sendQueuedMessageNow(threadId: string, index: number): Promise<void> {
+		const q = this._queuedMessagesOfThread.get(threadId);
+		if (!q || index < 0 || index >= q.length) { return; }
+		const [msg] = q.splice(index, 1);
+		if (q.length === 0) { this._queuedMessagesOfThread.delete(threadId); }
+		this._onDidChangeQueuedMessages.fire({ threadId });
+		await this.interruptAndSendNow(threadId, msg);
+	}
+
+	async interruptAndSendNow(threadId: string, userMessage: string): Promise<void> {
+		const trimmed = userMessage.trim();
+		if (!trimmed) { return; }
+		if (this.streamState[threadId]?.isRunning) {
+			await this.abortRunning(threadId);
+		}
+		await this.addUserMessageAndStreamResponse({ userMessage: trimmed, threadId });
 	}
 
 	clearQueuedMessages(threadId: string): void {
@@ -499,6 +630,20 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 	) {
 		super()
 		this.state = { allThreads: {}, currentThreadId: null as unknown as string } // default state
+
+		this._taskScheduler = new KodiaTaskScheduler(async (task) => {
+			const targetThreadId = task.threadId && this.state.allThreads[task.threadId]
+				? task.threadId
+				: this.state.currentThreadId;
+			if (!targetThreadId) return;
+			const msg = `[Scheduled Task ${task.id} (${task.kind === 'cron' ? task.cronExpression : `${task.durationSeconds}s timer`})] ${task.prompt}`;
+			if (this.streamState[targetThreadId]?.isRunning) {
+				this.enqueueUserMessage(targetThreadId, msg);
+			} else {
+				await this.addUserMessageAndStreamResponse({ userMessage: msg, threadId: targetThreadId });
+			}
+		});
+		this._register({ dispose: () => this._taskScheduler.dispose() });
 
 		// Sync taskPlan from TaskPlanService to thread.taskPlan
 		this._register(this.taskPlanService.onDidChangePlan(({ threadId, plan }) => {
@@ -1335,6 +1480,26 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			return {};
 		}
 
+		// Antigravity Live Focus, Steps Checklist, Interactive Questions, Artifacts, Scheduler & Dynamic Subagent Engines
+		const antigravityEngineTools: Set<string> = new Set([
+			'update_focus',
+			'update_steps',
+			'ask_user_question',
+			'create_artifact',
+			'update_artifact',
+			'read_artifact',
+			'list_artifacts',
+			'schedule_task',
+			'manage_scheduled_tasks',
+			'define_subagent',
+			'manage_subagents',
+			'run_parallel_workflow',
+			'render_interactive_widget',
+		]);
+		if (isBuiltInTool && antigravityEngineTools.has(toolName)) {
+			return await this._runAntigravityEngineTool(threadId, toolId, toolName, toolParams, opts.unvalidatedToolParams, mcpServerName, resolveInterruptor, parallel);
+		}
+
 		// Test-integrity guard: remember a test file's content before a change, to detect weakening afterwards
 		const testFileUri = isBuiltInTool ? this._testFileChangedBy(toolName, toolParams) : null
 		const testFileBefore = testFileUri ? await this._readTextIfExists(testFileUri) : undefined
@@ -1525,6 +1690,467 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		return folder ? uri.fsPath.slice(folder.uri.fsPath.length).replace(/^[\\/]/, '') : uri.fsPath
 	}
 
+	private _artifactStorageRoot(threadId: string): URI | null {
+		const folder = this._workspaceContextService.getWorkspace().folders[0];
+		if (!folder) return null;
+		const safeThread = threadId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 48) || 'default';
+		return URI.joinPath(folder.uri, '.kodia', 'artifacts', safeThread);
+	}
+
+	/**
+	 * Executes Antigravity-grade thread-scoped engines:
+	 * - Live Focus (`update_focus`) & Steps Checklist (`update_steps`)
+	 * - Interactive Multiple-Choice Clarification (`ask_user_question`)
+	 * - Workspace Artifacts (`create_artifact`, `update_artifact`, `read_artifact`, `list_artifacts`)
+	 * - Cron & Timer Scheduler (`schedule_task`, `manage_scheduled_tasks`)
+	 * - Dynamic Subagent Registry & Staged Parallel Workflows (`define_subagent`, `manage_subagents`, `run_parallel_workflow`)
+	 */
+	private async _runAntigravityEngineTool(
+		threadId: string,
+		toolId: string,
+		toolName: BuiltinToolName,
+		toolParams: any,
+		rawParams: RawToolParamsObj,
+		mcpServerName: string | undefined,
+		resolveInterruptor: (fn: () => void) => void,
+		parallel?: ParallelToolRun,
+	): Promise<{ interrupted?: boolean }> {
+		let interrupted = false;
+		const finishSuccess = (result: any, content: string) => {
+			this._updateLatestTool(threadId, { role: 'tool', type: 'success', params: toolParams, result, name: toolName, content, id: toolId, rawParams, mcpServerName });
+			return {};
+		};
+		const finishError = (msg: string) => {
+			this._updateLatestTool(threadId, { role: 'tool', type: 'tool_error', params: toolParams, result: msg, name: toolName, content: msg, id: toolId, rawParams, mcpServerName });
+			return {};
+		};
+
+		this._updateLatestTool(threadId, { role: 'tool', type: 'running_now', name: toolName, params: toolParams, content: '(running...)', result: null, id: toolId, rawParams, mcpServerName });
+
+		try {
+			if (toolName === 'update_focus') {
+				resolveInterruptor(() => { });
+				const focus = String(toolParams.focus ?? '').trim();
+				const ux = this._ensureAgentUX(threadId);
+				ux.focus = focus;
+				ux.focusUpdatedAt = Date.now();
+				this._onDidChangeAgentUX.fire({ threadId });
+				return finishSuccess({ focus, updatedAt: ux.focusUpdatedAt }, `Focus updated: ${focus}`);
+			}
+
+			if (toolName === 'update_steps') {
+				resolveInterruptor(() => { });
+				const steps: AgentStepItem[] = Array.isArray(toolParams.steps) ? toolParams.steps : [];
+				const ux = this._ensureAgentUX(threadId);
+				ux.steps = steps.map(s => ({ title: String(s.title), status: s.status }));
+				this._onDidChangeAgentUX.fire({ threadId });
+				const doneCount = ux.steps.filter(s => s.status === 'done').length;
+				const summary = `Steps updated (${doneCount}/${ux.steps.length} done):\n` + ux.steps.map((s, i) => `  ${i + 1}. [${s.status}] ${s.title}`).join('\n');
+				return finishSuccess({ steps: ux.steps, completed: doneCount, total: ux.steps.length }, summary);
+			}
+
+			if (toolName === 'ask_user_question') {
+				const questions: UserQuestionItem[] = Array.isArray(toolParams.questions) ? toolParams.questions : [];
+				if (questions.length === 0) {
+					resolveInterruptor(() => { });
+					return finishError('ask_user_question requires at least one question with options.');
+				}
+				const questionId = generateUuid();
+				const ux = this._ensureAgentUX(threadId);
+				ux.pendingQuestion = { id: questionId, threadId, questions, createdAt: Date.now() };
+				this._onDidChangeAgentUX.fire({ threadId });
+
+				let resolveWait!: (answers: UserQuestionAnswer[]) => void;
+				let rejectWait!: (err: Error) => void;
+				const waitPromise = new Promise<UserQuestionAnswer[]>((res, rej) => {
+					resolveWait = res;
+					rejectWait = rej;
+				});
+				this._pendingQuestionResolvers.set(questionId, { resolve: resolveWait, reject: rejectWait });
+				resolveInterruptor(() => {
+					interrupted = true;
+					this.cancelUserQuestion(threadId, questionId);
+				});
+				if (!parallel) {
+					this._setStreamState(threadId, {
+						isRunning: 'awaiting_user',
+						interrupt: Promise.resolve(() => { interrupted = true; this.cancelUserQuestion(threadId, questionId); }),
+					} as any);
+				}
+
+				let answers: UserQuestionAnswer[];
+				try {
+					answers = await waitPromise;
+				} catch (err) {
+					if (interrupted) return { interrupted: true };
+					return finishError(getErrorMessage(err));
+				}
+				const formatted = answers.map((a, idx) =>
+					`Q${idx + 1}: ${a.question}\nAnswer: ${a.selected.join(', ')}${a.otherText ? ` (Other: ${a.otherText})` : ''}`
+				).join('\n\n');
+				return finishSuccess({ answers }, `User answered clarification question(s):\n\n${formatted}`);
+			}
+
+			if (toolName === 'create_artifact' || toolName === 'update_artifact') {
+				resolveInterruptor(() => { });
+				const filename = sanitizeArtifactFilename(String(toolParams.name || toolParams.title || 'artifact'));
+				const title = String(toolParams.title || filename.replace(/\.md$/, ''));
+				const kind: ArtifactKind = toolParams.kind || 'report';
+				const summary = String(toolParams.summary || title);
+				const requestFeedback = Boolean(toolParams.request_feedback);
+				const content = String(toolParams.content ?? '');
+
+				const root = this._artifactStorageRoot(threadId);
+				let fsPath = `.kodia/artifacts/${threadId}/${filename}`;
+				if (root) {
+					await this._fileService.createFolder(root).catch(() => { });
+					const fileUri = URI.joinPath(root, filename);
+					await this._fileService.writeFile(fileUri, VSBuffer.fromString(content));
+					fsPath = fileUri.fsPath;
+				}
+
+				const ux = this._ensureAgentUX(threadId);
+				const existingIdx = ux.artifacts.findIndex(a => a.name === filename);
+				const meta: ThreadArtifactMeta = {
+					id: existingIdx >= 0 ? ux.artifacts[existingIdx].id : generateUuid(),
+					name: filename,
+					title,
+					path: fsPath,
+					kind,
+					summary,
+					requestFeedback,
+					updatedAt: Date.now(),
+					approved: false,
+				};
+				if (existingIdx >= 0) ux.artifacts[existingIdx] = meta;
+				else ux.artifacts.push(meta);
+				this._onDidChangeAgentUX.fire({ threadId });
+				return finishSuccess(
+					{ artifact: meta },
+					`${toolName === 'create_artifact' ? 'Created' : 'Updated'} artifact "${title}" (${kind}) at ${fsPath}${requestFeedback ? ' [awaiting user review/proceed]' : ''}.`
+				);
+			}
+
+			if (toolName === 'read_artifact') {
+				resolveInterruptor(() => { });
+				const filename = sanitizeArtifactFilename(String(toolParams.name || ''));
+				const root = this._artifactStorageRoot(threadId);
+				if (!root) return finishError('No workspace folder is open to read artifacts from.');
+				const fileUri = URI.joinPath(root, filename);
+				const buf = await this._fileService.readFile(fileUri);
+				const content = buf.value.toString();
+				return finishSuccess({ name: filename, path: fileUri.fsPath, content }, content);
+			}
+
+			if (toolName === 'list_artifacts') {
+				resolveInterruptor(() => { });
+				const ux = this._ensureAgentUX(threadId);
+				const items = ux.artifacts.slice();
+				const root = this._artifactStorageRoot(threadId);
+				if (root && items.length === 0) {
+					try {
+						const stat = await this._fileService.resolve(root);
+						for (const child of stat.children ?? []) {
+							if (!child.isDirectory && child.name.endsWith('.md')) {
+								items.push({
+									id: child.name,
+									name: child.name,
+									title: child.name.replace(/\.md$/, ''),
+									path: child.resource.fsPath,
+									kind: 'other',
+									summary: child.name,
+									requestFeedback: false,
+									updatedAt: Date.now(),
+								});
+							}
+						}
+					} catch { }
+				}
+				const text = items.length === 0
+					? 'No artifacts created in this thread yet.'
+					: items.map(a => `- [${a.kind}] ${a.title} (${a.name}) — ${a.path}${a.approved ? ' [approved]' : a.requestFeedback ? ' [needs review]' : ''}`).join('\n');
+				return finishSuccess({ artifacts: items }, text);
+			}
+
+			if (toolName === 'schedule_task') {
+				resolveInterruptor(() => { });
+				const task = this._taskScheduler.schedule({
+					threadId,
+					prompt: String(toolParams.prompt ?? ''),
+					durationSeconds: toolParams.duration_seconds,
+					cronExpression: toolParams.cron_expression,
+					maxIterations: toolParams.max_iterations,
+				});
+				const nextStr = task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : 'n/a';
+				return finishSuccess(
+					{ task },
+					`Scheduled ${task.kind} task ${task.id} (${task.kind === 'cron' ? `cron "${task.cronExpression}"` : `in ${task.durationSeconds}s`}). Next trigger: ${nextStr}.`
+				);
+			}
+
+			if (toolName === 'manage_scheduled_tasks') {
+				resolveInterruptor(() => { });
+				const action = String(toolParams.action || 'list');
+				const taskId = toolParams.task_id ? String(toolParams.task_id) : undefined;
+				if (action === 'list') {
+					const tasks = this._taskScheduler.list(threadId);
+					const text = tasks.length === 0
+						? 'No scheduled tasks or timers active.'
+						: tasks.map(t => `- ${t.id} [${t.status}] (${t.kind === 'cron' ? t.cronExpression : `${t.durationSeconds}s`}, runs=${t.runCount}) — ${t.prompt.slice(0, 100)}`).join('\n');
+					return finishSuccess({ tasks }, text);
+				}
+				if (!taskId) return finishError(`manage_scheduled_tasks action "${action}" requires task_id.`);
+				if (action === 'status') {
+					const t = this._taskScheduler.get(taskId);
+					if (!t) return finishError(`Scheduled task "${taskId}" not found.`);
+					return finishSuccess({ task: t }, JSON.stringify(t, null, 2));
+				}
+				if (action === 'pause') {
+					const t = this._taskScheduler.pause(taskId);
+					if (!t) return finishError(`Scheduled task "${taskId}" not found.`);
+					return finishSuccess({ task: t }, `Paused scheduled task ${taskId}.`);
+				}
+				if (action === 'resume') {
+					const t = this._taskScheduler.resume(taskId);
+					if (!t) return finishError(`Scheduled task "${taskId}" not found.`);
+					return finishSuccess({ task: t }, `Resumed scheduled task ${taskId}.`);
+				}
+				if (action === 'cancel') {
+					const ok = this._taskScheduler.cancel(taskId);
+					if (!ok) return finishError(`Scheduled task "${taskId}" not found.`);
+					return finishSuccess({ cancelled: true, taskId }, `Cancelled scheduled task ${taskId}.`);
+				}
+				return finishError(`Unknown manage_scheduled_tasks action: ${action}`);
+			}
+
+			if (toolName === 'define_subagent') {
+				resolveInterruptor(() => { });
+				const def = dynamicSubagentRegistry.define({
+					name: String(toolParams.name),
+					description: String(toolParams.description),
+					systemPrompt: String(toolParams.system_prompt),
+					canChangeFiles: toolParams.can_change_files ?? false,
+					allowedTools: Array.isArray(toolParams.allowed_tools) ? toolParams.allowed_tools : undefined,
+					defaultModel: toolParams.default_model || undefined,
+				});
+				if (toolParams.persist) {
+					const folder = this._workspaceContextService.getWorkspace().folders[0];
+					if (folder) {
+						const agentsDir = URI.joinPath(folder.uri, '.kodia', 'agents');
+						await this._fileService.createFolder(agentsDir).catch(() => { });
+						const agentFile = URI.joinPath(agentsDir, `${def.name}.md`);
+						await this._fileService.writeFile(agentFile, VSBuffer.fromString(dynamicSubagentRegistry.toAgentMarkdown(def)));
+						def.persistedPath = agentFile.fsPath;
+					}
+				}
+				return finishSuccess(
+					{ subagent: def },
+					`Defined subagent "${def.name}" (${def.canChangeFiles ? 'read+write' : 'read-only'}). You can now invoke it via subagent(agent="${def.name}", ...)${def.persistedPath ? ` (saved to ${def.persistedPath})` : ''}.`
+				);
+			}
+
+			if (toolName === 'manage_subagents') {
+				resolveInterruptor(() => { });
+				const action = String(toolParams.action || 'list');
+				const sessions = Array.from(this._subagentSessions.values()).filter(s => s.parentThreadId === threadId);
+				if (action === 'list') {
+					const defined = dynamicSubagentRegistry.list().map(d => d.name);
+					const lines = sessions.length === 0
+						? ['No subagent sessions have run in this thread yet.']
+						: sessions.map(s => `- ${s.sessionId} [${s.state}] (${s.agent}) "${s.description}" — ${s.toolCallCount} tools, ${s.filesChanged.length} file(s) changed`);
+					if (defined.length > 0) lines.push(`Custom defined subagents: ${defined.join(', ')}`);
+					return finishSuccess({ sessions, definedSubagents: defined }, lines.join('\n'));
+				}
+				if (action === 'cancel' || action === 'cancel_all') {
+					const targetIds: string[] = action === 'cancel_all'
+						? sessions.filter(s => s.state === 'running').map(s => s.sessionId)
+						: (Array.isArray(toolParams.session_ids) ? toolParams.session_ids : []);
+					const cancelled: string[] = [];
+					for (const sid of targetIds) {
+						const rec = this._subagentSessions.get(sid);
+						if (rec && rec.parentThreadId === threadId && rec.state === 'running') {
+							await this.abortRunning(sid);
+							rec.state = 'cancelled';
+							rec.endedAt = Date.now();
+							cancelled.push(sid);
+						}
+					}
+					return finishSuccess({ cancelled }, cancelled.length ? `Cancelled ${cancelled.length} subagent(s): ${cancelled.join(', ')}` : 'No running subagents matched to cancel.');
+				}
+				return finishError(`Unknown manage_subagents action: ${action}`);
+			}
+
+			if (toolName === 'run_parallel_workflow') {
+				if (this.state.allThreads[threadId]?.subagentOf) {
+					resolveInterruptor(() => { });
+					return finishError('A subagent cannot invoke run_parallel_workflow.');
+				}
+				const description = String(toolParams.description || 'Parallel workflow');
+				const stages: ParallelWorkflowStage[] = Array.isArray(toolParams.stages) ? toolParams.stages : [];
+				if (stages.length === 0) {
+					resolveInterruptor(() => { });
+					return finishError('run_parallel_workflow requires at least one stage with tasks.');
+				}
+				const activeChildIds = new Set<string>();
+				resolveInterruptor(() => {
+					interrupted = true;
+					for (const cid of activeChildIds) { void this.abortRunning(cid); }
+				});
+				const workflowStart = Date.now();
+				const allResults: ParallelWorkflowTaskResult[] = [];
+				let priorStageContext = '';
+
+				for (let sIdx = 0; sIdx < stages.length; sIdx++) {
+					if (interrupted) return { interrupted: true };
+					const stage = stages[sIdx];
+					const tasks = Array.isArray(stage.tasks) ? stage.tasks : [];
+					const stageResults: ParallelWorkflowTaskResult[] = [];
+
+					// Execute tasks in parallel batches bounded by MAX_PARALLEL_SUBAGENTS
+					for (let offset = 0; offset < tasks.length; offset += MAX_PARALLEL_SUBAGENTS) {
+						if (interrupted) return { interrupted: true };
+						const batch = tasks.slice(offset, offset + MAX_PARALLEL_SUBAGENTS);
+						const batchOut = await Promise.all(batch.map(async (t) => {
+							const promptWithContext = priorStageContext
+								? `${t.prompt}\n\n--- PRIOR WORKFLOW STAGE OUTPUTS ---\n${priorStageContext}`
+								: t.prompt;
+							const tStart = Date.now();
+							const customAgents = await this._discoverCustomAgents();
+							const resolved = resolveSubagentType(t.agent || 'general', customAgents);
+							if ('error' in resolved) {
+								return {
+									stage: stage.name,
+									agent: t.agent,
+									description: t.description,
+									sessionId: '',
+									status: 'failed',
+									filesChanged: [],
+									summary: '',
+									durationMs: Date.now() - tStart,
+									error: resolved.error,
+								} as ParallelWorkflowTaskResult;
+							}
+							const model = this._resolveSubagentModel(threadId, t.model ?? resolved.profile.defaultModel);
+							if ('error' in model) {
+								return {
+									stage: stage.name,
+									agent: resolved.type,
+									description: t.description,
+									sessionId: '',
+									status: 'failed',
+									filesChanged: [],
+									summary: '',
+									durationMs: Date.now() - tStart,
+									error: model.error,
+								} as ParallelWorkflowTaskResult;
+							}
+							const childThread: ThreadType = { ...newThreadObject(), subagentOf: { parentThreadId: threadId, agent: resolved.type, description: t.description } };
+							const childId = childThread.id;
+							const newThreads: ChatThreads = { ...this.state.allThreads, [childId]: childThread };
+							this._storeAllThreads(newThreads);
+							this._setState({ allThreads: newThreads });
+							const offered = (availableTools(this._settingsService.state.globalSettings.chatMode, this._mcpService.getMCPTools()) ?? []).map(x => x.name);
+							const allowed = new Set(subagentToolNames(resolved.type, offered, n => !isABuiltinToolName(n) || n in approvalTypeOfBuiltinToolName, resolved.profile));
+							this._toolPolicyOfThread.set(childId, { agent: resolved.type, allowed, profile: resolved.profile });
+							activeChildIds.add(childId);
+							this._subagentSessions.set(childId, {
+								sessionId: childId,
+								parentThreadId: threadId,
+								agent: resolved.type,
+								description: t.description,
+								state: 'running',
+								startedAt: tStart,
+								filesChanged: [],
+								toolCallCount: 0,
+							});
+							let crash: string | undefined;
+							try {
+								await this.addUserMessage({ userMessage: promptWithContext, threadId: childId });
+								await this._runChatAgent({ threadId: childId, ...model });
+							} catch (e) {
+								crash = getErrorMessage(e);
+							} finally {
+								activeChildIds.delete(childId);
+								this._subagentFileClaims.releaseAll(childId);
+							}
+							const msgs = this.state.allThreads[childId]?.messages ?? [];
+							const facts: SubagentToolCallFact[] = [];
+							for (const m of msgs) {
+								if (m.role !== 'tool' || m.type === 'running_now' || m.type === 'tool_request') continue;
+								const uri = m.type !== 'invalid_params' ? (m.params as { uri?: URI } | undefined)?.uri : undefined;
+								facts.push({ name: m.name, type: m.type, target: uri ? this._workspaceRelativePath(URI.revive(uri)) : undefined, error: m.type === 'success' ? undefined : m.content });
+							}
+							const lastReply = findLast(msgs, m => m.role === 'assistant');
+							const output = lastReply?.role === 'assistant' ? lastReply.displayContent : '';
+							const sum = summarizeSubagentRun(facts, FILE_CHANGING_TOOLS);
+							const status = crash ? 'failed' : 'completed';
+							const rec = this._subagentSessions.get(childId);
+							if (rec) {
+								rec.state = status;
+								rec.endedAt = Date.now();
+								rec.filesChanged = sum.filesChanged;
+								rec.toolCallCount = sum.toolCalls.total;
+								rec.error = crash ?? sum.problems[0];
+							}
+							return {
+								stage: stage.name,
+								agent: resolved.type,
+								description: t.description,
+								sessionId: childId,
+								status,
+								filesChanged: sum.filesChanged,
+								summary: output.slice(0, 1600),
+								durationMs: Date.now() - tStart,
+								error: crash ?? sum.problems[0],
+							} as ParallelWorkflowTaskResult;
+						}));
+						stageResults.push(...batchOut);
+					}
+					allResults.push(...stageResults);
+					priorStageContext = stageResults.map(r => `[${r.stage} / ${r.agent}: ${r.description}] (${r.status}, files: ${r.filesChanged.join(', ') || 'none'})\n${r.summary || r.error || '(no output)'}`).join('\n\n').slice(0, 8000);
+				}
+
+				const report: ParallelWorkflowReport = {
+					description,
+					totalStages: stages.length,
+					totalTasks: allResults.length,
+					succeeded: allResults.filter(r => r.status === 'completed').length,
+					failed: allResults.filter(r => r.status !== 'completed').length,
+					durationMs: Date.now() - workflowStart,
+					results: allResults,
+				};
+				const formatted = [
+					`Parallel workflow "${description}" finished in ${Math.round(report.durationMs / 1000)}s (${report.succeeded}/${report.totalTasks} tasks succeeded across ${report.totalStages} stage(s)).`,
+					...allResults.map(r => `\n### [${r.stage}] ${r.description} (${r.agent}) — ${r.status}\nFiles: ${r.filesChanged.join(', ') || 'none'}\n${r.error ? `Error: ${r.error}\n` : ''}${r.summary}`),
+				].join('\n');
+				return finishSuccess(report, formatted);
+			}
+
+			if (toolName === 'render_interactive_widget') {
+				resolveInterruptor(() => { });
+				const ux = this._ensureAgentUX(threadId);
+				const widget = {
+					id: generateUuid(),
+					title: String(toolParams.title || 'Interactive Widget'),
+					kind: (toolParams.kind || 'interactive') as 'diagram' | 'chart' | 'ui_preview' | 'interactive' | 'table' | 'other',
+					html: String(toolParams.html ?? ''),
+					heightPx: Math.max(140, Math.min(680, Number(toolParams.height_px) || 340)),
+					createdAt: Date.now(),
+				};
+				ux.widgets.push(widget);
+				if (ux.widgets.length > 6) ux.widgets.shift();
+				this._onDidChangeAgentUX.fire({ threadId });
+				return finishSuccess({ widget }, `Rendered interactive ${widget.kind} widget "${widget.title}" inline in chat.`);
+			}
+
+			resolveInterruptor(() => { });
+			return finishError(`Unhandled Antigravity engine tool: ${toolName}`);
+		} catch (error) {
+			resolveInterruptor(() => { });
+			return finishError(getErrorMessage(error));
+		}
+	}
+
 	// ---------- subagents (roadmap 6) ----------
 
 	private _toolInfosOf(names: ReadonlySet<string>): InternalToolInfo[] {
@@ -1681,6 +2307,16 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		})
 
 		const startedAt = Date.now()
+		this._subagentSessions.set(childId, {
+			sessionId: childId,
+			parentThreadId: parentId,
+			agent,
+			description: params.description,
+			state: 'running',
+			startedAt,
+			filesChanged: [],
+			toolCallCount: 0,
+		})
 		const startIdx = this.state.allThreads[childId]?.messages.length ?? 0
 		let timedOut = false
 		let crash: string | undefined
@@ -1696,6 +2332,8 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			this._subagentFileClaims.releaseAll(childId)
 		}
 		if (interrupted) {
+			const existingRec = this._subagentSessions.get(childId);
+			if (existingRec) { existingRec.state = 'cancelled'; existingRec.endedAt = Date.now(); }
 			if (subagentSpanId) { this._observabilityService?.endSpan(subagentSpanId, { status: 'cancelled' }) }
 			return { interrupted: true }
 		} // the parent's abort marks this call interrupted
@@ -1724,6 +2362,14 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			problems: [...summary.problems, ...[crash, streamError].filter((e): e is string => !!e).map(e => `the subagent stopped with an error: ${e}`)],
 			awaitingApprovalOf: status === 'awaiting_approval' ? awaitingApprovalOf : undefined,
 			durationMs: Date.now() - startedAt,
+		}
+		const rec = this._subagentSessions.get(childId);
+		if (rec) {
+			rec.state = status === 'timed_out' ? 'timed_out' : status === 'failed' ? 'failed' : 'completed';
+			rec.endedAt = Date.now();
+			rec.filesChanged = report.filesChanged;
+			rec.toolCallCount = report.toolCalls.total;
+			rec.error = report.problems[0];
 		}
 		const content = formatSubagentReport(report)
 		if (subagentSpanId) {
@@ -1844,11 +2490,71 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			estimateTokens,
 		) : undefined
 		const explicitTools: InternalToolInfo[] | undefined = budgeted?.tools ?? policyTools ?? (disabledSet ? baseAvailable : undefined)
+
+		// Automatic Turn-Aware UI/UX Design Intelligence & Live Research Injection:
+		// Guarantees that whenever the user asks to build/redesign software or AI products, Kodia's Design Engine
+		// automatically computes a custom WCAG-verified design system + CSS tokens and hands them directly to the agent.
+		let autoTurnDirectives = ''
+		if (!subagentOf && (chatMode === 'agent' || chatMode === 'plan')) {
+			const threadMsgs = this.state.allThreads[threadId]?.messages ?? []
+			const lastUserMsg = findLast(threadMsgs, m => m.role === 'user')
+			const userText = (lastUserMsg?.role === 'user' ? lastUserMsg.displayContent : '') || ''
+			const designSettings = this._settingsService.state.globalSettings.designIntelligence
+			const autoDesignOn = designSettings?.autoDesignIntelligence !== false
+
+			const isUiBuildRequest = /\b(build|create|design|make|develop|redesign|revamp|beautify|style|ui|ux|website|web\s*app|dashboard|saas|landing\s*page|store|e-?commerce|frontend|app|application|interface|portal|platform|software|mobile\s*app|screen|page|component)\b/i.test(userText)
+			const isAiRequest = /\b(ai|llm|chatbot|agent|rag|nvidia|nemotron|groq|openrouter|gemini|openai|anthropic|claude|ollama|model|prompt|automation|workflow)\b/i.test(userText)
+
+			const blocks: string[] = []
+			if (autoDesignOn && isUiBuildRequest && userText.trim().length > 0) {
+				try {
+					const brief = generateDesignBrief({
+						productDescription: userText.slice(0, 600),
+						requestedDirection: designSettings?.preferredStyleDirection ?? 'auto',
+						accessibilityTarget: designSettings?.accessibilityTarget ?? 'WCAG_AA',
+						animationPreference: designSettings?.animationPreference ?? 'refined',
+					})
+					const tokens = generateDesignTokens({
+						name: brief.productName,
+						productDescription: userText.slice(0, 600),
+						productCategory: brief.category,
+						visualDirection: brief.visualDirectionId,
+						accessibilityTarget: designSettings?.accessibilityTarget ?? 'WCAG_AA',
+						animationPreference: designSettings?.animationPreference ?? 'refined',
+					})
+					blocks.push([
+						`=== KODIA AUTO-GENERATED UI/UX DESIGN SYSTEM FOR THIS REQUEST (MANDATORY TO APPLY) ===`,
+						formatDesignBriefForLLM(brief),
+						`Google Fonts URL (include in index.html): ${tokens.typography.googleFontsUrl}`,
+						`Typography: Display="${tokens.typography.displayFont}", Body="${tokens.typography.bodyFont}", Mono="${tokens.typography.monoFont}"`,
+						`AVOID (STRICTLY BANNED): ${brief.avoidList.slice(0, 5).join('; ')}; generic flat gray boxes, unstyled default Tailwind boilerplate, raw Unicode emojis as UI icons, broken image links, lorem ipsum.`,
+						`Ready-to-paste CSS Custom Properties (paste into index.css / globals.css and use across all surfaces, buttons, cards, badges & typography):`,
+						'```css',
+						tokens.cssVariables,
+						'```',
+						`Also call \`discover_visual_assets\` / \`download_visual_assets\` (or craft bespoke SVG artwork) and run browser visual QA (\`browser_launch\` -> \`browser_navigate\` -> \`inspect_visual_quality\` / \`critique_interface_design\`) before finishing.`,
+					].join('\n'))
+				} catch { /* fallback to system prompt design instructions */ }
+			}
+
+			if (isAiRequest) {
+				blocks.push([
+					`=== KODIA MANDATORY LIVE RESEARCH DIRECTIVE (AI / MODELS / LATEST APIS) ===`,
+					`BEFORE writing any AI model ID, SDK call, or provider config, you MUST call \`lei_discover_models\` and/or \`web_search\` / \`lei_research_technology\` to verify the newest active models and docs.`,
+					`- NEVER use stale memorized model IDs like \`nvidia/llama-3.1-nemotron-70b-instruct\`, \`gpt-3.5-turbo\`, or \`gemini-1.5-pro\`.`,
+					`- Prefer free / free-tier providers (NVIDIA NIM e.g. live-verified \`nvidia/nemotron-3.5-super-vl-120b-a12b\`, Groq, OpenRouter \`:free\`, Google Gemini free tier, local Ollama) unless the user specifically asks for paid OpenAI/Anthropic.`,
+				].join('\n'))
+			}
+
+			autoTurnDirectives = blocks.join('\n\n')
+		}
+
 		const promptNotes = [
 			toolPolicy && subagentOf ? subagentRoleText(subagentOf.agent, subagentOf.description, toolPolicy.profile) : '',
 			budgeted ? describeOmittedTools(budgeted.omitted) : '',
+			autoTurnDirectives,
 		].filter(Boolean).join('\n\n')
-		const subagentPrompt = explicitTools ? { tools: explicitTools, role: promptNotes } : undefined
+		const subagentPrompt = (explicitTools || promptNotes) ? { tools: explicitTools, role: promptNotes } : undefined
 
 		// before enter loop, call tool
 		if (callThisToolFirst) {

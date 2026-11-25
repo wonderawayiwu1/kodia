@@ -593,6 +593,23 @@ export function selectBestModelForTask(
 			else if (m.capabilities.contextWindow >= 128_000) score += 10;
 		}
 
+		// Recency & newer-generation scoring so newer active models (e.g. nemotron-3.5, gemini-2.5, llama-3.3, qwen3)
+		// consistently outrank older legacy models (e.g. llama-3.1-nemotron-70b, gemini-1.5, gpt-3.5)
+		const idLower = m.modelId.toLowerCase();
+		if (/nemotron-3\.5|nemotron-4|gemini-2\.5|gemini-3|qwen3|llama-4|llama-3\.3|deepseek-r1|deepseek-v3|claude-4|gpt-5/.test(idLower)) {
+			score += 24;
+		}
+		if (/llama-3\.1-nemotron|llama-3\.0|llama2|llama-2|gpt-3\.5|gpt-4-0314|gpt-4-0613|gemini-1\.0|gemini-1\.5|claude-2/.test(idLower)) {
+			score -= 30;
+		}
+		if (m.releaseDate) {
+			const yearMatch = /^(\d{4})/.exec(m.releaseDate);
+			const yr = yearMatch ? Number(yearMatch[1]) : 0;
+			if (yr >= 2026) score += 16;
+			else if (yr === 2025) score += 8;
+			else if (yr > 0 && yr <= 2023) score -= 12;
+		}
+
 		return { model: m, score };
 	});
 

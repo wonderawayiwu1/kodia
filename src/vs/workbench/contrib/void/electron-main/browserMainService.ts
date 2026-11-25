@@ -24,7 +24,7 @@
  *    model: only page text, element metadata, URLs, titles and screenshots.
  */
 
-import { IBrowserService, BrowserLaunchResult, BrowserTabResult, BrowserTabInfo, BrowserInspectResult, BrowserPageInfo, BrowserScreenshotResult, ConsoleMessage, NetworkFailure, DownloadInfo, ScreenshotType, BrowserSessionInfo } from '../common/browserServiceTypes.js';
+import { IBrowserService, BrowserLaunchResult, BrowserTabResult, BrowserTabInfo, BrowserInspectResult, BrowserPageInfo, BrowserScreenshotResult, ConsoleMessage, NetworkFailure, NetworkLogEntry, BrowserDialogRecord, AnnotatedElementRef, BrowserAccessibilitySnapshot, BrowserAccessibilityNode, BrowserStorageResult, DownloadInfo, ScreenshotType, BrowserSessionInfo } from '../common/browserServiceTypes.js';
 import type { BrowserVisualAuditResult, MultiViewportAuditResult, ViewportScreenshotCapture } from '../common/designIntelligenceTypes.js';
 import { generateUuid } from '../../../../base/common/uuid.js';
 import { timeout } from '../../../../base/common/async.js';
@@ -83,6 +83,12 @@ interface PageState {
 	status?: number; // HTTP status of the main document
 	consoleMessages: ConsoleMessage[];
 	networkFailures: NetworkFailure[];
+	networkLog: NetworkLogEntry[];
+	requestStartTimes: WeakMap<object, number>;
+	dialogs: BrowserDialogRecord[];
+	dialogPolicy: { action: 'accept' | 'dismiss'; promptText?: string };
+	lastAnnotatedSelectors: Map<number, string>;
+	explicitViewport?: boolean;
 }
 
 interface SessionState {
@@ -90,6 +96,8 @@ interface SessionState {
 	browser: any; // playwright Browser
 	context: any; // playwright BrowserContext
 	headless: boolean;
+	responsiveViewport: boolean;
+	windowMaximized: boolean;
 	createdAt: number;
 	pages: Map<string, PageState>;
 	activeTabId: string | null;
@@ -318,23 +326,44 @@ export class KodiaBrowserMainService implements IBrowserService {
 		const pw = await getPlaywright();
 		const headless = opts.headless ?? false;
 		const executablePath = resolveChromeExecutable(pw);
-		const viewport = opts.viewport ?? { width: 1280, height: 800 };
+		// In headed (visible) mode, passing a fixed desktop viewport to Playwright sends
+		// CDP Emulation.setDeviceMetricsOverride, locking the page inside a fixed letterboxed
+		// rectangle with empty side margins and a mid-window scrollbar when maximized or resized.
+		// Use `viewport: null` + `--start-maximized` so the visible browser opens full-size and
+		// stays 100% responsive to window maximize/restore/resize. Honor fixed viewports in
+		// headless mode or when explicitly emulating a narrow (<1024px) mobile/tablet width.
+		const responsiveViewport = !headless && (!opts.viewport || opts.viewport.width >= 1024);
+		const contextViewport = responsiveViewport
+			? null
+			: (opts.viewport ?? { width: 1280, height: 800 });
+
+		const launchArgs = [
+			'--no-sandbox',
+			'--disable-setuid-sandbox',
+			'--disable-dev-shm-usage',
+			'--no-first-run',
+			'--no-default-browser-check',
+		];
+		if (headless) {
+			launchArgs.push(
+				'--disable-accelerated-2d-canvas',
+				'--no-zygote',
+				'--disable-gpu',
+			);
+		} else if (responsiveViewport) {
+			launchArgs.push('--start-maximized');
+		} else if (contextViewport) {
+			launchArgs.push(`--window-size=${Math.max(contextViewport.width + 64, 480)},${Math.max(contextViewport.height + 140, 680)}`);
+		}
+
 		const browser = await pw.chromium.launch({
 			headless,
 			executablePath,
-			args: [
-				'--no-sandbox',
-				'--disable-setuid-sandbox',
-				'--disable-dev-shm-usage',
-				'--disable-accelerated-2d-canvas',
-				'--no-first-run',
-				'--no-zygote',
-				'--disable-gpu',
-			],
+			args: launchArgs,
 		});
 		const context = await browser.newContext({
 			acceptDownloads: true,
-			viewport,
+			viewport: contextViewport,
 			// Do not record cookies/storage state for privacy across sessions;
 			// each session starts clean unless the agent navigates/logs in.
 		});
@@ -344,6 +373,8 @@ export class KodiaBrowserMainService implements IBrowserService {
 			browser,
 			context,
 			headless,
+			responsiveViewport,
+			windowMaximized: false,
 			createdAt: now(),
 			pages: new Map(),
 			activeTabId: null,
@@ -351,6 +382,32 @@ export class KodiaBrowserMainService implements IBrowserService {
 			closed: false,
 		};
 		this.sessions.set(sessionId, session);
+
+		// Automatically track popup windows and target="_blank" tabs opened by page clicks
+		context.on('page', (popupPage: any) => {
+			if (session.closed) return;
+			for (const existing of session.pages.values()) {
+				if (existing.page === popupPage) return;
+			}
+			const popupTabId = generateUuid();
+			const popupState: PageState = {
+				page: popupPage,
+				tabId: popupTabId,
+				url: popupPage.url() || 'about:blank',
+				title: '',
+				loading: true,
+				consoleMessages: [],
+				networkFailures: [],
+				networkLog: [],
+				requestStartTimes: new WeakMap(),
+				dialogs: [],
+				dialogPolicy: { action: 'accept' },
+				lastAnnotatedSelectors: new Map(),
+			};
+			session.pages.set(popupTabId, popupState);
+			session.activeTabId = popupTabId;
+			this.attachPageListeners(session, popupTabId, popupState);
+		});
 
 		return {
 			sessionId,
@@ -392,11 +449,21 @@ export class KodiaBrowserMainService implements IBrowserService {
 			loading: false,
 			consoleMessages: [],
 			networkFailures: [],
+			networkLog: [],
+			requestStartTimes: new WeakMap(),
+			dialogs: [],
+			dialogPolicy: { action: 'accept' },
+			lastAnnotatedSelectors: new Map(),
 		};
 		session.pages.set(tabId, state);
 		if (!session.activeTabId) session.activeTabId = tabId;
 
 		this.attachPageListeners(session, tabId, state);
+
+		if (session.responsiveViewport && !session.windowMaximized) {
+			session.windowMaximized = true;
+			await this.ensureMaximizedResponsiveWindow(session, page);
+		}
 
 		if (opts.url) {
 			await this.navigateLocked(session, tabId, state, opts.url);
@@ -456,6 +523,8 @@ export class KodiaBrowserMainService implements IBrowserService {
 		st.status = undefined;
 		st.consoleMessages = [];
 		st.networkFailures = [];
+		st.networkLog = [];
+		st.lastAnnotatedSelectors.clear();
 	}
 
 	// The HTTP status of the main document is part of the result: a 404/500 page still "loads".
@@ -568,100 +637,508 @@ export class KodiaBrowserMainService implements IBrowserService {
 		return !!navigation;
 	}
 
+	private resolveSelector(st: PageState, selector: string): string {
+		const trimmed = selector.trim();
+		const idxMatch = /^(?:@|\[)?(\d+)\]?$/.exec(trimmed);
+		if (idxMatch) {
+			const idx = Number(idxMatch[1]);
+			const mapped = st.lastAnnotatedSelectors.get(idx);
+			if (mapped) return mapped;
+		}
+		return selector;
+	}
+
+	/** Briefly highlights the target element in headed mode so the user sees Kodia's live browser actions. */
+	private async flashElementHighlight(session: SessionState, page: any, selector: string, label?: string): Promise<void> {
+		if (session.headless) return;
+		await page.evaluate(({ sel, tag }: { sel: string; tag?: string }) => {
+			try {
+				const el = document.querySelector(sel);
+				if (!el) return;
+				const r = el.getBoundingClientRect();
+				if (r.width === 0 && r.height === 0) return;
+				const old = document.getElementById('__kodia_agent_highlight__');
+				if (old) old.remove();
+				const box = document.createElement('div');
+				box.id = '__kodia_agent_highlight__';
+				box.style.cssText = `position:fixed;left:${Math.max(0, r.left - 3)}px;top:${Math.max(0, r.top - 3)}px;width:${r.width + 6}px;height:${r.height + 6}px;border:2px solid #38bdf8;border-radius:6px;background:rgba(56,189,248,0.12);box-shadow:0 0 0 4px rgba(56,189,248,0.18);pointer-events:none;z-index:2147483647;transition:opacity 0.35s ease;`;
+				if (tag) {
+					const pill = document.createElement('div');
+					pill.textContent = tag;
+					pill.style.cssText = 'position:absolute;top:-20px;left:0;background:#0284c7;color:#fff;font:600 10px/1.2 system-ui,sans-serif;padding:2px 6px;border-radius:4px;white-space:nowrap;';
+					box.appendChild(pill);
+				}
+				document.documentElement.appendChild(box);
+				setTimeout(() => { box.style.opacity = '0'; setTimeout(() => box.remove(), 360); }, 550);
+			} catch { }
+		}, { sel: selector, tag: label }).catch(() => { });
+	}
+
 	async clickElement(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		const matches = await st.page.$$eval(selector, (els: Element[]) => els.length).catch(() => 1);
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		const matches = await st.page.$$eval(resolved, (els: Element[]) => els.length).catch(() => 1);
 		if (matches > 1) {
-			throw new Error(`Selector "${selector}" matches ${matches} elements; use a selector that matches exactly one (browser_inspect_page lists one per element).`);
+			throw new Error(`Selector "${resolved}" matches ${matches} elements; use a selector that matches exactly one (browser_inspect_page lists one per element).`);
 		}
-		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.click(selector, { timeout: DEFAULT_TIMEOUT_MS }));
+		await this.flashElementHighlight(session, st.page, resolved, 'Click');
+		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.click(resolved, { timeout: DEFAULT_TIMEOUT_MS }));
 		return this.tabResult(tabId, st, navigated);
+	}
+
+	async clickAt(sessionId: string, tabId: string, x: number, y: number, opts?: { button?: 'left' | 'right' | 'middle'; clickCount?: number }): Promise<BrowserTabResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		if (!session.headless) {
+			await st.page.evaluate(({ px, py }: { px: number; py: number }) => {
+				try {
+					const dot = document.createElement('div');
+					dot.id = '__kodia_agent_highlight__';
+					dot.style.cssText = `position:fixed;left:${px - 10}px;top:${py - 10}px;width:20px;height:20px;border-radius:9999px;border:2px solid #38bdf8;background:rgba(56,189,248,0.28);pointer-events:none;z-index:2147483647;transition:opacity 0.35s ease;`;
+					document.documentElement.appendChild(dot);
+					setTimeout(() => { dot.style.opacity = '0'; setTimeout(() => dot.remove(), 360); }, 500);
+				} catch { }
+			}, { px: x, py: y }).catch(() => { });
+		}
+		const navigated = await this.runPossiblyNavigatingAction(st, () =>
+			st.page.mouse.click(x, y, { button: opts?.button ?? 'left', clickCount: opts?.clickCount ?? 1 })
+		);
+		return this.tabResult(tabId, st, navigated);
+	}
+
+	async hoverElement(sessionId: string, tabId: string, selector: string): Promise<void> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await this.flashElementHighlight(session, st.page, resolved, 'Hover');
+		await st.page.hover(resolved, { timeout: DEFAULT_TIMEOUT_MS });
 	}
 
 	async fillElement(sessionId: string, tabId: string, selector: string, text: string): Promise<void> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		await st.page.fill(selector, text, { timeout: DEFAULT_TIMEOUT_MS });
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await this.flashElementHighlight(session, st.page, resolved, 'Fill');
+		await st.page.fill(resolved, text, { timeout: DEFAULT_TIMEOUT_MS });
+	}
+
+	async typeText(sessionId: string, tabId: string, opts: { selector?: string; text: string; delayMs?: number; clearFirst?: boolean; pressEnter?: boolean }): Promise<BrowserTabResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		if (opts.selector) {
+			const resolved = this.resolveSelector(st, opts.selector);
+			await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+			await this.flashElementHighlight(session, st.page, resolved, 'Type');
+			await st.page.click(resolved, { timeout: DEFAULT_TIMEOUT_MS });
+			if (opts.clearFirst) {
+				await st.page.fill(resolved, '', { timeout: DEFAULT_TIMEOUT_MS }).catch(() => { });
+			}
+		}
+		const navigated = await this.runPossiblyNavigatingAction(st, async () => {
+			await st.page.keyboard.type(opts.text, { delay: Math.max(0, Math.min(opts.delayMs ?? 15, 250)) });
+			if (opts.pressEnter) {
+				await st.page.keyboard.press('Enter');
+			}
+		});
+		return this.tabResult(tabId, st, navigated);
+	}
+
+	async pressKey(sessionId: string, tabId: string, key: string, opts?: { selector?: string }): Promise<BrowserTabResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		if (opts?.selector) {
+			const resolved = this.resolveSelector(st, opts.selector);
+			await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+			await st.page.focus(resolved);
+		}
+		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.keyboard.press(key));
+		return this.tabResult(tabId, st, navigated);
+	}
+
+	async scrollPage(sessionId: string, tabId: string, opts: { direction?: 'up' | 'down' | 'left' | 'right' | 'top' | 'bottom'; amount?: number; selector?: string }): Promise<{ scrollX: number; scrollY: number; maxScrollY: number }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const resolved = opts.selector ? this.resolveSelector(st, opts.selector) : undefined;
+		const direction = opts.direction ?? 'down';
+		const amount = opts.amount ?? 600;
+		return await st.page.evaluate(({ dir, px, sel }: { dir: string; px: number; sel?: string }) => {
+			if (sel) {
+				const el = document.querySelector(sel) as HTMLElement | null;
+				if (!el) throw new Error(`Scroll target not found: ${sel}`);
+				if (dir === 'top') el.scrollTop = 0;
+				else if (dir === 'bottom') el.scrollTop = el.scrollHeight;
+				else if (dir === 'up') el.scrollBy(0, -px);
+				else if (dir === 'down') el.scrollBy(0, px);
+				else if (dir === 'left') el.scrollBy(-px, 0);
+				else if (dir === 'right') el.scrollBy(px, 0);
+				else el.scrollIntoView({ behavior: 'instant' as any, block: 'center' });
+				return { scrollX: Math.round(el.scrollLeft), scrollY: Math.round(el.scrollTop), maxScrollY: Math.max(0, el.scrollHeight - el.clientHeight) };
+			}
+			const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+			if (dir === 'top') window.scrollTo(0, 0);
+			else if (dir === 'bottom') window.scrollTo(0, maxY);
+			else if (dir === 'up') window.scrollBy(0, -px);
+			else if (dir === 'down') window.scrollBy(0, px);
+			else if (dir === 'left') window.scrollBy(-px, 0);
+			else if (dir === 'right') window.scrollBy(px, 0);
+			return { scrollX: Math.round(window.scrollX), scrollY: Math.round(window.scrollY), maxScrollY: Math.round(maxY) };
+		}, { dir: direction, px: amount, sel: resolved });
+	}
+
+	async dragAndDrop(sessionId: string, tabId: string, sourceSelector: string, targetSelector: string): Promise<void> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const src = this.resolveSelector(st, sourceSelector);
+		const dst = this.resolveSelector(st, targetSelector);
+		await st.page.waitForSelector(src, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await st.page.waitForSelector(dst, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await this.flashElementHighlight(session, st.page, src, 'Drag');
+		await st.page.dragAndDrop(src, dst, { timeout: DEFAULT_TIMEOUT_MS });
 	}
 
 	async selectOption(sessionId: string, tabId: string, selector: string, value: string): Promise<void> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		await st.page.selectOption(selector, { value }, { timeout: DEFAULT_TIMEOUT_MS });
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await this.flashElementHighlight(session, st.page, resolved, 'Select');
+		await st.page.selectOption(resolved, { value }, { timeout: DEFAULT_TIMEOUT_MS });
 	}
 
 	async checkElement(sessionId: string, tabId: string, selector: string, checked: boolean): Promise<void> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
-		await st.page.setChecked(selector, checked, { timeout: DEFAULT_TIMEOUT_MS });
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'visible', timeout: DEFAULT_TIMEOUT_MS });
+		await this.flashElementHighlight(session, st.page, resolved, checked ? 'Check' : 'Uncheck');
+		await st.page.setChecked(resolved, checked, { timeout: DEFAULT_TIMEOUT_MS });
 	}
 
 	async submitForm(sessionId: string, tabId: string, selector: string): Promise<BrowserTabResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
-		await st.page.waitForSelector(selector, { state: 'attached', timeout: DEFAULT_TIMEOUT_MS });
+		const resolved = this.resolveSelector(st, selector);
+		await st.page.waitForSelector(resolved, { state: 'attached', timeout: DEFAULT_TIMEOUT_MS });
 		const navigated = await this.runPossiblyNavigatingAction(st, () => st.page.evaluate((sel: string) => {
 			const form = document.querySelector(sel);
 			if (!form || !(form instanceof HTMLFormElement)) { throw new Error(`No <form> matches ${sel}`); }
 			form.requestSubmit();
-		}, selector));
+		}, resolved));
 		return this.tabResult(tabId, st, navigated);
+	}
+
+	async uploadFile(sessionId: string, tabId: string, selector: string, filePaths: string[]): Promise<{ uploaded: string[] }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const resolved = this.resolveSelector(st, selector);
+		const verified: string[] = [];
+		for (const p of filePaths) {
+			const abs = path.resolve(p);
+			if (!fs.existsSync(abs)) {
+				throw new Error(`Upload file does not exist: ${abs}`);
+			}
+			verified.push(abs);
+		}
+		await st.page.waitForSelector(resolved, { state: 'attached', timeout: DEFAULT_TIMEOUT_MS });
+		await st.page.setInputFiles(resolved, verified);
+		return { uploaded: verified };
+	}
+
+	async evaluateScript(sessionId: string, tabId: string, expression: string): Promise<{ value: unknown; type: string }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		return await st.page.evaluate((code: string) => {
+			// Evaluate either an expression or a function body safely and JSON-sanitize the result.
+			let raw: unknown;
+			try {
+				raw = (0, eval)(`(${code})`);
+			} catch {
+				raw = (new Function(code))();
+			}
+			const t = raw === null ? 'null' : Array.isArray(raw) ? 'array' : typeof raw;
+			if (raw === undefined) return { value: null, type: 'undefined' };
+			if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean' || raw === null) {
+				return { value: raw, type: t };
+			}
+			try {
+				const seen = new WeakSet();
+				const serialized = JSON.stringify(raw, (_k, v) => {
+					if (typeof v === 'object' && v !== null) {
+						if (seen.has(v)) return '[Circular]';
+						seen.add(v);
+					}
+					if (typeof v === 'function') return '[Function]';
+					return v;
+				});
+				if (!serialized) return { value: String(raw), type: t };
+				const capped = serialized.length > 24_000 ? serialized.slice(0, 24_000) : serialized;
+				return { value: capped.length < serialized.length ? `${capped}... (truncated)` : JSON.parse(serialized), type: t };
+			} catch {
+				return { value: String(raw).slice(0, 4000), type: t };
+			}
+		}, expression);
+	}
+
+	async getAccessibilitySnapshot(sessionId: string, tabId: string, opts?: { maxNodes?: number }): Promise<BrowserAccessibilitySnapshot> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const maxNodes = Math.max(10, Math.min(opts?.maxNodes ?? 200, 500));
+		return await st.page.evaluate((limit: number) => {
+			const isVisible = (el: Element): boolean => {
+				const r = el.getBoundingClientRect();
+				if (r.width === 0 && r.height === 0) return false;
+				const s = window.getComputedStyle(el);
+				return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0' && el.getAttribute('aria-hidden') !== 'true';
+			};
+			const selectorOf = (el: Element): string => {
+				const tag = el.tagName.toLowerCase();
+				const id = el.getAttribute('id');
+				if (id) return `#${CSS.escape(id)}`;
+				const dtid = el.getAttribute('data-testid');
+				if (dtid) return `[data-testid="${CSS.escape(dtid)}"]`;
+				const name = el.getAttribute('name');
+				if (name) return `${tag}[name="${CSS.escape(name)}"]`;
+				return tag;
+			};
+			const implicitRole = (el: Element): string | null => {
+				const explicit = el.getAttribute('role');
+				if (explicit) return explicit;
+				const tag = el.tagName.toLowerCase();
+				switch (tag) {
+					case 'main': return 'main';
+					case 'nav': return 'navigation';
+					case 'header': return 'banner';
+					case 'footer': return 'contentinfo';
+					case 'aside': return 'complementary';
+					case 'form': return 'form';
+					case 'section': return el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') ? 'region' : null;
+					case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': return 'heading';
+					case 'a': return el.hasAttribute('href') ? 'link' : null;
+					case 'button': return 'button';
+					case 'textarea': return 'textbox';
+					case 'select': return 'combobox';
+					case 'img': return 'img';
+					case 'table': return 'table';
+					case 'dialog': return 'dialog';
+					case 'input': {
+						const t = (el.getAttribute('type') || 'text').toLowerCase();
+						if (t === 'hidden') return null;
+						if (t === 'checkbox') return 'checkbox';
+						if (t === 'radio') return 'radio';
+						if (t === 'submit' || t === 'button' || t === 'reset') return 'button';
+						if (t === 'search') return 'searchbox';
+						return 'textbox';
+					}
+					default: return null;
+				}
+			};
+			const accessibleName = (el: Element): string => {
+				const aria = el.getAttribute('aria-label');
+				if (aria) return aria.trim();
+				const labelledBy = el.getAttribute('aria-labelledby');
+				if (labelledBy) {
+					const txt = labelledBy.split(/\s+/).map(id => document.getElementById(id)?.textContent?.trim() || '').join(' ').trim();
+					if (txt) return txt;
+				}
+				const alt = el.getAttribute('alt');
+				if (alt) return alt.trim();
+				const title = el.getAttribute('title');
+				if (title) return title.trim();
+				const ph = el.getAttribute('placeholder');
+				if (ph) return ph.trim();
+				return (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 100);
+			};
+
+			const landmarks: Array<{ role: string; label: string; selector: string }> = [];
+			const nodes: BrowserAccessibilityNode[] = [];
+			const activeEl = document.activeElement;
+			let focusedElement: { role: string; name: string; selector?: string } | undefined;
+
+			const all = Array.from(document.body ? document.body.querySelectorAll('*') : []);
+			for (const el of all) {
+				if (nodes.length >= limit) break;
+				if (!isVisible(el)) continue;
+				const role = implicitRole(el);
+				if (!role) continue;
+				const name = accessibleName(el);
+				const sel = selectorOf(el);
+				if (['main', 'navigation', 'banner', 'contentinfo', 'complementary', 'search', 'form', 'region'].includes(role)) {
+					landmarks.push({ role, label: name || role, selector: sel });
+				}
+				const tag = el.tagName.toLowerCase();
+				const level = /^h([1-6])$/.test(tag) ? Number(tag[1]) : (el.getAttribute('aria-level') ? Number(el.getAttribute('aria-level')) : undefined);
+				const ariaChecked = el.getAttribute('aria-checked');
+				const checked = tag === 'input' && ['checkbox', 'radio'].includes((el as HTMLInputElement).type)
+					? (el as HTMLInputElement).checked
+					: (ariaChecked === 'true' ? true : ariaChecked === 'false' ? false : ariaChecked === 'mixed' ? 'mixed' : undefined);
+				const ariaExpanded = el.getAttribute('aria-expanded');
+				const expanded = ariaExpanded === 'true' ? true : ariaExpanded === 'false' ? false : undefined;
+				const disabled = (el as HTMLButtonElement).disabled === true || el.getAttribute('aria-disabled') === 'true' || undefined;
+				const focused = el === activeEl || undefined;
+				const val = (tag === 'input' || tag === 'textarea' || tag === 'select') ? ((el as HTMLInputElement).value || undefined) : undefined;
+				if (focused) {
+					focusedElement = { role, name, selector: sel };
+				}
+				nodes.push({ role, name, value: val, level, checked, expanded, disabled, focused, selector: sel });
+			}
+			return {
+				url: location.href,
+				title: document.title,
+				focusedElement,
+				landmarks,
+				nodes,
+				summary: `${nodes.length} semantic ARIA nodes, ${landmarks.length} landmark(s)${focusedElement ? `, focus on [${focusedElement.role}] "${focusedElement.name}"` : ''}`,
+			};
+		}, maxNodes);
 	}
 
 	async waitForElement(sessionId: string, tabId: string, selector: string, opts: { timeoutMs?: number }): Promise<{ found: boolean }> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
+		const resolved = this.resolveSelector(st, selector);
 		try {
-			await st.page.waitForSelector(selector, { state: 'visible', timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
+			await st.page.waitForSelector(resolved, { state: 'visible', timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS });
 			return { found: true };
 		} catch {
 			return { found: false };
 		}
 	}
 
+	async waitForText(sessionId: string, tabId: string, text: string, opts?: { state?: 'visible' | 'hidden'; timeoutMs?: number }): Promise<{ matched: boolean }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const wantVisible = (opts?.state ?? 'visible') === 'visible';
+		const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		try {
+			await st.page.waitForFunction(
+				({ needle, expectVisible }: { needle: string; expectVisible: boolean }) => {
+					const bodyText = document.body?.innerText || '';
+					const has = bodyText.toLowerCase().includes(needle.toLowerCase());
+					return expectVisible ? has : !has;
+				},
+				{ needle: text, expectVisible: wantVisible },
+				{ timeout: timeoutMs },
+			);
+			return { matched: true };
+		} catch {
+			return { matched: false };
+		}
+	}
+
+	async waitForNetworkIdle(sessionId: string, tabId: string, opts?: { timeoutMs?: number }): Promise<{ settled: boolean }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		try {
+			await st.page.waitForLoadState('networkidle', { timeout: opts?.timeoutMs ?? 15_000 });
+			return { settled: true };
+		} catch {
+			return { settled: false };
+		}
+	}
+
 	async setViewport(sessionId: string, tabId: string, viewport: { width: number; height: number }): Promise<void> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
+		if (session.responsiveViewport && viewport.width <= 0 && viewport.height <= 0) {
+			st.explicitViewport = false;
+			await this.restoreResponsiveViewport(session, st.page);
+			return;
+		}
+		st.explicitViewport = true;
 		await st.page.setViewportSize(viewport);
 	}
 
-	async takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string }): Promise<BrowserScreenshotResult> {
+	async takeScreenshot(sessionId: string, tabId: string, opts: { type?: ScreenshotType; selector?: string; annotated?: boolean }): Promise<BrowserScreenshotResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
 		const type = opts.type ?? 'viewport';
 		let buffer: Buffer;
 		let width = 0;
 		let height = 0;
-		if (type === 'element') {
-			if (!opts.selector) throw new Error('An element screenshot needs a selector.');
-			const el = await st.page.$(opts.selector);
-			if (!el) throw new Error(`Element not found for screenshot: ${opts.selector}`);
-			buffer = await el.screenshot();
-			const box = await el.boundingBox();
-			width = Math.round((box && box.width) || 0);
-			height = Math.round((box && box.height) || 0);
-		} else if (type === 'fullpage') {
-			buffer = await st.page.screenshot({ fullPage: true });
-			const size = await st.page.evaluate(() => ({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }));
-			width = size.width;
-			height = size.height;
-		} else {
-			buffer = await st.page.screenshot({ fullPage: false });
-			const size = st.page.viewportSize();
-			width = size?.width ?? 0;
-			height = size?.height ?? 0;
+		let annotatedElements: AnnotatedElementRef[] | undefined;
+
+		// Remove any transient live highlight before capturing a clean screenshot
+		await st.page.evaluate(() => { document.getElementById('__kodia_agent_highlight__')?.remove(); }).catch(() => { });
+
+		if (opts.annotated) {
+			const inspected = await st.page.evaluate(EVAL_INSPECT_PAGE, 120) as BrowserPageInfo;
+			const visibleInVp = inspected.elements.filter(e => e.visible && e.inViewport && e.bbox && e.bbox.width > 2 && e.bbox.height > 2);
+			annotatedElements = visibleInVp.map((el, i) => ({
+				index: i + 1,
+				selector: el.selector,
+				type: el.type,
+				label: el.label,
+				bbox: el.bbox!,
+			}));
+			st.lastAnnotatedSelectors.clear();
+			for (const ref of annotatedElements) {
+				st.lastAnnotatedSelectors.set(ref.index, ref.selector);
+			}
+			await st.page.evaluate((refs: AnnotatedElementRef[]) => {
+				document.getElementById('__kodia_annotation_layer__')?.remove();
+				const layer = document.createElement('div');
+				layer.id = '__kodia_annotation_layer__';
+				layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
+				for (const r of refs) {
+					const box = document.createElement('div');
+					box.style.cssText = `position:fixed;left:${r.bbox.x}px;top:${r.bbox.y}px;width:${r.bbox.width}px;height:${r.bbox.height}px;border:1.5px solid #0ea5e9;border-radius:4px;background:rgba(14,165,233,0.06);box-sizing:border-box;`;
+					const badge = document.createElement('div');
+					badge.textContent = String(r.index);
+					badge.style.cssText = 'position:absolute;top:-10px;left:-2px;background:#0284c7;color:#ffffff;font:700 10px/1 monospace;padding:2px 4px;border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,0.45);';
+					box.appendChild(badge);
+					layer.appendChild(box);
+				}
+				document.documentElement.appendChild(layer);
+			}, annotatedElements).catch(() => { });
+		}
+
+		try {
+			if (type === 'element') {
+				if (!opts.selector) throw new Error('An element screenshot needs a selector.');
+				const resolved = this.resolveSelector(st, opts.selector);
+				const el = await st.page.$(resolved);
+				if (!el) throw new Error(`Element not found for screenshot: ${resolved}`);
+				buffer = await el.screenshot();
+				const box = await el.boundingBox();
+				width = Math.round((box && box.width) || 0);
+				height = Math.round((box && box.height) || 0);
+			} else if (type === 'fullpage') {
+				buffer = await st.page.screenshot({ fullPage: true });
+				const size = await st.page.evaluate(() => ({ width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }));
+				width = size.width;
+				height = size.height;
+			} else {
+				buffer = await st.page.screenshot({ fullPage: false });
+				const size = (session.responsiveViewport && !st.explicitViewport)
+					? null
+					: st.page.viewportSize();
+				if (size && size.width > 0 && size.height > 0) {
+					width = size.width;
+					height = size.height;
+				} else {
+					const liveSize = await st.page.evaluate(() => ({
+						width: document.documentElement.clientWidth || window.innerWidth,
+						height: document.documentElement.clientHeight || window.innerHeight,
+					})).catch(() => ({ width: 0, height: 0 }));
+					width = liveSize.width;
+					height = liveSize.height;
+				}
+			}
+		} finally {
+			if (opts.annotated) {
+				await st.page.evaluate(() => { document.getElementById('__kodia_annotation_layer__')?.remove(); }).catch(() => { });
+			}
 		}
 		// Also on disk, so the user (or a vision tool) can open it: the text result the model gets only says where.
 		fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 		const filePath = path.join(SCREENSHOT_DIR, `${generateUuid()}.png`);
 		fs.writeFileSync(filePath, buffer);
 		const dataUrl = `data:image/png;base64,${buffer.toString('base64')}`;
-		return { dataUrl, width, height, type, path: filePath };
+		return { dataUrl, width, height, type, path: filePath, ...(annotatedElements ? { annotatedElements } : {}) };
 	}
 
 	async auditDesignVisuals(sessionId: string, tabId: string): Promise<BrowserVisualAuditResult> {
@@ -966,6 +1443,7 @@ export class KodiaBrowserMainService implements IBrowserService {
 	): Promise<MultiViewportAuditResult> {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
+		const shouldRestoreResponsive = session.responsiveViewport && !st.explicitViewport;
 		const originalViewport = st.page.viewportSize() ?? { width: 1280, height: 800 };
 		const viewports = opts?.viewports && opts.viewports.length > 0
 			? opts.viewports
@@ -976,9 +1454,22 @@ export class KodiaBrowserMainService implements IBrowserService {
 			];
 
 		const captures: ViewportScreenshotCapture[] = [];
+		let responsiveCdp: any = null;
 		try {
+			if (shouldRestoreResponsive) {
+				responsiveCdp = await session.context.newCDPSession(st.page).catch(() => null);
+			}
 			for (const vp of viewports) {
-				await st.page.setViewportSize({ width: vp.width, height: vp.height });
+				if (responsiveCdp) {
+					await responsiveCdp.send('Emulation.setDeviceMetricsOverride', {
+						width: vp.width,
+						height: vp.height,
+						deviceScaleFactor: 0,
+						mobile: vp.width <= 480,
+					});
+				} else {
+					await st.page.setViewportSize({ width: vp.width, height: vp.height });
+				}
 				await timeout(120);
 				const [audit, shot] = await Promise.all([
 					this.auditDesignVisuals(sessionId, tabId),
@@ -998,7 +1489,17 @@ export class KodiaBrowserMainService implements IBrowserService {
 				});
 			}
 		} finally {
-			await st.page.setViewportSize(originalViewport).catch(() => { });
+			if (responsiveCdp) {
+				await responsiveCdp.send('Emulation.clearDeviceMetricsOverride').catch(() => { });
+				await responsiveCdp.detach().catch(() => { });
+				await st.page.evaluate(() => {
+					try { window.dispatchEvent(new Event('resize')); } catch { }
+				}).catch(() => { });
+			} else if (shouldRestoreResponsive) {
+				await this.restoreResponsiveViewport(session, st.page);
+			} else {
+				await st.page.setViewportSize(originalViewport).catch(() => { });
+			}
 		}
 
 		const allViewportsClean = captures.every(c => !c.hasHorizontalOverflow && c.layoutIssueCount === 0 && c.brokenImageCount === 0);
@@ -1029,6 +1530,78 @@ export class KodiaBrowserMainService implements IBrowserService {
 		const session = this.getSession(sessionId);
 		const st = this.getPage(session, tabId);
 		return st.networkFailures.slice();
+	}
+
+	async getNetworkLog(sessionId: string, tabId: string, opts?: { urlFilter?: string; resourceType?: string; statusMin?: number; limit?: number }): Promise<NetworkLogEntry[]> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		let entries = st.networkLog.slice();
+		if (opts?.urlFilter) {
+			const needle = opts.urlFilter.toLowerCase();
+			entries = entries.filter(e => e.url.toLowerCase().includes(needle));
+		}
+		if (opts?.resourceType) {
+			const rt = opts.resourceType.toLowerCase();
+			entries = entries.filter(e => e.resourceType.toLowerCase() === rt);
+		}
+		if (typeof opts?.statusMin === 'number') {
+			entries = entries.filter(e => (e.status ?? 0) >= opts.statusMin!);
+		}
+		const limit = opts?.limit && opts.limit > 0 ? Math.min(opts.limit, 200) : 50;
+		return entries.slice(-limit);
+	}
+
+	async handleDialog(sessionId: string, tabId: string, opts: { action: 'accept' | 'dismiss'; promptText?: string }): Promise<{ configured: { action: 'accept' | 'dismiss'; promptText?: string }; recentDialogs: BrowserDialogRecord[] }> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		st.dialogPolicy = { action: opts.action, promptText: opts.promptText };
+		return { configured: { ...st.dialogPolicy }, recentDialogs: st.dialogs.slice(-20) };
+	}
+
+	async inspectStorage(sessionId: string, tabId: string, opts?: { action?: 'read' | 'set_local' | 'remove_local' | 'clear_local' | 'set_session' | 'remove_session' | 'clear_session'; key?: string; value?: string }): Promise<BrowserStorageResult> {
+		const session = this.getSession(sessionId);
+		const st = this.getPage(session, tabId);
+		const action = opts?.action ?? 'read';
+		const storage = await st.page.evaluate(({ act, k, v }: { act: string; k?: string; v?: string }) => {
+			try {
+				if (act === 'set_local' && k !== undefined) localStorage.setItem(k, v ?? '');
+				else if (act === 'remove_local' && k !== undefined) localStorage.removeItem(k);
+				else if (act === 'clear_local') localStorage.clear();
+				else if (act === 'set_session' && k !== undefined) sessionStorage.setItem(k, v ?? '');
+				else if (act === 'remove_session' && k !== undefined) sessionStorage.removeItem(k);
+				else if (act === 'clear_session') sessionStorage.clear();
+			} catch { }
+			const readStore = (s: Storage): Record<string, string> => {
+				const out: Record<string, string> = {};
+				try {
+					for (let i = 0; i < Math.min(s.length, 100); i++) {
+						const key = s.key(i);
+						if (!key) continue;
+						const rawVal = s.getItem(key) ?? '';
+						// Redact obvious secret tokens while keeping shape visible
+						const sensitive = /token|secret|password|apikey|api_key|auth/i.test(key);
+						out[key] = sensitive ? `[REDACTED (${rawVal.length} chars)]` : rawVal.slice(0, 500);
+					}
+				} catch { }
+				return out;
+			};
+			return { url: location.href, localStorage: readStore(localStorage), sessionStorage: readStore(sessionStorage) };
+		}, { act: action, k: opts?.key, v: opts?.value });
+
+		let cookies: BrowserStorageResult['cookies'] = [];
+		try {
+			const rawCookies = await session.context.cookies(st.page.url() && st.page.url().startsWith('http') ? [st.page.url()] : []);
+			cookies = rawCookies.slice(0, 100).map((c: any) => ({
+				name: c.name,
+				domain: c.domain,
+				path: c.path,
+				httpOnly: !!c.httpOnly,
+				secure: !!c.secure,
+				sameSite: c.sameSite,
+			}));
+		} catch { }
+
+		return { ...storage, cookies };
 	}
 
 	async startDownload(sessionId: string, tabId: string, url: string): Promise<DownloadInfo> {
@@ -1102,6 +1675,53 @@ export class KodiaBrowserMainService implements IBrowserService {
 		return st;
 	}
 
+	/**
+	 * Ensures a visible (headed) Chromium window opens cleanly maximized with no locked
+	 * CDP device-metrics override so the page fills 100% of the window and responds fluidly
+	 * when the user maximizes, restores, or resizes the browser window.
+	 */
+	private async ensureMaximizedResponsiveWindow(session: SessionState, page: any): Promise<void> {
+		let cdp: any;
+		try {
+			cdp = await session.context.newCDPSession(page);
+			await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => { });
+			const winInfo = await cdp.send('Browser.getWindowForTarget').catch(() => null);
+			if (winInfo && typeof winInfo.windowId === 'number' && winInfo.bounds?.windowState !== 'maximized') {
+				await cdp.send('Browser.setWindowBounds', {
+					windowId: winInfo.windowId,
+					bounds: { windowState: 'maximized' },
+				}).catch(() => { });
+			}
+		} catch {
+			// Best-effort: headless/non-CDP environments safely ignore window bounds calls
+		} finally {
+			if (cdp) {
+				await cdp.detach().catch(() => { });
+			}
+		}
+	}
+
+	/**
+	 * Clears any fixed Playwright/CDP viewport override (e.g. after multi-viewport responsive audits)
+	 * so a visible Chromium window immediately returns to native responsive full-window layout.
+	 */
+	private async restoreResponsiveViewport(session: SessionState, page: any): Promise<void> {
+		let cdp: any;
+		try {
+			cdp = await session.context.newCDPSession(page);
+			await cdp.send('Emulation.clearDeviceMetricsOverride').catch(() => { });
+			await page.evaluate(() => {
+				try { window.dispatchEvent(new Event('resize')); } catch { }
+			}).catch(() => { });
+		} catch {
+			// Best-effort restore
+		} finally {
+			if (cdp) {
+				await cdp.detach().catch(() => { });
+			}
+		}
+	}
+
 	private attachPageListeners(session: SessionState, tabId: string, st: PageState): void {
 		const page = st.page;
 
@@ -1128,11 +1748,33 @@ export class KodiaBrowserMainService implements IBrowserService {
 			if (st.consoleMessages.length > 500) st.consoleMessages.shift();
 		});
 
+		// Track request start times for live network inspector
+		page.on('request', (req: any) => {
+			try { st.requestStartTimes.set(req, now()); } catch { }
+		});
+
 		// requestfailed only fires for transport errors; a 404 script or a 500 API call is a "successful" request.
 		page.on('response', (res: any) => {
 			try {
-				if (res.status() >= 400) {
-					st.networkFailures.push({ id: generateUuid(), timestampMs: now(), url: res.url(), type: res.request().resourceType() || 'other', errorText: `HTTP ${res.status()} ${res.statusText()}`.trim() });
+				const req = res.request();
+				const started = st.requestStartTimes.get(req);
+				const durationMs = started ? Math.max(0, now() - started) : undefined;
+				const status = res.status();
+				const headers = res.headers ? res.headers() : {};
+				st.networkLog.push({
+					id: generateUuid(),
+					timestampMs: now(),
+					method: req.method ? req.method() : 'GET',
+					url: res.url(),
+					resourceType: req.resourceType ? req.resourceType() : 'other',
+					status,
+					ok: status < 400,
+					durationMs,
+					contentType: headers['content-type']?.split(';')[0],
+				});
+				if (st.networkLog.length > 300) st.networkLog.shift();
+				if (status >= 400) {
+					st.networkFailures.push({ id: generateUuid(), timestampMs: now(), url: res.url(), type: req.resourceType() || 'other', errorText: `HTTP ${status} ${res.statusText()}`.trim() });
 					if (st.networkFailures.length > 200) st.networkFailures.shift();
 				}
 			} catch { }
@@ -1140,14 +1782,54 @@ export class KodiaBrowserMainService implements IBrowserService {
 
 		page.on('requestfailed', (req: any) => {
 			try {
+				const started = st.requestStartTimes.get(req);
+				const durationMs = started ? Math.max(0, now() - started) : undefined;
+				const errorText = req.failure()?.errorText ?? 'request failed';
+				st.networkLog.push({
+					id: generateUuid(),
+					timestampMs: now(),
+					method: req.method ? req.method() : 'GET',
+					url: req.url(),
+					resourceType: req.resourceType ? req.resourceType() : 'other',
+					ok: false,
+					durationMs,
+					errorText,
+				});
+				if (st.networkLog.length > 300) st.networkLog.shift();
 				st.networkFailures.push({
 					id: generateUuid(),
 					timestampMs: now(),
 					url: req.url(),
 					type: req.resourceType() || 'other',
-					errorText: req.failure()?.errorText ?? 'request failed',
+					errorText,
 				});
 				if (st.networkFailures.length > 200) st.networkFailures.shift();
+			} catch { }
+		});
+
+		// Auto-handle native JS alert/confirm/prompt/beforeunload dialogs so they never hang automation
+		page.on('dialog', async (dialog: any) => {
+			const policy = st.dialogPolicy ?? { action: 'accept' };
+			const type = dialog.type() as BrowserDialogRecord['type'];
+			const message = dialog.message();
+			const defaultValue = dialog.defaultValue ? dialog.defaultValue() : undefined;
+			const actionTaken: 'accepted' | 'dismissed' = policy.action === 'dismiss' ? 'dismissed' : 'accepted';
+			st.dialogs.push({
+				id: generateUuid(),
+				timestampMs: now(),
+				type,
+				message,
+				defaultValue,
+				actionTaken,
+				promptText: actionTaken === 'accepted' ? policy.promptText : undefined,
+			});
+			if (st.dialogs.length > 50) st.dialogs.shift();
+			try {
+				if (actionTaken === 'dismissed') {
+					await dialog.dismiss();
+				} else {
+					await dialog.accept(policy.promptText);
+				}
 			} catch { }
 		});
 

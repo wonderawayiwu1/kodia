@@ -38,17 +38,53 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'browser_reload',
 	'browser_inspect_page',
 	'browser_click_element',
+	'browser_click_at',
+	'browser_hover',
 	'browser_fill_element',
+	'browser_type_text',
+	'browser_press_key',
+	'browser_scroll',
+	'browser_drag_and_drop',
 	'browser_select_option',
 	'browser_check_element',
 	'browser_submit_form',
+	'browser_upload_file',
+	'browser_evaluate',
+	'browser_accessibility_snapshot',
 	'browser_wait_for_element',
+	'browser_wait_for_text',
+	'browser_wait_for_network_idle',
+	'browser_set_viewport',
 	'browser_screenshot',
 	'browser_console',
 	'browser_network_failures',
+	'browser_network_log',
+	'browser_handle_dialog',
+	'browser_storage',
 	'browser_download',
 	'browser_list_downloads',
 	'browser_shutdown',
+	// Antigravity Live Focus, Steps, Interactive Questions, Artifacts, Scheduler & Multi-Agent Engines
+	'update_focus',
+	'update_steps',
+	'ask_user_question',
+	'create_artifact',
+	'update_artifact',
+	'read_artifact',
+	'list_artifacts',
+	'schedule_task',
+	'manage_scheduled_tasks',
+	'define_subagent',
+	'manage_subagents',
+	'run_parallel_workflow',
+	// Cursor + Antigravity Superpower Tools
+	'multi_edit_file',
+	'view_file_outline',
+	'view_code_item',
+	'review_code_changes',
+	'manage_notepads',
+	'manage_rules',
+	'render_interactive_widget',
 	// Autonomous dev cycle tools
 	'dep_install',
 	'db_migrate',
@@ -480,14 +516,44 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'browser_forward':
 		case 'browser_reload':
 		case 'browser_inspect_page':
+		case 'browser_accessibility_snapshot':
 		case 'browser_wait_for_element':
+		case 'browser_wait_for_text':
+		case 'browser_wait_for_network_idle':
+		case 'browser_scroll':
+		case 'browser_hover':
 		case 'browser_set_viewport':
 		case 'browser_screenshot':
 		case 'browser_console':
 		case 'browser_network_failures':
+		case 'browser_network_log':
+		case 'browser_handle_dialog':
+		case 'browser_storage':
+		case 'browser_evaluate':
 		case 'browser_list_downloads':
 		case 'browser_shutdown':
+		case 'update_focus':
+		case 'update_steps':
+		case 'ask_user_question':
+		case 'create_artifact':
+		case 'update_artifact':
+		case 'read_artifact':
+		case 'list_artifacts':
+		case 'schedule_task':
+		case 'manage_scheduled_tasks':
+		case 'define_subagent':
+		case 'manage_subagents':
+		case 'run_parallel_workflow':
+		case 'view_file_outline':
+		case 'view_code_item':
+		case 'review_code_changes':
+		case 'render_interactive_widget':
 			return 'low';
+
+		case 'multi_edit_file':
+		case 'manage_notepads':
+		case 'manage_rules':
+			return 'medium';
 
 		// Dev server automation - starting/stopping servers is medium risk
 		case 'dev_server_start':

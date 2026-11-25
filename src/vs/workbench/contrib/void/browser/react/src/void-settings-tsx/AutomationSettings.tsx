@@ -10,9 +10,11 @@ import { SettingGroup, SettingsSection, SettingSwitch } from './SettingsControls
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import {
 	DEFAULT_UAEP_ENGINE_SETTINGS,
+	UaepAiProviderId,
 	UaepCodegenTarget,
 	UaepEngineSettings,
 } from '../../../../common/universalAutomationTypes.js';
+import { getUaepAiProviderPreset, UAEP_AI_PROVIDER_PRESETS } from '../../../../common/universalAutomationEngine.js';
 
 export const AutomationSettingsSection = ({ onRecordChange }: { onRecordChange?: (label: string) => void }) => {
 	const accessor = useAccessor();
@@ -53,6 +55,43 @@ export const AutomationSettingsSection = ({ onRecordChange }: { onRecordChange?:
 					<ShieldCheck size={12} /> Audit Logs
 				</KodiaSecondaryButton>
 			</KodiaCard>
+
+			<SettingGroup title='Free-First AI Provider Defaults (NVIDIA NIM, Groq, OpenRouter, Gemini, Ollama)' description='Choose which AI provider and model new Automation Studio AI nodes default to. Free-tier and local providers are prioritized over paid OpenAI.'>
+				<div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+					<label className='flex flex-col gap-1 text-xs'>
+						<span className='font-medium text-void-fg-1'>Default AI Provider</span>
+						<select
+							value={current.defaultAiProvider}
+							onChange={e => {
+								const preset = getUaepAiProviderPreset(e.target.value);
+								voidSettingsService.setGlobalSetting('uaep', {
+									...current,
+									defaultAiProvider: preset.id as UaepAiProviderId,
+									defaultAiModel: preset.defaultModel || current.defaultAiModel,
+								});
+								onRecordChange?.(`Automation Studio (UAEP): Default AI provider → ${preset.label}`);
+							}}
+							className='px-2.5 py-1.5 rounded bg-void-bg-1 border border-void-border-2 text-void-fg-1'
+						>
+							{UAEP_AI_PROVIDER_PRESETS.map(p => (
+								<option key={p.id} value={p.id}>{p.label}</option>
+							))}
+						</select>
+					</label>
+					<label className='flex flex-col gap-1 text-xs'>
+						<span className='font-medium text-void-fg-1'>Default AI Model ID (Verify Live via LEI)</span>
+						<input
+							value={current.defaultAiModel}
+							onChange={e => update('defaultAiModel', e.target.value, 'Default AI model updated')}
+							placeholder='e.g. nvidia/nemotron-3.5-super-vl-120b-a12b'
+							className='px-2.5 py-1.5 rounded bg-void-bg-1 border border-void-border-2 text-void-fg-1 font-mono'
+						/>
+					</label>
+				</div>
+				<div className='text-[11px] text-void-fg-3 mt-1.5'>
+					{getUaepAiProviderPreset(current.defaultAiProvider).note}
+				</div>
+			</SettingGroup>
 
 			<SettingGroup title='Compiler & Runtime Defaults' description='Controls execution model, generated source language, retry policies, and node timeouts.'>
 				<div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3'>

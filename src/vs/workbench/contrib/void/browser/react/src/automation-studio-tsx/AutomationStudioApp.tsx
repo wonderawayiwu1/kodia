@@ -34,6 +34,7 @@ import '../styles.css';
 import { useAccessor, useIsDark } from '../util/services.js';
 import { KodiaBadge, KodiaCard, KodiaPrimaryButton, KodiaSecondaryButton } from '../util/KodiaDesignSystem.js';
 import type {
+	UaepAiProviderId,
 	UaepCodegenTarget,
 	UaepCompileReport,
 	UaepConnectorSpec,
@@ -46,6 +47,7 @@ import type {
 	UaepStudioSection,
 	UaepWorkflowDefinition,
 } from '../../../../common/universalAutomationTypes.js';
+import { getUaepAiProviderPreset, UAEP_AI_PROVIDER_PRESETS } from '../../../../common/universalAutomationEngine.js';
 
 const CATEGORY_COLORS: Record<UaepNodeCategory, string> = {
 	trigger: 'border-emerald-500/60 bg-emerald-500/10 text-emerald-300',
@@ -60,6 +62,7 @@ export const AutomationStudioApp: React.FC = () => {
 	const isDark = useIsDark();
 	const accessor = useAccessor();
 	const uaep = accessor.get('IUniversalAutomationService');
+	const lei = accessor.get('ILiveIntelligenceService');
 
 	const [section, setSection] = useState<UaepStudioSection>(() => uaep.getActiveSection());
 	const [tenantId, setTenantId] = useState('default');
@@ -88,10 +91,11 @@ export const AutomationStudioApp: React.FC = () => {
 	const [compileReport, setCompileReport] = useState<UaepCompileReport | null>(null);
 	const [activeExecution, setActiveExecution] = useState<UaepExecutionRecord | null>(null);
 	const [triggerJson, setTriggerJson] = useState('{"email": "dev@acme.io", "orderId": "ORD-1001", "status": "ok"}');
-	const [credName, setCredName] = useState('');
-	const [credProvider, setCredProvider] = useState('openai');
-	const [credEnvKey, setCredEnvKey] = useState('OPENAI_API_KEY');
+	const [credName, setCredName] = useState('NVIDIA NIM (Free Tier)');
+	const [credProvider, setCredProvider] = useState('nvidia');
+	const [credEnvKey, setCredEnvKey] = useState('NVIDIA_API_KEY');
 	const [credSecret, setCredSecret] = useState('');
+	const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
 	const [deployTarget, setDeployTarget] = useState<UaepDeploymentTarget>('docker_compose');
 	const [embeddedName, setEmbeddedName] = useState('Acme Automation Cloud');
 	const [embeddedMultiTenant, setEmbeddedMultiTenant] = useState(true);
@@ -551,12 +555,84 @@ export const AutomationStudioApp: React.FC = () => {
 											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2'
 										/>
 									</label>
+									{selectedNode.category === 'ai' && (
+										<div className='p-2 rounded bg-void-bg-2/70 border border-fuchsia-500/30 flex flex-col gap-2'>
+											<div className='flex items-center justify-between'>
+												<span className='text-[11px] font-semibold text-fuchsia-300'>Free-First AI Provider</span>
+												<KodiaBadge tone='accent'>Live LEI Ready</KodiaBadge>
+											</div>
+											<select
+												value={String(selectedNode.config.provider ?? 'nvidia')}
+												onChange={e => {
+													const preset = getUaepAiProviderPreset(e.target.value as UaepAiProviderId);
+													setDiscoveredModels([]);
+													mutateWf(wf => ({
+														...wf,
+														nodes: wf.nodes.map(n => n.id === selectedNode.id ? {
+															...n,
+															credentialRef: preset.requiresApiKey ? preset.envKey : undefined,
+															config: {
+																...n.config,
+																provider: preset.id,
+																endpoint: preset.endpoint || String(n.config.endpoint ?? ''),
+																model: preset.defaultModel || String(n.config.model ?? ''),
+															},
+														} : n),
+													}));
+												}}
+												className='px-2 py-1 rounded bg-void-bg-1 border border-void-border-2 text-[11px]'
+											>
+												{UAEP_AI_PROVIDER_PRESETS.map(p => (
+													<option key={p.id} value={p.id}>{p.label}</option>
+												))}
+											</select>
+											<label className='flex flex-col gap-0.5 text-[10px]'>
+												<span className='text-void-fg-3'>Model ID</span>
+												<input
+													value={String(selectedNode.config.model ?? '')}
+													onChange={e => mutateWf(wf => ({ ...wf, nodes: wf.nodes.map(n => n.id === selectedNode.id ? { ...n, config: { ...n.config, model: e.target.value } } : n) }))}
+													placeholder='e.g. nvidia/nemotron-3.5-super-vl-120b-a12b'
+													className='px-2 py-1 rounded bg-void-bg-1 border border-void-border-2 font-mono text-[10px]'
+												/>
+											</label>
+											<KodiaSecondaryButton
+												disabled={busy !== null}
+												onClick={() => void run('lei-models', async () => {
+													const provider = String(selectedNode.config.provider ?? 'nvidia');
+													const report = await lei.discoverProviderModels({ provider: provider as any, forceRefresh: true });
+													const ids = report.models.slice(0, 16).map(m => m.modelId);
+													setDiscoveredModels(ids);
+													if (report.recommendedModel?.modelId) {
+														mutateWf(wf => ({ ...wf, nodes: wf.nodes.map(n => n.id === selectedNode.id ? { ...n, config: { ...n.config, model: report.recommendedModel!.modelId } } : n) }));
+													}
+													return `Discovered ${report.models.length} live ${provider.toUpperCase()} model(s)${report.recommendedModel ? ` — recommended: ${report.recommendedModel.modelId}` : ''}.`;
+												})}
+											>
+												<Sparkles size={11} /> Discover Latest Models (LEI)
+											</KodiaSecondaryButton>
+											{discoveredModels.length > 0 && (
+												<div className='max-h-24 overflow-y-auto flex flex-wrap gap-1'>
+													{discoveredModels.map(mid => (
+														<button
+															key={mid}
+															type='button'
+															onClick={() => mutateWf(wf => ({ ...wf, nodes: wf.nodes.map(n => n.id === selectedNode.id ? { ...n, config: { ...n.config, model: mid } } : n) }))}
+															className='px-1.5 py-0.5 rounded bg-void-bg-1 hover:bg-fuchsia-500/20 border border-void-border-2 text-[9px] font-mono text-void-fg-2 truncate max-w-full cursor-pointer'
+															title={`Use ${mid}`}
+														>
+															{mid}
+														</button>
+													))}
+												</div>
+											)}
+										</div>
+									)}
 									<label className='flex flex-col gap-1 text-[11px]'>
 										<span className='text-void-fg-3'>Credential Reference (Tenant Vault Key)</span>
 										<input
 											value={selectedNode.credentialRef ?? ''}
 											onChange={e => mutateWf(wf => ({ ...wf, nodes: wf.nodes.map(n => n.id === selectedNode.id ? { ...n, credentialRef: e.target.value || undefined } : n) }))}
-											placeholder='e.g. OPENAI_API_KEY'
+											placeholder='e.g. NVIDIA_API_KEY / GROQ_API_KEY / OPENROUTER_API_KEY'
 											className='px-2 py-1 rounded bg-void-bg-2 border border-void-border-2 font-mono'
 										/>
 									</label>
@@ -710,10 +786,23 @@ export const AutomationStudioApp: React.FC = () => {
 							{section === 'credentials' && (
 								<KodiaCard className='flex flex-col gap-3'>
 									<div className='font-semibold text-sm'>Multi-Tenant Encrypted Credential Vault (Tenant: {tenantId})</div>
+									<div className='flex flex-wrap items-center gap-1.5 text-[10px]'>
+										<span className='text-void-fg-3'>Quick Free-AI Presets:</span>
+										{UAEP_AI_PROVIDER_PRESETS.filter(p => p.requiresApiKey).map(p => (
+											<button
+												key={p.id}
+												type='button'
+												onClick={() => { setCredName(p.label); setCredProvider(p.id); setCredEnvKey(p.envKey); }}
+												className={`px-2 py-0.5 rounded border cursor-pointer transition-colors ${credProvider === p.id ? 'bg-fuchsia-500/20 border-fuchsia-400/60 text-fuchsia-200' : 'bg-void-bg-2 border-void-border-2 text-void-fg-2 hover:bg-void-bg-3'}`}
+											>
+												{p.label}
+											</button>
+										))}
+									</div>
 									<div className='grid grid-cols-1 md:grid-cols-5 gap-2'>
 										<input value={credName} onChange={e => setCredName(e.target.value)} placeholder='Credential Name' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2' />
-										<input value={credProvider} onChange={e => setCredProvider(e.target.value)} placeholder='Provider (nvidia/stripe)' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2' />
-										<input value={credEnvKey} onChange={e => setCredEnvKey(e.target.value)} placeholder='ENV_KEY' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2 font-mono' />
+										<input value={credProvider} onChange={e => setCredProvider(e.target.value)} placeholder='Provider (nvidia/groq/openrouter)' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2' />
+										<input value={credEnvKey} onChange={e => setCredEnvKey(e.target.value)} placeholder='ENV_KEY (e.g. NVIDIA_API_KEY)' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2 font-mono' />
 										<input type='password' value={credSecret} onChange={e => setCredSecret(e.target.value)} placeholder='Secret value (AES-256-GCM)' className='px-2 py-1.5 rounded bg-void-bg-2 border border-void-border-2 font-mono' />
 										<KodiaPrimaryButton disabled={!credSecret.trim() || !credEnvKey.trim() || busy !== null} onClick={() => void run('cred', async () => {
 											const m = await uaep.saveTenantCredential({ tenantId, name: credName.trim() || credEnvKey, provider: credProvider.trim() || 'custom', envKey: credEnvKey.trim(), secretValue: credSecret.trim() });
