@@ -656,9 +656,21 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 	const tokenizer = getTokenizer(providerName, modelName_, { tokenizerEncoding })
 	const reservedOutputTokenSpace = getReservedOutputTokenSpace(providerName, modelName_, { isReasoningEnabled: !!reasoningInfo?.isReasoningEnabled, overridesOfModel })
-	const preparedMessages = nativeToolsObj.tools
-		? _trimMessagesForToolBudget(messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[], nativeToolsObj.tools, contextWindow, reservedOutputTokenSpace, tokenizer)
+	const preparedMessages = (nativeToolsObj.tools || providerName === 'cloudflare')
+		? _trimMessagesForToolBudget(messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[], nativeToolsObj.tools ?? [], contextWindow, reservedOutputTokenSpace, tokenizer)
 		: messages as any
+
+	// Cloudflare Workers AI defaults `max_tokens` to 256 if omitted, which truncates tool-call JSON
+	// and code output mid-generation. Always pass a safe explicit `max_tokens` for Cloudflare.
+	let explicitMaxTokens: number | undefined
+	if (providerName === 'cloudflare') {
+		const countTokens = tokenizer ? tokenizer.countTokens : estimateTokens
+		const toolTokens = nativeToolsObj.tools ? countTokens(JSON.stringify(nativeToolsObj.tools)) : 0
+		const msgTokens = (preparedMessages as ChatMessageParam[]).reduce((sum, m) => sum + countTokens(_messageContentText(m.content)), 0)
+		const desiredOutput = Math.min(reservedOutputTokenSpace ?? 8_192, 16_384)
+		const available = Math.max(1_024, contextWindow - msgTokens - toolTokens - 512)
+		explicitMaxTokens = Math.max(1_024, Math.min(desiredOutput, available))
+	}
 
 	// instance
 	const openai: OpenAI = await newOpenAICompatibleSDK({ providerName, settingsOfProvider })
@@ -674,9 +686,9 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		...(promptCacheKey && providersWithPromptCacheKey.has(providerName) ? { prompt_cache_key: promptCacheKey } : {}),
 		// the model generates the unchanged parts of a rewrite much faster when it's told what to expect
 		...(prediction && supportsPredictedOutputs ? { prediction: { type: 'content' as const, content: prediction } } : {}),
+		...(explicitMaxTokens ? { max_tokens: explicitMaxTokens } : {}),
 		...nativeToolsObj,
 		...reasoningAndExtraPayload,
-		// max_completion_tokens: maxTokens,
 	}
 
 	// open source models - manually parse think tokens

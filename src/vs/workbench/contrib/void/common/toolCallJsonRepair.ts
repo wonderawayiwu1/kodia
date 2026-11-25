@@ -335,6 +335,35 @@ export function extractFallbackTextToolCalls(
 			return fullMatch;
 		});
 
+		// Pattern 3: Mistral / Llama raw JSON tool-call array `[TOOL_CALLS][{"name":"...","arguments":{...}}]`
+		// or bare `[{"name":"edit_file","arguments":{...}}]` leaked into content when server parser misses it
+		if (found.length === 0) {
+			const mistralRe = /(?:\[TOOL_CALLS\]\s*)?(?:```(?:json)?\s*)?(\[\s*\{\s*"name"\s*:[\s\S]*?\}\s*\])(?:\s*```)?/g;
+			cleaned = cleaned.replace(mistralRe, (fullMatch, jsonArrayStr: string) => {
+				try {
+					const arr = JSON.parse(jsonArrayStr.replace(/,\s*([}\]])/g, '$1'));
+					if (Array.isArray(arr) && arr.length > 0 && arr.every(item => item && typeof item === 'object' && typeof (item as Record<string, unknown>).name === 'string')) {
+						const beforeCount = found.length;
+						for (const item of arr as Array<Record<string, unknown>>) {
+							const rawArgs = item.arguments ?? item.parameters ?? item.params ?? {};
+							let argsObj: RawToolParamsObj = {};
+							if (typeof rawArgs === 'string') {
+								const rep = parseOrRepairToolArgs(rawArgs);
+								if (rep.ok) argsObj = rep.params;
+							} else if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+								argsObj = rawArgs as RawToolParamsObj;
+							}
+							accept(String(item.name), argsObj);
+						}
+						if (found.length > beforeCount) {
+							return '';
+						}
+					}
+				} catch { }
+				return fullMatch;
+			});
+		}
+
 		return cleaned.trim();
 	};
 

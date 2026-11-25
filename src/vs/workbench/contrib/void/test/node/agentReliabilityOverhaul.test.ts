@@ -234,5 +234,19 @@ suite('Kodia Core Agent Engine Reliability Overhaul', () => {
 			assert.deepStrictEqual(res.toolCalls[0].rawParams, { uri: 'a.ts', target: 'old', replacement: 'new' });
 			assert.strictEqual(res.cleanedText, 'Let me update the file.');
 		});
+
+		test('recovers Mistral raw JSON array [{"name":...,"arguments":{...}}] tool calls and repairs SEARCH/REPLACE markers', () => {
+			const mistralText = '[{"name": "edit_file", "arguments": {"uri": "button.tsx", "search_replace_blocks": "<<<<<<< SEARCH\\nconst a = 1;\\n=======\\nconst a = 2;\\n>>>>>>> REPLACE"}}]';
+			const res = extractFallbackTextToolCalls(mistralText, '', new Set(['edit_file']));
+			assert.strictEqual(res.toolCalls.length, 1);
+			assert.strictEqual(res.toolCalls[0].name, 'edit_file');
+			assert.strictEqual(res.cleanedText, '');
+
+			const repaired = repairToolParams('edit_file', res.toolCalls[0].rawParams, 'C:\\repo');
+			assert.strictEqual(repaired.repairedParams.search_replace_blocks, '<<<<<<< ORIGINAL\nconst a = 1;\n=======\nconst a = 2;\n>>>>>>> UPDATED');
+
+			const fromTarget = repairToolParams('edit_file', { uri: 'button.tsx', target: 'old', replacement: 'new' }, 'C:\\repo');
+			assert.strictEqual(fromTarget.repairedParams.search_replace_blocks, '<<<<<<< ORIGINAL\nold\n=======\nnew\n>>>>>>> UPDATED');
+		});
 	});
 });

@@ -174,22 +174,28 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		const cfDetected = detectedModelsOfProvider('cloudflare', [
 			{ name: '@cf/openai/gpt-oss-120b' }, // already a default
 			{ name: '@cf/qwen/qwen2.5-coder-32b-instruct', properties: [{ property_id: 'context_window', value: 32768 }] },
-			{ name: '@cf/mistral/mistral-7b-instruct-v0.2' }, // chat model without native function_calling
+			{ name: '@cf/mistralai/mistral-small-3.1-24b-instruct', properties: [{ property_id: 'function_calling', value: 'true' }] },
+			{ name: '@cf/cloudflare/clairic-flash' }, // non-chat structured fields endpoint: excluded
+			{ name: '@cf/cloudflare/def' }, // non-chat state/questions endpoint: excluded
+			{ name: '@cf/ibm-granite/granite-4.0-h-micro' }, // tiny micro model: excluded
 			{ name: '@cf/meta/llama-2-7b-chat-fp16' }, // legacy: excluded
 			{ name: '@cf/tinyllama/tinyllama-1.1b-chat-v1.0' }, // legacy tiny: excluded
 			{ name: '@cf/baai/bge-large-en-v1.5' }, // embedding: excluded
 			{ name: '@cf/openai/whisper' }, // audio: excluded
 		]);
-		assert.deepStrictEqual(names(cfDetected), ['@cf/mistral/mistral-7b-instruct-v0.2', '@cf/qwen/qwen2.5-coder-32b-instruct']);
-		const mistralCf = cfDetected.find(m => m.modelName === '@cf/mistral/mistral-7b-instruct-v0.2');
-		assert.strictEqual(mistralCf?.capabilities?.specialToolFormat, undefined, 'non-tool Cloudflare model should use XML fallback instead of openai-style');
+		assert.deepStrictEqual(names(cfDetected), ['@cf/mistralai/mistral-small-3.1-24b-instruct', '@cf/qwen/qwen2.5-coder-32b-instruct']);
 		const qwenCf = cfDetected.find(m => m.modelName === '@cf/qwen/qwen2.5-coder-32b-instruct');
-		assert.strictEqual(qwenCf?.capabilities?.specialToolFormat, 'openai-style');
+		assert.strictEqual(qwenCf?.capabilities?.specialToolFormat, undefined, 'qwen2.5-coder on Cloudflare should use XML tool calling');
+		const mistralCf = cfDetected.find(m => m.modelName === '@cf/mistralai/mistral-small-3.1-24b-instruct');
+		assert.strictEqual(mistralCf?.capabilities?.specialToolFormat, 'openai-style');
 
 		const cfCaps = getModelCapabilities('cloudflare', '@cf/openai/gpt-oss-120b', undefined);
 		assert.strictEqual(cfCaps.contextWindow, 128_000);
 		assert.strictEqual(cfCaps.cost.input, 0);
 		assert.strictEqual(cfCaps.specialToolFormat, 'openai-style');
+
+		const qwenCaps = getModelCapabilities('cloudflare', '@cf/qwen/qwen2.5-coder-32b-instruct', undefined);
+		assert.strictEqual(qwenCaps.specialToolFormat, undefined);
 
 		const gemma4Caps = getModelCapabilities('cloudflare', '@cf/google/gemma-4-26b-a4b-it', undefined);
 		assert.strictEqual(gemma4Caps.isUnrecognizedModel, false);

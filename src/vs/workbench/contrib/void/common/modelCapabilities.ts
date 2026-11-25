@@ -185,6 +185,7 @@ export const catalogModelsOfProvider = {
 		'@cf/deepseek-ai/deepseek-v4-pro-0813',
 		'@cf/qwen/qwen3.8-27b',
 		'@cf/qwen/qwen2.5-coder-32b-instruct',
+		'@cf/mistralai/mistral-small-3.1-24b-instruct',
 		'@cf/zai-org/glm-5.3',
 		'@cf/zai-org/glm-5.3-flash',
 		'@cf/moonshotai/kimi-k2.7-code',
@@ -2372,10 +2373,23 @@ const cloudflareModelOptions = {
 	},
 	'@cf/qwen/qwen2.5-coder-32b-instruct': {
 		contextWindow: 32_768,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		// Cloudflare's backend for qwen2.5-coder-32b-instruct does not expose native OpenAI function_calling;
+		// leaving specialToolFormat undefined enables Kodia's reliable XML tool calling instead.
+		specialToolFormat: undefined,
+		reasoningCapabilities: false,
+	},
+	'@cf/mistralai/mistral-small-3.1-24b-instruct': {
+		contextWindow: 128_000,
 		reservedOutputTokenSpace: 16_384,
 		cost: { input: 0, output: 0 },
 		downloadable: false,
 		supportsFIM: false,
+		supportsVision: true,
 		supportsSystemMessage: 'system-role',
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: false,
@@ -2433,7 +2447,7 @@ const cloudflareModelOptions = {
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
 
-const cloudflareToolCapableFallbackRe = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|qwen2\.5-coder|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i
+const cloudflareToolCapableFallbackRe = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i
 
 const cloudflareSettings: VoidStaticProviderInfo = {
 	modelOptions: cloudflareModelOptions,

@@ -57,7 +57,7 @@ const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
 	mistral: /voxtral|leanstral|ocr|embed|moderation|shieldstral|timestral/,
 	xAI: /voice|tts|speech|transcri/,
 	nvidia: /embedding|whisper|tts|transcribe|dall-e|image|audio|live|voice|speech|search|moderation|computer-use|deep-research|sora|davinci|babbage|-pro\b|guard|safety|rerank|reranker|ocr|embed/,
-	cloudflare: /embed|bge-|whisper|melotts|aura-|flux|stable-diffusion|dreamshaper|resnet|detr|m2m100|bart-|distilbert|rerank|speech|tts|audio|guard|llama-2|tinyllama|gemma-2b|gemma-7b|phi-2|openchat|zephyr|starling|discolm|sqlcoder|falcon|una-cybertron|deepseek-math|mistral-7b-instruct-v0\.1|qwen1\.5/i,
+	cloudflare: /^@cf\/cloudflare\/|clairic|\/def$|embed|bge-|whisper|melotts|aura-|flux|stable-diffusion|dreamshaper|resnet|detr|m2m100|bart-|distilbert|rerank|speech|tts|audio|guard|granite-.*(?:micro|tiny)|llama-3\.2-[13]b|llama-2|tinyllama|gemma-2b|gemma-7b|phi-2|openchat|zephyr|starling|discolm|sqlcoder|falcon|una-cybertron|deepseek-math|mistral-7b-instruct-v0\.1|qwen1\.5/i,
 	aionLabs: /embed|whisper|tts|audio|voice|speech|image|rerank/i,
 };
 
@@ -185,10 +185,14 @@ const nvidiaModels = (models: NvidiaModel[]): DetectedModel[] => models.map(m =>
 	// Preserve the exact model ID NVIDIA returns, including any owner prefix (e.g. nvidia/nemotron-3.5-super-vl-120b-a12b).
 }));
 
-const cloudflareToolCapableFamily = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|qwen2\.5-coder|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i;
+const cloudflareToolCapableFamily = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i;
 
 const cloudflareModels = (models: CloudflareModel[]): DetectedModel[] => models
 	.filter(m => typeof (m.name || m.id) === 'string')
+	.filter(m => {
+		const props = Array.isArray(m.properties) ? m.properties : [];
+		return !props.some(p => p.property_id === 'planned_deprecation_date' || (p.property_id === 'deprecated' && (p.value === true || p.value === 'true')));
+	})
 	.map(m => {
 		const modelName = String(m.name || m.id);
 		const props = Array.isArray(m.properties) ? m.properties : [];

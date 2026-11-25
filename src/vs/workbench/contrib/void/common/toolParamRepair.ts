@@ -143,21 +143,60 @@ export function repairToolParams(
 		}
 	}
 
-	// 4. edit_file: synthesize search_replace_blocks when model emits old_string/new_string
-	if (toolName === 'edit_file' && !next.search_replace_blocks) {
-		const oldVal = typeof next.old_string === 'string' ? next.old_string
-			: typeof next.old_text === 'string' ? next.old_text
-				: typeof next.search === 'string' ? next.search
-					: typeof next.original === 'string' ? next.original
-						: undefined;
-		const newVal = typeof next.new_string === 'string' ? next.new_string
-			: typeof next.new_text === 'string' ? next.new_text
-				: typeof next.replace === 'string' ? next.replace
-					: typeof next.updated === 'string' ? next.updated
-						: undefined;
-		if (oldVal !== undefined && newVal !== undefined) {
-			next.search_replace_blocks = `<<<<<<< ORIGINAL\n${oldVal}\n=======\n${newVal}\n>>>>>>> UPDATED`;
-			repairs.push('old_string/new_string→search_replace_blocks');
+	// 4. edit_file: synthesize or normalize search_replace_blocks for open-weight models
+	if (toolName === 'edit_file') {
+		if (Array.isArray(next.search_replace_blocks)) {
+			const blocks: string[] = [];
+			for (const entry of next.search_replace_blocks) {
+				if (entry && typeof entry === 'object') {
+					const e = entry as Record<string, unknown>;
+					const orig = typeof e.original === 'string' ? e.original
+						: typeof e.target === 'string' ? e.target
+							: typeof e.old_string === 'string' ? e.old_string
+								: typeof e.search === 'string' ? e.search : undefined;
+					const upd = typeof e.updated === 'string' ? e.updated
+						: typeof e.replacement === 'string' ? e.replacement
+							: typeof e.new_string === 'string' ? e.new_string
+								: typeof e.replace === 'string' ? e.replace : undefined;
+					if (orig !== undefined && upd !== undefined) {
+						blocks.push(`<<<<<<< ORIGINAL\n${orig}\n=======\n${upd}\n>>>>>>> UPDATED`);
+					}
+				}
+			}
+			if (blocks.length > 0) {
+				next.search_replace_blocks = blocks.join('\n');
+				repairs.push('array→search_replace_blocks');
+			}
+		} else if (!next.search_replace_blocks) {
+			const oldVal = typeof next.old_string === 'string' ? next.old_string
+				: typeof next.old_text === 'string' ? next.old_text
+					: typeof next.target === 'string' ? next.target
+						: typeof next.search === 'string' ? next.search
+							: typeof next.original === 'string' ? next.original
+								: typeof next.find === 'string' ? next.find
+									: typeof next.before === 'string' ? next.before
+										: undefined;
+			const newVal = typeof next.new_string === 'string' ? next.new_string
+				: typeof next.new_text === 'string' ? next.new_text
+					: typeof next.replacement === 'string' ? next.replacement
+						: typeof next.replace === 'string' ? next.replace
+							: typeof next.updated === 'string' ? next.updated
+								: typeof next.after === 'string' ? next.after
+									: undefined;
+			if (oldVal !== undefined && newVal !== undefined) {
+				next.search_replace_blocks = `<<<<<<< ORIGINAL\n${oldVal}\n=======\n${newVal}\n>>>>>>> UPDATED`;
+				repairs.push('old_string/new_string→search_replace_blocks');
+			}
+		}
+		if (typeof next.search_replace_blocks === 'string') {
+			const normalized = next.search_replace_blocks
+				.replace(/^<{4,}\s*(?:ORIGINAL|SEARCH|OLD|BEFORE)\s*$/gm, '<<<<<<< ORIGINAL')
+				.replace(/^={5,}\s*$/gm, '=======')
+				.replace(/^>{4,}\s*(?:UPDATED|REPLACE|NEW|AFTER)\s*$/gm, '>>>>>>> UPDATED');
+			if (normalized !== next.search_replace_blocks) {
+				next.search_replace_blocks = normalized;
+				repairs.push('normalized search_replace_blocks markers');
+			}
 		}
 	}
 
