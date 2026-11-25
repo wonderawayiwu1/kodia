@@ -17,6 +17,11 @@ import { prepareMessages } from '../../common/prepareLLMMessages.js';
 import { availableTools, chat_systemMessage, InternalToolInfo } from '../../common/prompt/prompts.js';
 import { estimateTokens } from '../../common/tokenizer.js';
 import { FILE_CHANGING_TOOLS, shouldRequestCompletionCheck } from '../../common/completionCheck.js';
+import {
+	buildMandatoryLiveWebQueries,
+	extractMidTurnWebVerificationQuery,
+	formatAutoWebSearchResultsForLLM,
+} from '../../common/liveWebGrounding.js';
 
 suite('Kodia Core Agent Engine Reliability Overhaul', () => {
 
@@ -247,6 +252,54 @@ suite('Kodia Core Agent Engine Reliability Overhaul', () => {
 
 			const fromTarget = repairToolParams('edit_file', { uri: 'button.tsx', target: 'old', replacement: 'new' }, 'C:\\repo');
 			assert.strictEqual(fromTarget.repairedParams.search_replace_blocks, '<<<<<<< ORIGINAL\nold\n=======\nnew\n>>>>>>> UPDATED');
+		});
+	});
+
+	suite('7. Mandatory Live Web Search Grounding (Always-Latest Code Enforcement)', () => {
+		test('buildMandatoryLiveWebQueries generates year-stamped queries for technical/AI requests and skips trivial greetings', () => {
+			const trivial = buildMandatoryLiveWebQueries('thanks!', 2026);
+			assert.strictEqual(trivial.shouldAutoSearch, false);
+			assert.deepStrictEqual(trivial.queries, []);
+
+			const plan = buildMandatoryLiveWebQueries('Build a React + Vite + Tailwind CSS app connected to Groq and NVIDIA NIM', 2026);
+			assert.strictEqual(plan.shouldAutoSearch, true);
+			assert.strictEqual(plan.queries.length, 2);
+			assert.ok(plan.queries.every(q => q.includes('2026')), 'every query must include current year');
+			assert.ok(plan.queries[0].includes('Groq') || plan.queries[0].includes('NVIDIA'));
+			assert.ok(plan.queries[1].includes('Tailwind CSS') && plan.queries[1].includes('React'));
+		});
+
+		test('extractMidTurnWebVerificationQuery catches manifest/config/install calls when agent skipped web_search', () => {
+			const q1 = extractMidTurnWebVerificationQuery('write_file', {
+				uri: 'client/package.json',
+				new_content: '{"dependencies":{"react":"^18.0.0","tailwindcss":"^4.0.0","vite":"^6.0.0"}}',
+			}, 2026);
+			assert.ok(q1 && q1.includes('Tailwind CSS') && q1.includes('2026'));
+
+			const q2 = extractMidTurnWebVerificationQuery('run_command', {
+				command: 'npm install openai tailwindcss @tailwindcss/vite',
+			}, 2026);
+			assert.ok(q2 && q2.includes('openai') && q2.includes('tailwindcss') && q2.includes('2026'));
+		});
+
+		test('formatAutoWebSearchResultsForLLM formats dated live grounding block & core toolset always keeps web_search/fetch_url', () => {
+			const block = formatAutoWebSearchResultsForLLM([{
+				query: 'Tailwind CSS latest 2026',
+				results: [{ title: 'Tailwind CSS v4 Docs', url: 'https://tailwindcss.com/docs', snippet: 'Use @import "tailwindcss";', publishedDate: '2026-05-01' }],
+			}], '2026-11-25');
+			assert.ok(block.includes('FETCHED 2026-11-25'));
+			assert.ok(block.includes('Tailwind CSS v4 Docs'));
+			assert.ok(block.includes('https://tailwindcss.com/docs'));
+
+			const allAgentTools = availableTools('agent', []) ?? [];
+			const focused = selectFocusedToolset(allAgentTools, 'Fix button styles', 32_000, estimateTokens);
+			const names = new Set(focused.tools.map(t => t.name));
+			assert.ok(names.has('web_search'), 'web_search must always be in core toolset');
+			assert.ok(names.has('fetch_url'), 'fetch_url must always be in core toolset');
+			assert.ok(names.has('lei_check_dependency'), 'lei_check_dependency must always be in core toolset');
+
+			const sys = chat_systemMessage({ workspaceFolders: ['C:\\repo'], chatMode: 'agent', mcpTools: [], includeXMLToolDefinitions: false });
+			assert.ok(sys.includes('MANDATORY LIVE WEB SEARCH FIRST'));
 		});
 	});
 });

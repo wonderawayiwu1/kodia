@@ -62,6 +62,7 @@ import { IToolOutputService } from '../common/toolOutputService.js';
 import { RetryPolicy, createRetryErrorInfo } from '../common/retryPolicy.js';
 import { isFallbackEligibleError, modelSelectionKey, resolveRoutedModelSelection, selectNextFallbackModel } from '../common/modelRouting.js';
 import { repairToolParams } from '../common/toolParamRepair.js';
+import { buildMandatoryLiveWebQueries, extractMidTurnWebVerificationQuery, formatAutoWebSearchResultsForLLM, LiveWebSearchEntry } from '../common/liveWebGrounding.js';
 import { FailurePatternMemory } from '../common/failureMemory.js';
 import { formatDesignBriefForLLM, generateDesignBrief, generateDesignTokens } from '../common/designIntelligenceEngine.js';
 import {
@@ -2543,21 +2544,69 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			: undefined
 		const explicitTools: InternalToolInfo[] | undefined = focusedSelection?.tools ?? budgeted?.tools ?? policyTools ?? (disabledSet ? baseAvailable : undefined)
 
-		// Automatic Turn-Aware UI/UX Design Intelligence & Live Research Injection:
-		// Guarantees that whenever the user asks to build/redesign software or AI products, Kodia's Design Engine
-		// automatically computes a custom WCAG-verified design system + CSS tokens and hands them directly to the agent.
+		// Automatic Turn-Aware UI/UX Design Intelligence & Mandatory Live Web Search Grounding:
+		// 1. Automatically fetches live current-year web search results BEFORE the first LLM call on technical/coding
+		//    turns so models NEVER rely on stale training memory for packages, frameworks, SDKs, or AI models.
+		// 2. Automatically computes a WCAG-verified Design System + CSS tokens for UI/app build requests.
 		let autoTurnDirectives = ''
-		if (!subagentOf && (chatMode === 'agent' || chatMode === 'plan')) {
+		let hasSearchedWebThisTurn = false
+		let midTurnAutoSearched = false
+		const todayIsoDate = new Date().toISOString().slice(0, 10)
+		const currentYear = new Date().getFullYear()
+		const runQuickLiveWebSearch = async (query: string, timeoutMs: number): Promise<LiveWebSearchEntry | null> => {
+			try {
+				const searchPromise = (async () => {
+					const callRes = await this._toolsService.callTool.web_search({ query, maxResults: 5 })
+					const awaited = await callRes.result
+					return awaited?.results ?? []
+				})()
+				const results = await Promise.race([
+					searchPromise,
+					new Promise<null>(resolve => setTimeout(() => resolve(null), timeoutMs)),
+				])
+				if (results && results.length > 0) {
+					return { query, results }
+				}
+			} catch {
+				// Fail open if offline or web search provider errors; system prompt still enforces web_search tool use
+			}
+			return null
+		}
+
+		if (!subagentOf && (chatMode === 'agent' || chatMode === 'plan' || chatMode === 'debug' || chatMode === 'gather')) {
 			const threadMsgs = this.state.allThreads[threadId]?.messages ?? []
 			const lastUserMsg = findLast(threadMsgs, m => m.role === 'user')
 			const userText = (lastUserMsg?.role === 'user' ? lastUserMsg.displayContent : '') || ''
 			const designSettings = this._settingsService.state.globalSettings.designIntelligence
 			const autoDesignOn = designSettings?.autoDesignIntelligence !== false
 
-			const isUiBuildRequest = /\b(build|create|design|make|develop|redesign|revamp|beautify|style|ui|ux|website|web\s*app|dashboard|saas|landing\s*page|store|e-?commerce|frontend|app|application|interface|portal|platform|software|mobile\s*app|screen|page|component)\b/i.test(userText)
-			const isAiRequest = /\b(ai|llm|chatbot|agent|rag|nvidia|nemotron|groq|openrouter|gemini|openai|anthropic|claude|ollama|model|prompt|automation|workflow)\b/i.test(userText)
+			const isUiBuildRequest = (chatMode === 'agent' || chatMode === 'plan') && /\b(build|create|design|make|develop|redesign|revamp|beautify|style|ui|ux|website|web\s*app|dashboard|saas|landing\s*page|store|e-?commerce|frontend|app|application|interface|portal|platform|software|mobile\s*app|screen|page|component)\b/i.test(userText)
+			const isAiRequest = /\b(ai|llm|chatbot|agent|rag|nvidia|nemotron|groq|openrouter|cloudflare|gemini|openai|anthropic|claude|ollama|model|prompt|automation|workflow)\b/i.test(userText)
+			const webQueryPlan = buildMandatoryLiveWebQueries(userText, currentYear)
 
 			const blocks: string[] = []
+
+			// Automatically run live web search BEFORE the first model call so the agent starts with verified up-to-date docs!
+			if (webQueryPlan.shouldAutoSearch && !disabledSet?.has('web_search')) {
+				const settled = await Promise.all(webQueryPlan.queries.map(q => runQuickLiveWebSearch(q, 6_000)))
+				const liveSearches = settled.filter((x): x is LiveWebSearchEntry => !!x)
+				if (liveSearches.length > 0) {
+					hasSearchedWebThisTurn = true
+					blocks.push(formatAutoWebSearchResultsForLLM(liveSearches, todayIsoDate))
+				}
+			}
+
+			if (webQueryPlan.shouldAutoSearch || isUiBuildRequest || isAiRequest) {
+				blocks.push([
+					`=== KODIA MANDATORY LIVE WEB SEARCH DIRECTIVE (TODAY: ${todayIsoDate}) ===`,
+					`Your training weights are OUTDATED. You MUST use live \`web_search\` (include year ${currentYear}) and \`fetch_url\` / \`lei_check_dependency\` / \`lei_discover_models\` BEFORE writing code with external libraries, frameworks, SDKs, APIs, config files, CLI commands, or AI models — and immediately whenever you hit a version, export, or deprecation error.`,
+					...(isAiRequest ? [
+						`- NEVER hardcode stale model IDs (\`nvidia/llama-3.1-nemotron-70b-instruct\`, \`gpt-3.5-turbo\`, \`gemini-1.5-pro\`). Verify active models live via \`lei_discover_models\` / \`web_search\`.`,
+						`- Prefer free / free-tier providers (NVIDIA NIM e.g. \`nvidia/nemotron-3.5-super-vl-120b-a12b\`, Groq, Cloudflare Workers AI, OpenRouter \`:free\`, Gemini free tier, local Ollama) unless paid providers are requested.`,
+					] : []),
+				].join('\n'))
+			}
+
 			if (autoDesignOn && isUiBuildRequest && userText.trim().length > 0) {
 				try {
 					const brief = generateDesignBrief({
@@ -2587,15 +2636,6 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 						`Also call \`discover_visual_assets\` / \`download_visual_assets\` (or craft bespoke SVG artwork) and run browser visual QA (\`browser_launch\` -> \`browser_navigate\` -> \`inspect_visual_quality\` / \`critique_interface_design\`) before finishing.`,
 					].join('\n'))
 				} catch { /* fallback to system prompt design instructions */ }
-			}
-
-			if (isAiRequest) {
-				blocks.push([
-					`=== KODIA MANDATORY LIVE RESEARCH DIRECTIVE (AI / MODELS / LATEST APIS) ===`,
-					`BEFORE writing any AI model ID, SDK call, or provider config, you MUST call \`lei_discover_models\` and/or \`web_search\` / \`lei_research_technology\` to verify the newest active models and docs.`,
-					`- NEVER use stale memorized model IDs like \`nvidia/llama-3.1-nemotron-70b-instruct\`, \`gpt-3.5-turbo\`, or \`gemini-1.5-pro\`.`,
-					`- Prefer free / free-tier providers (NVIDIA NIM e.g. live-verified \`nvidia/nemotron-3.5-super-vl-120b-a12b\`, Groq, OpenRouter \`:free\`, Google Gemini free tier, local Ollama) unless the user specifically asks for paid OpenAI/Anthropic.`,
-				].join('\n'))
 			}
 
 			autoTurnDirectives = blocks.join('\n\n')
@@ -3025,6 +3065,40 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 						} else {
 							progress.stepsSinceLastProgress += 1
 							lastStuckDetail = stepStuckReason || (duplicateHit ? `Repeated identical tool call: ${stepSigs[0]}` : 'No net progress on last step')
+						}
+
+						// Track whether the agent already verified live web docs this turn; if it jumps straight into
+						// writing manifests/configs/SDK code without searching yet, automatically run one live web_search
+						// and feed the verified current-year docs back immediately so stale code is caught right away.
+						for (const tm of stepToolMsgs) {
+							if (tm.type === 'success' && (
+								tm.name === 'web_search' || tm.name === 'fetch_url' ||
+								tm.name === 'lei_research_technology' || tm.name === 'lei_discover_models' || tm.name === 'lei_check_dependency'
+							)) {
+								hasSearchedWebThisTurn = true
+							}
+						}
+						if (!subagentOf && !hasSearchedWebThisTurn && !midTurnAutoSearched && !disabledSet?.has('web_search')) {
+							let midQuery: string | null = null
+							for (const tc of toolCalls) {
+								midQuery = extractMidTurnWebVerificationQuery(tc.name, (tc.rawParams ?? {}) as Record<string, unknown>, currentYear)
+								if (midQuery) break
+							}
+							if (midQuery) {
+								midTurnAutoSearched = true
+								const liveEntry = await runQuickLiveWebSearch(midQuery, 5_000)
+								if (liveEntry) {
+									hasSearchedWebThisTurn = true
+									const formatted = formatAutoWebSearchResultsForLLM([liveEntry], todayIsoDate)
+									this._addMessageToThread(threadId, {
+										role: 'user',
+										displayContent: `Kodia Live Web Verification (${midQuery})`,
+										content: `${formatted}\n\nVerify your just-written manifest/config/SDK code against these live ${currentYear} results and immediately update anything outdated.`,
+										selections: null,
+										state: { stagingSelections: [], isBeingEdited: false },
+									})
+								}
+							}
 						}
 
 						// Active Self-Recovery Intervention at 3 and 6 stuck steps (breaks loops BEFORE stalling!)

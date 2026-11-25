@@ -35,8 +35,8 @@ const CORE_FOCUSED_TOOLS: readonly string[] = [
 	'db_inspect', 'db_query', 'manage_env_file',
 	// Testing, Git & BugBot review
 	'test_discover', 'test_run', 'test_rerun_failed', 'git_status', 'git_diff', 'review_code_changes',
-	// Live web/AI research & API / SSE testing
-	'web_search', 'fetch_url', 'lei_discover_models', 'api_request', 'api_test_sse_stream',
+	// Live web/AI research & API / SSE testing (ALWAYS available for up-to-date docs, packages & models)
+	'web_search', 'fetch_url', 'lei_research_technology', 'lei_check_dependency', 'lei_discover_models', 'api_request', 'api_test_sse_stream',
 	// Visual Browser QA & Embedded Live Preview
 	'browser_launch', 'browser_new_tab', 'browser_navigate', 'browser_inspect_page',
 	'browser_click_element', 'browser_fill_element', 'browser_screenshot', 'browser_console',
@@ -106,12 +106,19 @@ export function selectFocusedToolset(
 	maxTools: number = MAX_FOCUSED_TOOLS_PER_TURN,
 ): ToolBudgetResult {
 	const byName = new Map(allTools.map(t => [t.name, t]));
+	const orderedNames: string[] = [];
 	const selectedNames = new Set<string>();
+	const addTool = (name: string) => {
+		if (!selectedNames.has(name) && byName.has(name)) {
+			selectedNames.add(name);
+			orderedNames.push(name);
+		}
+	};
 
-	// 1. Always include MCP tools (explicitly installed by the user)
+	// 1. Always include MCP tools first (explicitly installed by the user)
 	for (const t of allTools) {
-		if (t.name.includes('__') || !TOOL_PRIORITY.includes(t.name) && t.name.startsWith('mcp_')) {
-			selectedNames.add(t.name);
+		if (t.name.includes('__') || (!TOOL_PRIORITY.includes(t.name) && t.name.startsWith('mcp_'))) {
+			addTool(t.name);
 		}
 	}
 
@@ -119,14 +126,14 @@ export function selectFocusedToolset(
 	if (userText) {
 		for (const t of allTools) {
 			if (t.name.length >= 6 && userText.includes(t.name)) {
-				selectedNames.add(t.name);
+				addTool(t.name);
 			}
 		}
 	}
 
-	// 3. Add core software-engineering tools first
+	// 3. Add core software-engineering + live web search tools
 	for (const name of CORE_FOCUSED_TOOLS) {
-		if (byName.has(name)) selectedNames.add(name);
+		addTool(name);
 	}
 
 	// 4. Add relevant domain packs matched by user intent (staying within maxTools)
@@ -134,18 +141,14 @@ export function selectFocusedToolset(
 		for (const pack of DOMAIN_TOOL_PACKS) {
 			if (!pack.pattern.test(userText)) continue;
 			for (const name of pack.tools) {
-				if (selectedNames.size >= maxTools) break;
-				if (byName.has(name)) selectedNames.add(name);
+				if (orderedNames.length >= maxTools) break;
+				addTool(name);
 			}
 		}
 	}
 
-	// Trim to maxTools if needed (preserving explicit mentions & core order)
-	const orderedSelected: InternalToolInfo[] = [];
-	for (const t of allTools) {
-		if (selectedNames.has(t.name)) orderedSelected.push(t);
-	}
-	const capped = orderedSelected.length > maxTools ? orderedSelected.slice(0, maxTools) : orderedSelected;
+	// Cap to maxTools preserving MCP -> explicit mentions -> core -> domain pack priority
+	const capped = orderedNames.slice(0, maxTools).map(name => byName.get(name)!);
 
 	// Finally enforce token budget for small-context models (e.g. 8k-32k local models)
 	const tokenBudgeted = toolsWithinBudget(capped, contextWindow, countTokens);
@@ -159,8 +162,8 @@ export function selectFocusedToolset(
 
 // What a coding agent needs most, most important first. Tools not listed come after, in their usual order.
 const TOOL_PRIORITY: readonly string[] = [
-	// read, find, change files
-	'read_file', 'edit_file', 'multi_edit_file', 'workspace_search_replace', 'write_file', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
+	// read, find, change files & ALWAYS-ON live web search for latest docs/APIs/packages
+	'read_file', 'edit_file', 'multi_edit_file', 'workspace_search_replace', 'write_file', 'web_search', 'fetch_url', 'lei_check_dependency', 'lei_research_technology', 'lei_discover_models', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
 	'view_file_outline', 'view_code_item', 'code_semantic_search', 'code_keyword_search', 'rewrite_file', 'delete_file_or_folder', 'get_dir_tree', 'read_lint_errors',
 	// run things, SSE, live preview & masked .env
 	'run_command', 'open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal', 'api_test_sse_stream', 'open_live_preview', 'manage_env_file',

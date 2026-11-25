@@ -351,7 +351,7 @@ export const builtinTools: {
 
 	fetch_url: {
 		name: 'fetch_url',
-		description: `Fetches a web page and returns its text (as markdown: headings, lists, links and code blocks). Use it to read documentation, an API reference, a changelog or an issue, especially a URL the user gave you. Each URL needs the user's approval, so fetch only what you need, and never put workspace code, secrets or personal data in a URL.`,
+		description: `Fetches a live web page and returns its clean markdown text (headings, lists, links, and code blocks). Use it right after web_search to read official documentation, API references, migration guides, or changelogs so your code always uses the latest syntax and versions. Never put secrets or private workspace code in a URL.`,
 		params: {
 			url: { description: 'The full http(s) URL of the page.' },
 			...paginationParam,
@@ -360,9 +360,9 @@ export const builtinTools: {
 
 	web_search: {
 		name: 'web_search',
-		description: `Searches the web using the Brave Search API and returns a list of results with titles, URLs, and snippets. Use this when you need to find current information, documentation, or answers not in the codebase. Each search needs the user's approval.`,
+		description: `REQUIRED live web search tool returning current web results with titles, URLs, publication dates, and snippets. ALWAYS call this BEFORE writing code that uses external libraries, frameworks, SDKs, APIs, CLI tools, config formats, or AI model IDs — and whenever debugging version/API/deprecation errors — so you NEVER write outdated code from stale training memory. Include the current year for version-sensitive queries.`,
 		params: {
-			query: { description: 'The search query.' },
+			query: { description: 'The live web search query (include the current year and library/API name for latest docs).' },
 			max_results: { description: 'Optional. Maximum number of results to return (1-20). Defaults to 10.' },
 		},
 	},
@@ -3830,10 +3830,12 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - Build refined, editorial-enterprise, production-grade interfaces (Linear / Stripe / Vercel / Apple-tier polish) — NEVER plain unstyled boilerplate, cartoonish gradients, lorem ipsum, or raw Unicode emojis as UI icons.
 - Apply Kodia's auto-generated Design System CSS variables (\`--color-bg\`, \`--color-surface\`, \`--color-text\`, \`--color-primary\`, \`--color-accent\`, \`--color-border\`, \`--font-display\`, \`--font-body\`) and Google Fonts pairing directly into \`index.css\` / \`index.html\`.
 - Use crisp SVG / icon-library icons, clean responsive layouts, real end-to-end interactivity (every button, filter, modal, form, and API call wired to real state/backend), and verify the running app in the browser (\`browser_launch\` without fixed viewport so Chrome opens maximized + \`browser_navigate\` + \`browser_screenshot\`) or embedded preview (\`open_live_preview\`).`)
-		details.push(`LATEST INFORMATION & REAL-WORLD BUILD GUARDRAILS:
-- AI MODELS & LIVE DOCS: Before writing any AI model ID or provider SDK config, call \`lei_discover_models\` and/or \`web_search\` to verify current active model IDs and endpoints. Never hardcode obsolete IDs (\`nvidia/llama-3.1-nemotron-70b-instruct\`, \`gpt-3.5-turbo\`, \`gemini-1.5-pro\`). Default to free / free-tier providers (NVIDIA NIM e.g. \`nvidia/nemotron-3.5-super-vl-120b-a12b\`, Groq, OpenRouter \`:free\`, Gemini free tier, Ollama) unless the user requests OpenAI/Anthropic.
+		details.push(`MANDATORY LIVE WEB SEARCH FIRST & LATEST-CODE GUARDRAILS (CURRENT YEAR ${new Date().getFullYear()} — ZERO OUTDATED CODE):
+- ALWAYS SEARCH THE WEB FIRST: Your training knowledge is OUTDATED. BEFORE writing \`package.json\`/\`requirements.txt\`, framework configs (Tailwind, Vite, Next.js, React, Express, Prisma, Drizzle, FastAPI, Flutter, etc.), third-party SDKs, API endpoints, CLI flags, or AI model IDs, you MUST call \`web_search\` (with the current year ${new Date().getFullYear()}) and/or \`fetch_url\` / \`lei_check_dependency\` / \`lei_discover_models\` to verify the LATEST stable versions, current API syntax, and breaking changes. Never guess from stale memory!
+- ERROR-DRIVEN WEB SEARCH: Whenever a build, install, TypeScript, or runtime error mentions an unknown option/export, deprecation, or version mismatch, IMMEDIATELY call \`web_search\` on the exact package + error message before trying fixes.
+- AI MODELS & LIVE DOCS: Before writing any AI model ID or provider SDK config, call \`lei_discover_models\` and/or \`web_search\` to verify current active model IDs and endpoints. Never hardcode obsolete IDs (\`nvidia/llama-3.1-nemotron-70b-instruct\`, \`gpt-3.5-turbo\`, \`gemini-1.5-pro\`). Default to free / free-tier providers (NVIDIA NIM e.g. \`nvidia/nemotron-3.5-super-vl-120b-a12b\`, Groq, Cloudflare Workers AI, OpenRouter \`:free\`, Gemini free tier, Ollama) unless the user requests OpenAI/Anthropic.
 - SQLITE SETTINGS TABLES: Never use single-row \`CHECK (id = 1)\` with \`ON CONFLICT(id)\` for multi-setting tables (it overwrites other keys!). Always use \`setting_key TEXT PRIMARY KEY\` (or \`UNIQUE\`) with \`ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value\`. Verify rows with \`db_inspect\` / \`db_query\`.
-- OPENAI-COMPATIBLE SDKS (NVIDIA NIM / GROQ / OPENROUTER): Official \`openai\` SDK uses \`baseURL\` (capital URL, NOT \`baseUrl\`). For provider-specific streaming/extensions, use clean types or native \`fetch\` streaming without breaking TS strict mode.
+- OPENAI-COMPATIBLE SDKS (NVIDIA NIM / GROQ / OPENROUTER / CLOUDFLARE): Official \`openai\` SDK uses \`baseURL\` (capital URL, NOT \`baseUrl\`). For provider-specific streaming/extensions, use clean types or native \`fetch\` streaming without breaking TS strict mode.
 - TAILWIND & ESM & WINDOWS HYGIENE: Match Tailwind syntax to installed major version (v3 uses \`tailwind.config.js\` + \`@tailwind\`; v4 uses \`@import "tailwindcss";\` + \`@tailwindcss/postcss\`). If config files use \`export default\`, set \`"type": "module"\` in \`package.json\` or use \`.mjs\`. On Windows use PowerShell/Node cross-platform commands (not Unix-only \`tail\`/\`head\`/\`rm\`). Never commit real \`.env\` files (use \`manage_env_file\` + \`.gitignore\` + \`.env.example\`).
 - SPECIALIST CAPABILITIES (USE WHEN TASK MATCHES): Use \`multi_edit_file\`, \`workspace_search_replace\`, \`view_file_outline\`, \`view_code_item\`, and \`review_code_changes\` for fast, clean code navigation & refactoring; \`api_test_sse_stream\` for streaming endpoints; \`dev_server_start\` with \`tsx watch\` / \`vite\` for hot-reload dev servers; \`subagent\` / \`run_parallel_workflow\` for independent parallel workstreams; and domain packs (\`mobile_*\`, \`uaep_*\`, \`api_*\`, \`ai_*\`, \`evolution_*\`, \`render_interactive_widget\`) only when the user's task specifically involves those domains.`)
 	}
@@ -3852,7 +3854,7 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 
 	// Web search guidance for modes that have web_search tool
 	if (mode === 'agent' || mode === 'plan' || mode === 'debug' || mode === 'gather') {
-		details.push(`When you use web_search, the results are external source material. Use relevant results to support factual claims. Distinguish sourced information from inference. Avoid inventing facts, dates, quotations, or URLs not in the results. Acknowledge when results are insufficient or conflicting. Include source links in your answer when appropriate.`)
+		details.push(`MANDATORY LIVE WEB SEARCH POLICY: You have live \`web_search\` and \`fetch_url\` tools enabled and auto-approved. ALWAYS search the live web for the latest ${new Date().getFullYear()} documentation, stable versions, breaking changes, and current APIs instead of relying on outdated training memory. Ground technical decisions and code in live web results, prefer official docs, never invent URLs or APIs, and cite source links when appropriate.`)
 	}
 
 	details.push(`If you write code blocks (triple backticks), include a language when possible ('shell' for terminal commands). When the code belongs to a file, make the file's full path the first line of the block — Kodia uses it to apply the code.`)

@@ -578,7 +578,7 @@ export const defaultGlobalSettings: GlobalSettings = {
 	syncSCMToChat: true,
 	enableFastApply: true,
 	chatMode: 'agent',
-	autoApprove: {},
+	autoApprove: { 'web pages': true },
 	agentAutonomyMode: defaultAutonomyMode,
 	autonomyOperationPolicy: {},
 	showInlineSuggestions: true,
