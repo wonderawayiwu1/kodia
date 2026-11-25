@@ -3376,16 +3376,29 @@ export class ToolsService implements IToolsService {
 
 			// Cursor + Antigravity Superpower Tools
 			multi_edit_file: (params: RawToolParamsObj) => {
-				let rawEdits = params.edits
+				let rawEdits: unknown = params.edits
 				if (typeof rawEdits === 'string') { try { rawEdits = JSON.parse(rawEdits) } catch { } }
+				// Tolerate models that pass a single edit object at top-level instead of wrapping in edits: [...]
+				if (!Array.isArray(rawEdits) && (params.uri || (params as any).path || (params as any).file)) {
+					rawEdits = [params]
+				}
 				if (!Array.isArray(rawEdits) || rawEdits.length === 0) {
 					throw new Error('Invalid LLM output: edits must be a non-empty array of { uri, target, replacement }.')
 				}
-				const edits = rawEdits.map((e: any) => ({
-					uri: validateURI(e?.uri, workspaceContextService),
-					target: validateStr('target', e?.target),
-					replacement: typeof e?.replacement === 'string' ? e.replacement : String(e?.replacement ?? ''),
-				}))
+				const edits = rawEdits.map((item: any) => {
+					let e = item
+					if (typeof e === 'string') {
+						try { e = JSON.parse(e) } catch { }
+					}
+					const rawUri = e?.uri ?? e?.path ?? e?.file ?? e?.file_path ?? e?.filePath ?? e?.filename ?? params.uri
+					const rawTarget = e?.target ?? e?.old_string ?? e?.old_text ?? e?.old ?? e?.search ?? e?.original ?? e?.find ?? e?.before ?? e?.match
+					const rawReplacement = e?.replacement ?? e?.new_string ?? e?.new_text ?? e?.new ?? e?.replace ?? e?.updated ?? e?.after ?? e?.content ?? ''
+					return {
+						uri: validateURI(rawUri, workspaceContextService),
+						target: validateStr('target', rawTarget),
+						replacement: typeof rawReplacement === 'string' ? rawReplacement : String(rawReplacement ?? ''),
+					}
+				})
 				return { edits }
 			},
 			view_file_outline: (params: RawToolParamsObj) => ({

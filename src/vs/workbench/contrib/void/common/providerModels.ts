@@ -57,7 +57,7 @@ const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
 	mistral: /voxtral|leanstral|ocr|embed|moderation|shieldstral|timestral/,
 	xAI: /voice|tts|speech|transcri/,
 	nvidia: /embedding|whisper|tts|transcribe|dall-e|image|audio|live|voice|speech|search|moderation|computer-use|deep-research|sora|davinci|babbage|-pro\b|guard|safety|rerank|reranker|ocr|embed/,
-	cloudflare: /embed|bge-|whisper|melotts|aura-|flux|stable-diffusion|dreamshaper|resnet|detr|m2m100|bart-|distilbert|rerank|speech|tts|audio|guard/i,
+	cloudflare: /embed|bge-|whisper|melotts|aura-|flux|stable-diffusion|dreamshaper|resnet|detr|m2m100|bart-|distilbert|rerank|speech|tts|audio|guard|llama-2|tinyllama|gemma-2b|gemma-7b|phi-2|openchat|zephyr|starling|discolm|sqlcoder|falcon|una-cybertron|deepseek-math|mistral-7b-instruct-v0\.1|qwen1\.5/i,
 	aionLabs: /embed|whisper|tts|audio|voice|speech|image|rerank/i,
 };
 
@@ -185,6 +185,8 @@ const nvidiaModels = (models: NvidiaModel[]): DetectedModel[] => models.map(m =>
 	// Preserve the exact model ID NVIDIA returns, including any owner prefix (e.g. nvidia/nemotron-3.5-super-vl-120b-a12b).
 }));
 
+const cloudflareToolCapableFamily = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|qwen2\.5-coder|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i;
+
 const cloudflareModels = (models: CloudflareModel[]): DetectedModel[] => models
 	.filter(m => typeof (m.name || m.id) === 'string')
 	.map(m => {
@@ -192,12 +194,13 @@ const cloudflareModels = (models: CloudflareModel[]): DetectedModel[] => models
 		const props = Array.isArray(m.properties) ? m.properties : [];
 		const ctxProp = props.find(p => p.property_id === 'context_window' || p.property_id === 'max_input_tokens');
 		const ctxNum = typeof ctxProp?.value === 'number' ? ctxProp.value : typeof ctxProp?.value === 'string' ? Number(ctxProp.value) : undefined;
-		const hasTools = props.some(p => p.property_id === 'function_calling' && (p.value === 'true' || p.value === true));
+		const hasExplicitTools = props.some(p => p.property_id === 'function_calling' && (p.value === 'true' || p.value === true));
+		const supportsNativeTools = hasExplicitTools || cloudflareToolCapableFamily.test(modelName);
 		return {
 			modelName,
 			capabilities: definedOnly({
 				contextWindow: positive(ctxNum),
-				specialToolFormat: hasTools ? 'openai-style' : 'openai-style',
+				specialToolFormat: supportsNativeTools ? 'openai-style' : undefined,
 				cost: { input: 0, output: 0 },
 			}),
 		};

@@ -20,7 +20,7 @@ import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOf
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace, anthropicModelFeatures } from '../../common/modelCapabilities.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
-import { finalizeStreamedToolCalls, inferToolParamSchema, mergeStreamedToolDelta, StreamedToolDeltaState } from '../../common/toolCallJsonRepair.js';
+import { extractFallbackTextToolCalls, finalizeStreamedToolCalls, inferToolParamSchema, mergeStreamedToolDelta, StreamedToolDeltaState } from '../../common/toolCallJsonRepair.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens, getTokenizer } from '../../common/tokenizer.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
@@ -737,11 +737,13 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				}
 
 
-				// reasoning
+				// reasoning (some OpenAI-compatible gateways like Cloudflare/vLLM use either `reasoning_content` or `reasoning`)
 				let newReasoning = ''
 				if (nameOfReasoningFieldInDelta) {
-					// @ts-ignore
-					newReasoning = (chunk.choices[0]?.delta?.[nameOfReasoningFieldInDelta] || '') + ''
+					const deltaObj = chunk.choices[0]?.delta as Record<string, unknown> | undefined
+					const rawReasoning = deltaObj?.[nameOfReasoningFieldInDelta]
+						?? (nameOfReasoningFieldInDelta === 'reasoning_content' ? deltaObj?.['reasoning'] : deltaObj?.['reasoning_content'])
+					newReasoning = (rawReasoning || '') + ''
 					fullReasoningSoFar += newReasoning
 				}
 
@@ -754,12 +756,25 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 
 			}
 			// on final
-			const toolCalls = finalToolCallsOf(streamedToolCalls)
-			if (!fullTextSoFar && !fullReasoningSoFar && toolCalls.length === 0) {
+			let toolCalls = finalToolCallsOf(streamedToolCalls)
+			let finalText = fullTextSoFar
+			let finalReasoning = fullReasoningSoFar
+			// Fallback recovery for gateways (e.g. Cloudflare Workers AI Gemma-4, vLLM Qwen/Hermes)
+			// that leak raw `<|tool_call>call:...<tool_call|>` or `<tool_call>{...}</tool_call>` into text/reasoning
+			if (toolCalls.length === 0 && nativeToolsObj.tools && nativeToolsObj.tools.length > 0) {
+				const allowedNames = new Set(nativeToolsObj.tools.map(t => t.type === 'function' ? t.function.name : '').filter(Boolean))
+				const recovered = extractFallbackTextToolCalls(finalText, finalReasoning, allowedNames)
+				if (recovered.toolCalls.length > 0) {
+					toolCalls = recovered.toolCalls
+					finalText = recovered.cleanedText
+					finalReasoning = recovered.cleanedReasoning
+				}
+			}
+			if (!finalText && !finalReasoning && toolCalls.length === 0) {
 				onError({ message: 'Kodia: Response from model was empty.', fullError: null })
 			}
 			else {
-				onFinalMessage({ fullText: fullTextSoFar, fullReasoning: fullReasoningSoFar, anthropicReasoning: null, toolCalls, usage, finishReason });
+				onFinalMessage({ fullText: finalText, fullReasoning: finalReasoning, anthropicReasoning: null, toolCalls, usage, finishReason });
 			}
 		})
 		// when error/fail - this catches errors of both .create() and .then(for await)
@@ -1182,10 +1197,26 @@ const toGeminiFunctionDecl = (toolInfo: InternalToolInfo, GeminiType: typeof Typ
 			type: GeminiType.OBJECT,
 			properties: Object.entries(params).reduce((acc, [key, value]) => {
 				const inferred = inferToolParamSchema(key, value.description)
+				let itemsSchema: Schema | undefined
+				if (inferred.type === 'array') {
+					if (inferred.items?.type === 'object') {
+						const itemProps: Record<string, Schema> = {}
+						for (const [ik, iv] of Object.entries(inferred.items.properties ?? {})) {
+							itemProps[ik] = { type: mapType(iv.type) }
+						}
+						itemsSchema = {
+							type: GeminiType.OBJECT,
+							...(Object.keys(itemProps).length > 0 ? { properties: itemProps } : {}),
+							...(inferred.items.required ? { required: inferred.items.required } : {}),
+						}
+					} else {
+						itemsSchema = { type: mapType(inferred.items?.type ?? 'string') }
+					}
+				}
 				acc[key] = {
 					type: mapType(inferred.type),
 					description: value.description,
-					...(inferred.type === 'array' ? { items: { type: GeminiType.STRING } } : {}),
+					...(itemsSchema ? { items: itemsSchema } : {}),
 				};
 				return acc;
 			}, {} as Record<string, Schema>)

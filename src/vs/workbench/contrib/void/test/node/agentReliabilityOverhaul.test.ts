@@ -5,6 +5,7 @@
 
 import assert from 'assert';
 import {
+	extractFallbackTextToolCalls,
 	finalizeStreamedToolCalls,
 	inferToolParamSchema,
 	mergeStreamedToolDelta,
@@ -73,7 +74,13 @@ suite('Kodia Core Agent Engine Reliability Overhaul', () => {
 			assert.strictEqual(inferToolParamSchema('dry_run', 'Set true to preview changes.').type, 'boolean');
 			assert.strictEqual(inferToolParamSchema('start_line', '1-based line number to start reading.').type, 'number');
 			assert.strictEqual(inferToolParamSchema('timeout_ms', 'Optional timeout in milliseconds.').type, 'number');
-			assert.strictEqual(inferToolParamSchema('edits', 'JSON array of { uri, target, replacement }.').type, 'array');
+			const editsSchema = inferToolParamSchema('edits', 'JSON array of { uri, target, replacement }.');
+			assert.strictEqual(editsSchema.type, 'array');
+			assert.strictEqual(editsSchema.items?.type, 'object');
+			assert.strictEqual(editsSchema.items?.properties?.uri?.type, 'string');
+			assert.strictEqual(editsSchema.items?.properties?.target?.type, 'string');
+			assert.strictEqual(editsSchema.items?.properties?.replacement?.type, 'string');
+			assert.deepStrictEqual(editsSchema.items?.required, ['uri', 'target', 'replacement']);
 			assert.strictEqual(inferToolParamSchema('headers', 'Optional JSON object of HTTP headers.').type, 'object');
 			assert.strictEqual(inferToolParamSchema('uri', 'Absolute or workspace-relative file path.').type, 'string');
 		});
@@ -190,6 +197,42 @@ suite('Kodia Core Agent Engine Reliability Overhaul', () => {
 				alreadyRequested: false,
 				messagesThisTurn: [{ role: 'tool', type: 'success', name: 'multi_edit_file' }],
 			}), true);
+		});
+	});
+
+	suite('6. Cloudflare Gemma-4 & Hermes Fallback Text Tool-Call Recovery', () => {
+		test('recovers leaked Gemma-4 <|tool_call>call:...<tool_call|> from reasoning_content and strips raw tokens', () => {
+			const leakedReasoning = 'Checking card component next.\n<|tool_call>call:read_file{uri:<|"|>client/src/components/ui/card.tsx<|"|>}<tool_call|>';
+			const allowed = new Set(['read_file', 'edit_file', 'multi_edit_file']);
+			const res = extractFallbackTextToolCalls('', leakedReasoning, allowed);
+			assert.strictEqual(res.toolCalls.length, 1);
+			assert.strictEqual(res.toolCalls[0].name, 'read_file');
+			assert.deepStrictEqual(res.toolCalls[0].rawParams, { uri: 'client/src/components/ui/card.tsx' });
+			assert.strictEqual(res.cleanedReasoning, 'Checking card component next.');
+		});
+
+		test('recovers multi-param Gemma-4 edit_file calls with braces, numbers, booleans, and namespace prefix', () => {
+			const leakedText = '<|tool_call>call:default_api:edit_file{uri:<|"|>src/btn.tsx<|"|>,target:<|"|>const a = () => { return "$1"; }<|"|>,replacement:<|"|>const a = () => { return "$2"; }<|"|>,start_line:10,dry_run:false}<tool_call|>';
+			const res = extractFallbackTextToolCalls(leakedText, '', new Set(['edit_file']));
+			assert.strictEqual(res.toolCalls.length, 1);
+			assert.strictEqual(res.toolCalls[0].name, 'edit_file');
+			assert.deepStrictEqual(res.toolCalls[0].rawParams, {
+				uri: 'src/btn.tsx',
+				target: 'const a = () => { return "$1"; }',
+				replacement: 'const a = () => { return "$2"; }',
+				start_line: 10,
+				dry_run: false,
+			});
+			assert.strictEqual(res.cleanedText, '');
+		});
+
+		test('recovers Hermes/Qwen <tool_call>{...}</tool_call> and ignores unknown tools', () => {
+			const text = 'Let me update the file.\n<tool_call>{"name":"edit_file","arguments":{"uri":"a.ts","target":"old","replacement":"new"}}</tool_call>\n<tool_call>{"name":"nonexistent_tool","arguments":{}}</tool_call>';
+			const res = extractFallbackTextToolCalls(text, '', new Set(['edit_file']));
+			assert.strictEqual(res.toolCalls.length, 1);
+			assert.strictEqual(res.toolCalls[0].name, 'edit_file');
+			assert.deepStrictEqual(res.toolCalls[0].rawParams, { uri: 'a.ts', target: 'old', replacement: 'new' });
+			assert.strictEqual(res.cleanedText, 'Let me update the file.');
 		});
 	});
 });

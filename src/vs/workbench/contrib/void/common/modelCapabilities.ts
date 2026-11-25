@@ -179,6 +179,8 @@ export const catalogModelsOfProvider = {
 	cloudflare: [ // https://developers.cloudflare.com/workers-ai/models/ — OpenAI-compatible free daily neurons tier
 		'@cf/openai/gpt-oss-120b',
 		'@cf/openai/gpt-oss-20b',
+		'@cf/google/gemma-4-26b-a4b-it',
+		'@cf/google/gemma-4-31b-it',
 		'@cf/deepseek-ai/deepseek-v4.1-flash-1017',
 		'@cf/deepseek-ai/deepseek-v4-pro-0813',
 		'@cf/qwen/qwen3.8-27b',
@@ -2315,6 +2317,28 @@ const cloudflareModelOptions = {
 		specialToolFormat: 'openai-style',
 		reasoningCapabilities: openAIReasoningEffortCapabilities,
 	},
+	'@cf/google/gemma-4-26b-a4b-it': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/google/gemma-4-31b-it': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
 	'@cf/deepseek-ai/deepseek-v4.1-flash-1017': {
 		contextWindow: 1_000_000,
 		reservedOutputTokenSpace: 32_768,
@@ -2409,12 +2433,21 @@ const cloudflareModelOptions = {
 	},
 } as const satisfies { [s: string]: VoidStaticModelInfo }
 
+const cloudflareToolCapableFallbackRe = /gpt-oss|deepseek-v4|deepseek-r1|qwen3|qwen2\.5-coder|glm-4\.7|glm-5|kimi|llama-4|llama-3\.3|llama-3\.1|gemma-4|mistral-small-3/i
+
 const cloudflareSettings: VoidStaticProviderInfo = {
 	modelOptions: cloudflareModelOptions,
 	modelOptionsFallback: (modelName) => {
 		const res = extensiveModelOptionsFallback(modelName)
 		if (res) {
-			return { ...res, specialToolFormat: 'openai-style', cost: { input: 0, output: 0 } }
+			const supportsNativeTools = cloudflareToolCapableFallbackRe.test(modelName)
+			return {
+				...res,
+				modelName,
+				recognizedModelName: modelName,
+				specialToolFormat: supportsNativeTools ? 'openai-style' : undefined,
+				cost: { input: 0, output: 0 },
+			}
 		}
 		return null
 	},

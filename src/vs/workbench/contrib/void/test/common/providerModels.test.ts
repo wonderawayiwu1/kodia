@@ -170,18 +170,32 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		assert.strictEqual(llama.supportsVision, false, 'vision not inferred from the model name');
 	});
 
-	test('Cloudflare Workers AI & Aion Labs: detects free text models, filters non-chat endpoints, and resolves catalog capabilities', () => {
+	test('Cloudflare Workers AI & Aion Labs: detects free text models, filters non-chat & legacy endpoints, and resolves catalog capabilities', () => {
 		const cfDetected = detectedModelsOfProvider('cloudflare', [
 			{ name: '@cf/openai/gpt-oss-120b' }, // already a default
 			{ name: '@cf/qwen/qwen2.5-coder-32b-instruct', properties: [{ property_id: 'context_window', value: 32768 }] },
+			{ name: '@cf/mistral/mistral-7b-instruct-v0.2' }, // chat model without native function_calling
+			{ name: '@cf/meta/llama-2-7b-chat-fp16' }, // legacy: excluded
+			{ name: '@cf/tinyllama/tinyllama-1.1b-chat-v1.0' }, // legacy tiny: excluded
 			{ name: '@cf/baai/bge-large-en-v1.5' }, // embedding: excluded
 			{ name: '@cf/openai/whisper' }, // audio: excluded
 		]);
-		assert.deepStrictEqual(names(cfDetected), ['@cf/qwen/qwen2.5-coder-32b-instruct']);
+		assert.deepStrictEqual(names(cfDetected), ['@cf/mistral/mistral-7b-instruct-v0.2', '@cf/qwen/qwen2.5-coder-32b-instruct']);
+		const mistralCf = cfDetected.find(m => m.modelName === '@cf/mistral/mistral-7b-instruct-v0.2');
+		assert.strictEqual(mistralCf?.capabilities?.specialToolFormat, undefined, 'non-tool Cloudflare model should use XML fallback instead of openai-style');
+		const qwenCf = cfDetected.find(m => m.modelName === '@cf/qwen/qwen2.5-coder-32b-instruct');
+		assert.strictEqual(qwenCf?.capabilities?.specialToolFormat, 'openai-style');
+
 		const cfCaps = getModelCapabilities('cloudflare', '@cf/openai/gpt-oss-120b', undefined);
 		assert.strictEqual(cfCaps.contextWindow, 128_000);
 		assert.strictEqual(cfCaps.cost.input, 0);
 		assert.strictEqual(cfCaps.specialToolFormat, 'openai-style');
+
+		const gemma4Caps = getModelCapabilities('cloudflare', '@cf/google/gemma-4-26b-a4b-it', undefined);
+		assert.strictEqual(gemma4Caps.isUnrecognizedModel, false);
+		assert.strictEqual(gemma4Caps.contextWindow, 262_144);
+		assert.strictEqual(gemma4Caps.supportsVision, true);
+		assert.strictEqual(gemma4Caps.specialToolFormat, 'openai-style');
 
 		const aionDetected = detectedModelsOfProvider('aionLabs', [
 			{ id: 'aion-labs/aion-3.5' }, // already a default

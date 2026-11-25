@@ -7,22 +7,73 @@ import type { RawToolCallObj, RawToolParamsObj } from './sendLLMMessageTypes.js'
 
 export type InferredJsonSchemaType = 'string' | 'boolean' | 'number' | 'integer' | 'array' | 'object';
 
+export type InferredJsonSchema = {
+	type: InferredJsonSchemaType;
+	description: string;
+	items?: {
+		type: string;
+		properties?: Record<string, { type: string }>;
+		required?: string[];
+		additionalProperties?: boolean;
+	};
+	additionalProperties?: boolean;
+};
+
 /**
  * Infers an accurate JSON Schema primitive/container type for a tool parameter so strict
- * OpenAI/Groq/NVIDIA/Gemini function-calling validators never reject valid boolean/number/array
- * arguments with HTTP 400 (`expected string, got boolean`).
+ * OpenAI/Groq/NVIDIA/Cloudflare/Gemini function-calling validators never reject valid boolean/number/array
+ * arguments with HTTP 400 (`expected string, got boolean`) or emit strings where objects are required.
  */
 export function inferToolParamSchema(
 	paramName: string,
 	description: string,
-): { type: InferredJsonSchemaType; description: string; items?: { type: string }; additionalProperties?: boolean } {
+): InferredJsonSchema {
 	const name = paramName.toLowerCase();
 	const desc = (description || '').toLowerCase();
 
-	// Explicit array parameters
+	// Explicit array-of-objects parameters (critical: never advertise these as items: { type: 'string' }!)
+	if (name === 'edits') {
+		return {
+			type: 'array',
+			description,
+			items: {
+				type: 'object',
+				properties: {
+					uri: { type: 'string' },
+					target: { type: 'string' },
+					replacement: { type: 'string' },
+				},
+				required: ['uri', 'target', 'replacement'],
+				additionalProperties: true,
+			},
+		};
+	}
+	if (name === 'steps') {
+		return {
+			type: 'array',
+			description,
+			items: {
+				type: 'object',
+				properties: {
+					title: { type: 'string' },
+					status: { type: 'string' },
+				},
+				required: ['title', 'status'],
+				additionalProperties: true,
+			},
+		};
+	}
+	if (/^(?:questions|stages|todos|cookies|cells|operations|viewports|tasks)$/.test(name) || /\barray of\s*\{|\[\s*\{/.test(desc)) {
+		return { type: 'array', description, items: { type: 'object', additionalProperties: true } };
+	}
+	if (/^(?:cell_indices)$/.test(name)) {
+		return { type: 'array', description, items: { type: 'number' } };
+	}
+
+	// Explicit string array parameters
 	if (
 		/\bjson array\b|\barray of\b/.test(desc) ||
-		/^(?:edits|steps|questions|stages|paths|todos|file_paths|session_ids|allowed_tools|test_files|test_names|changed_files|files|filters|globs|cookies|cells|operations|cell_indices|viewports|tasks|dependencies)$/.test(name)
+		/^(?:paths|file_paths|session_ids|allowed_tools|test_files|test_names|changed_files|files|filters|globs|dependencies)$/.test(name)
 	) {
 		return { type: 'array', description, items: { type: 'string' } };
 	}
@@ -194,4 +245,105 @@ export function finalizeStreamedToolCalls(calls: StreamedToolDeltaState[]): RawT
 		}
 	}
 	return out;
+}
+
+/**
+ * Converts Gemma-4's native token-delimited argument syntax
+ *   `{uri:<|"|>client/src/App.tsx<|"|>,start_line:1,is_regex:false}`
+ * into standard JSON and parses it into a RawToolParamsObj.
+ */
+function parseGemma4ArgObject(rawObj: string): RawToolParamsObj | null {
+	const trimmed = rawObj.trim();
+	if (!trimmed || trimmed === '{}') return {};
+	// Fast path if it's already valid JSON (e.g. standard double-quoted arguments)
+	if (!trimmed.includes('<|"|>')) {
+		const direct = parseOrRepairToolArgs(trimmed);
+		if (direct.ok) return direct.params;
+	}
+	// 1. Replace Gemma-4 <|"|>...<|"|> string literals with properly JSON-escaped strings
+	const placeholders: string[] = [];
+	const withPlaceholders = trimmed.replace(/<\|"\|>([\s\S]*?)<\|"\|>/g, (_m, inner: string) => {
+		const idx = placeholders.length;
+		placeholders.push(JSON.stringify(inner));
+		return `"__KODIA_G4_STR_${idx}__"`;
+	});
+	// 2. Quote bare object keys (e.g. {uri:"...",start_line:1} -> {"uri":"...","start_line":1})
+	const quotedKeys = withPlaceholders.replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)/g, '$1"$2"$3');
+	// 3. Restore JSON-escaped string literals
+	const restored = quotedKeys.replace(/"__KODIA_G4_STR_(\d+)__"/g, (_m, idxStr: string) => placeholders[Number(idxStr)] ?? '""');
+	const parsed = parseOrRepairToolArgs(restored);
+	return parsed.ok ? parsed.params : null;
+}
+
+/**
+ * Recovers raw model-native tool calls that leaked into `content` or `reasoning_content`
+ * on gateways whose server-side tool parser missed them (e.g. Cloudflare Workers AI Gemma-4
+ * `<|tool_call>call:read_file{uri:<|"|>a.tsx<|"|>}<tool_call|>` or Qwen/Hermes `<tool_call>{...}</tool_call>`).
+ */
+export function extractFallbackTextToolCalls(
+	fullText: string,
+	fullReasoning = '',
+	allowedToolNames?: ReadonlySet<string>,
+): { toolCalls: RawToolCallObj[]; cleanedText: string; cleanedReasoning: string } {
+	const found: RawToolCallObj[] = [];
+	let callCounter = 0;
+
+	const accept = (name: string, params: RawToolParamsObj) => {
+		const cleanName = name.trim();
+		if (!cleanName) return;
+		if (allowedToolNames && allowedToolNames.size > 0 && !allowedToolNames.has(cleanName)) return;
+		found.push({
+			id: `call_kodia_fb_${Date.now().toString(36)}_${callCounter++}`,
+			name: cleanName,
+			rawParams: params,
+			doneParams: Object.keys(params),
+			isDone: true,
+		});
+	};
+
+	const extractFrom = (source: string): string => {
+		if (!source) return source;
+		let cleaned = source;
+
+		// Pattern 1: Gemma-4 native `<|tool_call>call:TOOL_NAME{...}<tool_call|>` (with optional namespace prefix like default_api:)
+		const gemma4Re = /<\|tool_call>call:(?:[A-Za-z_][A-Za-z0-9_]*:)?([A-Za-z_][A-Za-z0-9_-]*)\s*(\{[\s\S]*?\})\s*<\|?tool_call\|>/g;
+		cleaned = cleaned.replace(gemma4Re, (fullMatch, name: string, argsObj: string) => {
+			const params = parseGemma4ArgObject(argsObj);
+			if (params) {
+				accept(name, params);
+				return '';
+			}
+			return fullMatch;
+		});
+
+		// Pattern 2: Qwen / Hermes / vLLM `<tool_call>{"name":"...","arguments":{...}}</tool_call>`
+		const hermesRe = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+		cleaned = cleaned.replace(hermesRe, (fullMatch, inner: string) => {
+			const parsed = parseOrRepairToolArgs(inner);
+			if (parsed.ok && typeof parsed.params.name === 'string') {
+				const rawArgs = parsed.params.arguments ?? parsed.params.parameters ?? parsed.params.params ?? {};
+				let argsObj: RawToolParamsObj = {};
+				if (typeof rawArgs === 'string') {
+					const rep = parseOrRepairToolArgs(rawArgs);
+					if (rep.ok) argsObj = rep.params;
+				} else if (rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)) {
+					argsObj = rawArgs as RawToolParamsObj;
+				}
+				accept(parsed.params.name, argsObj);
+				return '';
+			}
+			return fullMatch;
+		});
+
+		return cleaned.trim();
+	};
+
+	// Prefer tool calls emitted in content first; if none found, recover tool calls that leaked into reasoning_content
+	const cleanedText = extractFrom(fullText);
+	let cleanedReasoning = fullReasoning;
+	if (found.length === 0 && fullReasoning) {
+		cleanedReasoning = extractFrom(fullReasoning);
+	}
+
+	return { toolCalls: found, cleanedText, cleanedReasoning };
 }
