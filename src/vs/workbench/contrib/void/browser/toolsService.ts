@@ -15,13 +15,18 @@ import { IBrowserService } from '../common/browserServiceTypes.js'
 import { formatAccessibilitySnapshot, formatBrowserInspection, formatBrowserPage, formatNetworkLog } from '../common/browserFormatting.js'
 import {
 	analyzeGitDiffForBugs,
+	detectRealWorldBuildPitfalls,
 	extractCodeItem,
 	extractCodeOutline,
+	extractSseTextDelta,
 	formatScopedRuleMarkdown,
+	isSensitiveEnvFilePath,
 	parseScopedRuleFile,
 	sanitizeWorkspaceDocName,
 	ScopedRuleDocument,
+	SseStreamEvent,
 } from '../common/cursorAntigravityEngines.js'
+import { ICommandService } from '../../../../platform/commands/common/commands.js'
 import { formatSubagentReport } from '../common/subagents.js'
 import { formatArchitectureMapForLLM, formatProjectHealthForLLM } from '../common/projectHealth.js'
 import { runArchitectureMap, runProjectHealthScan } from './projectHealthScanner.js'
@@ -51,7 +56,7 @@ import { IVoidSettingsService } from '../common/voidSettingsService.js'
 import { generateUuid } from '../../../../base/common/uuid.js'
 import { IProjectMemoryService } from '../common/projectMemoryService.js'
 import { resolveCwdUri } from '../common/pathSecurity.js';
-import { wrapCommandForShell, wrapCommandForInteractiveShell, terminalCommandOutcome } from '../common/terminalUtils.js';
+import { normalizeCommandForPlatform, wrapCommandForShell, wrapCommandForInteractiveShell, terminalCommandOutcome } from '../common/terminalUtils.js';
 import { TaskStatus, getPlanProgress, formatTaskPlanForLLM } from '../common/autonomousTask.js';
 import { ProxyChannel } from '../../../../base/parts/ipc/common/ipc.js'
 import { IMainProcessService } from '../../../../platform/ipc/common/mainProcessService.js'
@@ -598,30 +603,59 @@ export class ToolsService implements IToolsService {
 		const uabeMainService = ProxyChannel.toService<IKodiaUniversalAppBuilderMainService>(mainProcessService.getChannel(KODIA_UABE_CHANNEL))
 		const uaepMainService = ProxyChannel.toService<IKodiaUniversalAutomationMainService>(mainProcessService.getChannel(KODIA_UAEP_CHANNEL))
 
-		// FPERE Write-Time Guard: immediately verify imports, named/default exports, declared packages & stubs on edited code files
+		// FPERE + Real-World Pitfall Write-Time Guard: immediately verify imports/exports AND catch
+		// SQLite single-row settings traps, OpenAI baseUrl typos, Tailwind v4/v3 mismatches, and ESM config bugs.
 		const runFpereWriteGuard = async (uri: URI, existingLintErrors: LintErrorItem[] | null): Promise<LintErrorItem[] | null> => {
-			const root = workspaceFolderPaths()[0]
-			if (!root || !/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py)$/i.test(uri.fsPath)) return existingLintErrors
-			const normRoot = root.replace(/\\/g, '/').toLowerCase()
-			const normFile = uri.fsPath.replace(/\\/g, '/')
-			if (!normFile.toLowerCase().startsWith(normRoot)) return existingLintErrors
-			const rel = normFile.slice(normRoot.length).replace(/^\/+/, '')
-			try {
-				const rep = await fpereMainService.validateImportsAndExports(root, [rel])
-				const fpereErrs: LintErrorItem[] = rep.issues
-					.filter(i => i.severity === 'error')
-					.slice(0, 8)
-					.map(i => ({
-						code: i.kind,
-						message: `[FPERE ${i.kind}] ${i.message} (${i.suggestedFix})`,
-						startLineNumber: i.line,
-						endLineNumber: i.line,
-					}))
-				if (fpereErrs.length === 0) return existingLintErrors
-				return [...(existingLintErrors ?? []), ...fpereErrs]
-			} catch {
-				return existingLintErrors
+			const extraErrs: LintErrorItem[] = []
+			if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|css|sql)$/i.test(uri.fsPath)) {
+				try {
+					const content = (await fileService.readFile(uri)).value.toString()
+					let pkgContent: string | undefined
+					// Look for package.json in the file's directory, parent directory, or workspace root
+					const candidates: URI[] = [
+						URI.joinPath(URI.file(uri.fsPath.replace(/[\\/][^\\/]+$/, '')), 'package.json'),
+					]
+					const folder = workspaceContextService.getWorkspaceFolder(uri)
+					if (folder) candidates.push(URI.joinPath(folder.uri, 'package.json'))
+					for (const cand of candidates) {
+						try {
+							pkgContent = (await fileService.readFile(cand)).value.toString()
+							break
+						} catch { }
+					}
+					for (const pitfall of detectRealWorldBuildPitfalls(uri.fsPath, content, pkgContent)) {
+						extraErrs.push({
+							code: pitfall.code,
+							message: `[Kodia Pitfall Guard] ${pitfall.message}`,
+							startLineNumber: pitfall.line,
+							endLineNumber: pitfall.line,
+						})
+					}
+				} catch { }
 			}
+
+			const root = workspaceFolderPaths()[0]
+			if (root && /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py)$/i.test(uri.fsPath)) {
+				const normRoot = root.replace(/\\/g, '/').toLowerCase()
+				const normFile = uri.fsPath.replace(/\\/g, '/')
+				if (normFile.toLowerCase().startsWith(normRoot)) {
+					const rel = normFile.slice(normRoot.length).replace(/^\/+/, '')
+					try {
+						const rep = await fpereMainService.validateImportsAndExports(root, [rel])
+						for (const i of rep.issues.filter(x => x.severity === 'error').slice(0, 8)) {
+							extraErrs.push({
+								code: i.kind,
+								message: `[FPERE ${i.kind}] ${i.message} (${i.suggestedFix})`,
+								startLineNumber: i.line,
+								endLineNumber: i.line,
+							})
+						}
+					} catch { }
+				}
+			}
+
+			if (extraErrs.length === 0) return existingLintErrors
+			return [...(existingLintErrors ?? []), ...extraErrs]
 		}
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
@@ -3357,6 +3391,46 @@ export class ToolsService implements IToolsService {
 				html: validateStr('html', params.html),
 				height_px: params.height_px === undefined || params.height_px === null ? 340 : Math.max(140, Math.min(680, Number(params.height_px) || 340)),
 			}),
+			workspace_search_replace: (params: RawToolParamsObj) => ({
+				query: validateStr('query', params.query),
+				replacement: typeof params.replacement === 'string' ? params.replacement : String(params.replacement ?? ''),
+				is_regex: validateBoolean(params.is_regex, { default: false }) ?? false,
+				case_sensitive: validateBoolean(params.case_sensitive, { default: true }) ?? true,
+				include_glob: validateOptionalStr('include_glob', params.include_glob) ?? undefined,
+				dry_run: validateBoolean(params.dry_run, { default: false }) ?? false,
+				max_files: params.max_files === undefined || params.max_files === null ? 100 : Math.max(1, Math.min(500, Number(params.max_files) || 100)),
+			}),
+			api_test_sse_stream: (params: RawToolParamsObj) => {
+				let headers: Record<string, string> | undefined
+				if (params.headers && typeof params.headers === 'object' && !Array.isArray(params.headers)) {
+					headers = Object.fromEntries(Object.entries(params.headers as Record<string, unknown>).map(([k, v]) => [k, String(v)]))
+				} else if (typeof params.headers === 'string') {
+					try { headers = JSON.parse(params.headers) } catch { }
+				}
+				const body = params.body === undefined || params.body === null ? undefined : (typeof params.body === 'string' ? params.body : JSON.stringify(params.body))
+				const rawMethod = (validateOptionalStr('method', params.method) ?? (body ? 'POST' : 'GET')).toUpperCase()
+				return {
+					url: validateStr('url', params.url),
+					method: (rawMethod === 'POST' ? 'POST' : 'GET') as 'GET' | 'POST',
+					headers,
+					body,
+					max_events: params.max_events === undefined || params.max_events === null ? 100 : Math.max(1, Math.min(500, Number(params.max_events) || 100)),
+					timeout_ms: params.timeout_ms === undefined || params.timeout_ms === null ? 20_000 : Math.max(1000, Math.min(120_000, Number(params.timeout_ms) || 20_000)),
+				}
+			},
+			open_live_preview: (params: RawToolParamsObj) => ({
+				url: validateStr('url', params.url),
+			}),
+			manage_env_file: (params: RawToolParamsObj) => {
+				const rawAct = validateOptionalStr('action', params.action) ?? 'inspect'
+				const action = (['inspect', 'set', 'delete'].includes(rawAct) ? rawAct : 'inspect') as 'inspect' | 'set' | 'delete'
+				return {
+					action,
+					path: validateOptionalStr('path', params.path) ?? '.env',
+					key: validateOptionalStr('key', params.key) ?? undefined,
+					value: params.value === undefined || params.value === null ? undefined : String(params.value),
+				}
+			},
 
 			// Notebook operations
 			read_notebook: (params: RawToolParamsObj) => {
@@ -3826,7 +3900,8 @@ export class ToolsService implements IToolsService {
 			dep_install: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
 				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? null
-				const wrappedCommand = wrapCommandForShell(command)
+				const normalized = normalizeCommandForPlatform(command)
+				const wrappedCommand = wrapCommandForShell(normalized.command)
 				const { resPromise, interrupt } = await this.terminalToolService.runCommand(wrappedCommand, {
 					type: 'temporary',
 					cwd: cwdPath,
@@ -3834,7 +3909,7 @@ export class ToolsService implements IToolsService {
 				})
 				void interrupt
 				const { success, exit_code, output } = terminalCommandOutcome(await resPromise)
-				return { result: { command, cwd: cwdPath ?? '', success, output, exit_code } }
+				return { result: { command: normalized.command, cwd: cwdPath ?? '', success, output, exit_code } }
 			},
 			db_migrate: async ({ command, cwd }) => {
 				const resolvedCwd = resolveCwdUri(cwd ?? null, workspaceContextService)
@@ -4507,13 +4582,15 @@ export class ToolsService implements IToolsService {
 				const cwdPath = resolvedCwd?.fsPath ?? cwd ?? undefined
 
 				// Ultra-fast native main-process execution (~25-80ms vs ~2.5s PTY launch), with automatic fallback to TerminalToolService
+				const normalizedCmd = normalizeCommandForPlatform(command)
+				const effectiveTimeoutMs = normalizedCmd.isPackageInstall ? Math.max(MAX_TERMINAL_INACTIVE_TIME * 1000, 300_000) : MAX_TERMINAL_INACTIVE_TIME * 1000
 				const runFastOrFallback = async (): Promise<{ result: string; resolveReason: { type: 'done'; exitCode: number } | { type: 'timeout' } }> => {
 					try {
 						const fastRes = await kodiaOpsService.execFastCommand({
 							execId: terminalId,
-							command,
+							command: normalizedCmd.command,
 							cwd: cwdPath,
-							inactiveTimeoutMs: MAX_TERMINAL_INACTIVE_TIME * 1000,
+							inactiveTimeoutMs: effectiveTimeoutMs,
 						})
 						if (fastRes && typeof fastRes.exitCode === 'number') {
 							const formatted = `$ ${command}\n${fastRes.output}`
@@ -4612,6 +4689,10 @@ export class ToolsService implements IToolsService {
 				return { result: { branch_name: (await git.ops.switchBranch(root, branchName)).branchName } }
 			},
 			git_stage: async ({ paths }) => {
+				const sensitiveEnv = paths.filter(p => isSensitiveEnvFilePath(p))
+				if (sensitiveEnv.length > 0) {
+					throw new Error(`Refused to stage sensitive .env file(s): ${sensitiveEnv.join(', ')}. Keep real .env files in .gitignore and commit .env.example instead.`)
+				}
 				const git = this.gitToolService, root = await git.workspaceRepositoryRoot()
 				return { result: { staged: (await git.ops.stage(root, paths)).staged } }
 			},
@@ -6768,15 +6849,18 @@ export class ToolsService implements IToolsService {
 					entry.content = entry.content.split(edit.target).join(edit.replacement)
 					entry.replacements += 1
 				}
-				// Phase 2: commit all validated file edits
+				// Phase 2: commit all validated file edits + run write-time pitfall guard
 				const filesEdited: string[] = []
 				let totalReplacements = 0
+				const collectedErrors: LintErrorItem[] = []
 				for (const entry of byPath.values()) {
 					await fileService.writeFile(entry.uri, VSBuffer.fromString(entry.content))
 					filesEdited.push(entry.uri.fsPath)
 					totalReplacements += entry.replacements
+					const guardErrs = await runFpereWriteGuard(entry.uri, null)
+					if (guardErrs && guardErrs.length > 0) collectedErrors.push(...guardErrs)
 				}
-				return { result: { filesEdited, totalReplacements, lintErrors: null } }
+				return { result: { filesEdited, totalReplacements, lintErrors: collectedErrors.length > 0 ? collectedErrors : null } }
 			},
 			view_file_outline: async ({ uri }) => {
 				const buf = await fileService.readFile(uri)
@@ -6905,6 +6989,167 @@ export class ToolsService implements IToolsService {
 					return { result: { action, deleted: true } }
 				}
 				throw new Error(`Unknown manage_rules action: ${action}`)
+			},
+			workspace_search_replace: async ({ query, replacement, is_regex, case_sensitive, include_glob, dry_run, max_files }) => {
+				const folders = workspaceContextService.getWorkspace().folders
+				if (folders.length === 0) throw new Error('No workspace folder open.')
+				const textQuery = queryBuilder.text(
+					{ pattern: query, isRegExp: Boolean(is_regex), isCaseSensitive: case_sensitive !== false },
+					folders.map(f => f.uri),
+					include_glob ? { includePattern: include_glob } : {},
+				)
+				const searchRes = await searchService.textSearch(textQuery, CancellationToken.None)
+				const cap = max_files ?? 100
+				const regex = is_regex
+					? new RegExp(query, case_sensitive === false ? 'gi' : 'g')
+					: new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), case_sensitive === false ? 'gi' : 'g')
+
+				const changes: Array<{ file: string; count: number }> = []
+				let totalReplacements = 0
+				for (const item of searchRes.results.slice(0, cap)) {
+					try {
+						const raw = (await fileService.readFile(item.resource)).value.toString()
+						let count = 0
+						const next = raw.replace(regex, (...args) => {
+							count++
+							return is_regex ? replacement.replace(/\$(\d+)/g, (_m, n) => String(args[Number(n)] ?? '')) : replacement
+						})
+						if (count > 0) {
+							if (!dry_run) {
+								await fileService.writeFile(item.resource, VSBuffer.fromString(next))
+							}
+							changes.push({ file: item.resource.fsPath, count })
+							totalReplacements += count
+						}
+					} catch { }
+				}
+				return { result: { dryRun: Boolean(dry_run), filesMatched: changes.length, totalReplacements, changes } }
+			},
+			api_test_sse_stream: async ({ url, method, headers, body, max_events, timeout_ms }) => {
+				const startedAt = Date.now()
+				const controller = new AbortController()
+				const timer = setTimeout(() => controller.abort(), timeout_ms ?? 20_000)
+				const events: SseStreamEvent[] = []
+				let ttftMs: number | null = null
+				let assembledText = ''
+				let status = 0
+				let contentType = ''
+				let completedNormally = false
+				let error: string | undefined
+				try {
+					const reqHeaders: Record<string, string> = { Accept: 'text/event-stream', ...(body ? { 'Content-Type': 'application/json' } : {}), ...(headers ?? {}) }
+					const resp = await fetch(url, { method: method ?? (body ? 'POST' : 'GET'), headers: reqHeaders, body, signal: controller.signal })
+					status = resp.status
+					contentType = resp.headers.get('content-type') ?? ''
+					if (!resp.ok || !resp.body) {
+						const errBody = await resp.text().catch(() => '')
+						error = `HTTP ${resp.status} ${resp.statusText}${errBody ? `: ${errBody.slice(0, 400)}` : ''}`
+					} else {
+						const reader = resp.body.getReader()
+						const decoder = new TextDecoder()
+						let buffer = ''
+						const limit = max_events ?? 100
+						while (events.length < limit) {
+							const { value, done } = await reader.read()
+							if (done) { completedNormally = true; break }
+							buffer += decoder.decode(value, { stream: true })
+							let sepIdx: number
+							while ((sepIdx = buffer.search(/\r?\n\r?\n/)) !== -1) {
+								const rawFrame = buffer.slice(0, sepIdx)
+								buffer = buffer.slice(sepIdx + (buffer[sepIdx] === '\r' ? 4 : 2))
+								let evType = 'message'
+								let evId: string | undefined
+								const dataLines: string[] = []
+								for (const line of rawFrame.split(/\r?\n/)) {
+									if (line.startsWith('event:')) evType = line.slice(6).trim()
+									else if (line.startsWith('id:')) evId = line.slice(3).trim()
+									else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+								}
+								if (dataLines.length === 0) continue
+								const data = dataLines.join('\n')
+								const nowMs = Date.now() - startedAt
+								if (ttftMs === null) ttftMs = nowMs
+								events.push({ index: events.length + 1, timestampMs: nowMs, event: evType, id: evId, data: data.slice(0, 1000) })
+								if (data.trim() === '[DONE]') { completedNormally = true; break }
+								assembledText += extractSseTextDelta(data)
+								if (events.length >= limit) break
+							}
+							if (completedNormally) break
+						}
+						await reader.cancel().catch(() => { })
+					}
+				} catch (e: any) {
+					error = e?.name === 'AbortError' ? `SSE stream timed out after ${timeout_ms ?? 20_000}ms` : (e?.message ?? String(e))
+				} finally {
+					clearTimeout(timer)
+				}
+				return {
+					result: {
+						url,
+						method: method ?? (body ? 'POST' : 'GET'),
+						status,
+						contentType,
+						ttftMs,
+						totalDurationMs: Date.now() - startedAt,
+						eventCount: events.length,
+						events,
+						assembledText: assembledText.slice(0, 12_000),
+						completedNormally,
+						error,
+					},
+				}
+			},
+			open_live_preview: async ({ url }) => {
+				const cmdSvc = instantiationService.invokeFunction(a => a.get(ICommandService))
+				await cmdSvc.executeCommand('simpleBrowser.show', url)
+				return { result: { opened: true, url } }
+			},
+			manage_env_file: async ({ action, path: relPath, key, value }) => {
+				const folder = workspaceContextService.getWorkspace().folders[0]
+				if (!folder) throw new Error('No workspace folder open.')
+				const targetRel = (relPath || '.env').replace(/\\/g, '/').replace(/^\/+/, '')
+				const targetUri = URI.joinPath(folder.uri, targetRel)
+				let raw = ''
+				try { raw = (await fileService.readFile(targetUri)).value.toString() } catch { }
+				const lines = raw ? raw.split(/\r?\n/) : []
+				if (action === 'set') {
+					if (!key) throw new Error('manage_env_file action="set" requires key.')
+					const idx = lines.findIndex(l => new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`).test(l))
+					const newLine = `${key}=${value ?? ''}`
+					if (idx >= 0) lines[idx] = newLine
+					else lines.push(newLine)
+					await fileService.writeFile(targetUri, VSBuffer.fromString(lines.filter((l, i, arr) => i < arr.length - 1 || l !== '').join('\n') + '\n'))
+				} else if (action === 'delete') {
+					if (!key) throw new Error('manage_env_file action="delete" requires key.')
+					const filtered = lines.filter(l => !new RegExp(`^\\s*${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*=`).test(l))
+					await fileService.writeFile(targetUri, VSBuffer.fromString(filtered.join('\n') + '\n'))
+				}
+				// Re-read & mask secrets
+				let finalRaw = ''
+				try { finalRaw = (await fileService.readFile(targetUri)).value.toString() } catch { }
+				const entries: Array<{ key: string; maskedValue: string; isSecret: boolean }> = []
+				for (const line of finalRaw.split(/\r?\n/)) {
+					const trimmed = line.trim()
+					if (!trimmed || trimmed.startsWith('#')) continue
+					const eq = trimmed.indexOf('=')
+					if (eq === -1) continue
+					const k = trimmed.slice(0, eq).trim()
+					const v = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, '')
+					const isSecret = /key|secret|token|password|passwd|auth|private|credential|dsn|database_url/i.test(k)
+					const maskedValue = isSecret
+						? (v.length <= 8 ? '••••••••' : `${v.slice(0, 4)}••••••${v.slice(-4)}`)
+						: v.slice(0, 120)
+					entries.push({ key: k, maskedValue, isSecret })
+				}
+				let gitignored = false
+				try {
+					const gi = (await fileService.readFile(URI.joinPath(folder.uri, '.gitignore'))).value.toString()
+					gitignored = /^\s*(?:\.env|\.env\*|\*\.env)\s*$/m.test(gi)
+				} catch { }
+				const warning = !gitignored && isSensitiveEnvFilePath(targetRel)
+					? `WARNING: "${targetRel}" is NOT listed in .gitignore — add ".env" to .gitignore to prevent leaking API keys!`
+					: undefined
+				return { result: { path: targetUri.fsPath, gitignored, warning, entries } }
 			},
 
 			// Notebook operations
@@ -8858,6 +9103,36 @@ export class ToolsService implements IToolsService {
 				return 'Deleted rule.'
 			},
 			render_interactive_widget: (_params, r) => `Rendered interactive ${r.widget.kind} widget "${r.widget.title}" inline in chat.`,
+			workspace_search_replace: (_params, r) => {
+				const verb = r.dryRun ? '[DRY RUN] Would replace' : 'Replaced'
+				const list = r.changes.slice(0, 30).map(c => `  ${c.file} (${c.count})`).join('\n')
+				return `${verb} ${r.totalReplacements} match(es) across ${r.filesMatched} file(s)${list ? `:\n${list}` : '.'}`
+			},
+			api_test_sse_stream: (_params, r) => {
+				const lines = [
+					`SSE ${r.method} ${r.url} -> HTTP ${r.status} (${r.contentType || 'no content-type'})`,
+					`Events: ${r.eventCount} | TTFT: ${r.ttftMs !== null ? `${r.ttftMs}ms` : 'n/a'} | Total: ${r.totalDurationMs}ms | Completed: ${r.completedNormally}`,
+				]
+				if (r.error) lines.push(`Error: ${r.error}`)
+				if (r.assembledText) lines.push(`\nAssembled stream text:\n${r.assembledText.slice(0, 2000)}`)
+				if (r.events.length > 0) {
+					lines.push(`\nFirst ${Math.min(10, r.events.length)} SSE chunk(s):`)
+					for (const ev of r.events.slice(0, 10)) {
+						lines.push(`  #${ev.index} (+${ev.timestampMs}ms) [${ev.event}] ${ev.data.slice(0, 180)}`)
+					}
+				}
+				return lines.join('\n')
+			},
+			open_live_preview: (_params, r) => `Opened embedded Live Preview pane inside Kodia for ${r.url}.`,
+			manage_env_file: (_params, r) => {
+				const lines = [`Env file: ${r.path} (gitignored: ${r.gitignored})`]
+				if (r.warning) lines.push(r.warning)
+				if (r.entries.length === 0) lines.push('  (no entries)')
+				for (const e of r.entries) {
+					lines.push(`  ${e.key}=${e.maskedValue}${e.isSecret ? ' [MASKED]' : ''}`)
+				}
+				return lines.join('\n')
+			},
 
 			// Notebook operations
 			read_notebook: (params, result) => {

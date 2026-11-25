@@ -85,6 +85,10 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'manage_notepads',
 	'manage_rules',
 	'render_interactive_widget',
+	'workspace_search_replace',
+	'api_test_sse_stream',
+	'open_live_preview',
+	'manage_env_file',
 	// Autonomous dev cycle tools
 	'dep_install',
 	'db_migrate',
@@ -548,11 +552,15 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'view_code_item':
 		case 'review_code_changes':
 		case 'render_interactive_widget':
+		case 'api_test_sse_stream':
+		case 'open_live_preview':
 			return 'low';
 
 		case 'multi_edit_file':
+		case 'workspace_search_replace':
 		case 'manage_notepads':
 		case 'manage_rules':
+		case 'manage_env_file':
 			return 'medium';
 
 		// Dev server automation - starting/stopping servers is medium risk

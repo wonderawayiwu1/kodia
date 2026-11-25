@@ -17,12 +17,16 @@ import {
 } from '../../common/antigravityEngines.js';
 import {
 	analyzeGitDiffForBugs,
+	detectRealWorldBuildPitfalls,
 	extractCodeItem,
 	extractCodeOutline,
+	extractSseTextDelta,
 	formatScopedRuleMarkdown,
+	isSensitiveEnvFilePath,
 	parseScopedRuleFile,
 	sanitizeWorkspaceDocName,
 } from '../../common/cursorAntigravityEngines.js';
+import { normalizeCommandForPlatform } from '../../common/terminalUtils.js';
 import { BUILTIN_SLASH_COMMANDS } from '../../common/customCommands.js';
 import { KodiaBrowserMainService } from '../../electron-main/browserMainService.js';
 
@@ -132,6 +136,46 @@ suite('Kodia - Antigravity Engines (Scheduler, Dynamic Subagents, Artifacts & Br
 		for (const expected of ['plan', 'goal', 'boost', 'grill-me', 'teamwork', 'browser', 'review', 'fix', 'test', 'ui', 'schedule', 'learn', 'docs', 'compact']) {
 			assert.ok(BUILTIN_SLASH_COMMANDS.some(c => c.name === expected), `expected built-in /${expected}`);
 		}
+	});
+
+	test('Real-world app-build pitfall guards, Windows shell normalization, .env protection & SSE delta extraction', () => {
+		// 1. SQLite single-row settings overwrite bug
+		const sqlPitfalls = detectRealWorldBuildPitfalls('backend/db.ts', `
+			db.exec(\`CREATE TABLE settings (id INTEGER PRIMARY KEY CHECK (id = 1), setting_key TEXT, value TEXT)\`);
+			db.prepare('INSERT INTO settings VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET value=excluded.value');
+		`);
+		assert.ok(sqlPitfalls.some(p => p.code === 'kodia-sqlite-single-row-settings'));
+
+		// 2. OpenAI SDK baseUrl casing bug
+		const openaiPitfalls = detectRealWorldBuildPitfalls('backend/nvidia.ts', `
+			const client = new OpenAI({ apiKey: key, baseUrl: 'https://integrate.api.nvidia.com/v1' });
+		`);
+		assert.ok(openaiPitfalls.some(p => p.code === 'kodia-openai-baseurl-casing'));
+
+		// 3. Tailwind v4 vs v3 directive mismatch & ESM export default without "type": "module"
+		const pkgV4 = JSON.stringify({ name: 'web', dependencies: { tailwindcss: '^4.0.0' } });
+		const twPitfalls = detectRealWorldBuildPitfalls('frontend/src/index.css', '@tailwind base;\n@tailwind utilities;', pkgV4);
+		assert.ok(twPitfalls.some(p => p.code === 'kodia-tailwind-v4-directive'));
+
+		const esmPitfalls = detectRealWorldBuildPitfalls('frontend/postcss.config.js', 'export default { plugins: { tailwindcss: {} } };', pkgV4);
+		assert.ok(esmPitfalls.some(p => p.code === 'kodia-esm-config-type-module'));
+		assert.ok(esmPitfalls.some(p => p.code === 'kodia-tailwind-v4-postcss'));
+
+		// 4. Windows shell shims + fast npm install flags
+		const npmNorm = normalizeCommandForPlatform('npm install lucide-react', 'win32');
+		assert.strictEqual(npmNorm.isPackageInstall, true);
+		assert.ok(npmNorm.command.includes('--no-audit --no-fund'));
+		assert.ok(normalizeCommandForPlatform('rm -rf dist', 'win32').command.includes('fs.rmSync'));
+		assert.ok(normalizeCommandForPlatform('tail -n 20 app.log', 'win32').command.includes('Get-Content -Tail 20'));
+
+		// 5. .env commit guard
+		assert.strictEqual(isSensitiveEnvFilePath('.env'), true);
+		assert.strictEqual(isSensitiveEnvFilePath('backend/.env.local'), true);
+		assert.strictEqual(isSensitiveEnvFilePath('.env.example'), false);
+
+		// 6. SSE delta extraction
+		assert.strictEqual(extractSseTextDelta('{"choices":[{"delta":{"content":"Hello"}}]}'), 'Hello');
+		assert.strictEqual(extractSseTextDelta('[DONE]'), '');
 	});
 
 	test('Antigravity+ Browser Engine supports annotated screenshots, @index targeting, hover, type, keys, scroll, ARIA tree, evaluate, dialogs, storage & upload', async () => {

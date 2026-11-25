@@ -27,6 +27,7 @@ import type {
 	CodeReviewReport,
 	InteractiveWidgetPayload,
 	ScopedRuleDocument,
+	SseStreamTestResult,
 } from './cursorAntigravityEngines.js';
 import { SubagentReport } from './subagents.js';
 import { CodeSearchResponse, IndexStats, LiteralSearchResponse } from './codeIndexServiceTypes.js';
@@ -393,6 +394,10 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'manage_notepads': 'edits',
 	'manage_rules': 'edits',
 	'render_interactive_widget': 'planning',
+	'workspace_search_replace': 'edits',
+	'api_test_sse_stream': 'web pages',
+	'open_live_preview': 'browser',
+	'manage_env_file': 'edits',
 	// Dev server automation - starting/stopping local dev servers
 	'dev_server_start': 'terminal',
 	'dev_server_stop': 'terminal',
@@ -976,6 +981,10 @@ export type BuiltinToolCallParams = {
 	'manage_notepads': { action: 'list' | 'read' | 'save' | 'delete', name?: string, content?: string },
 	'manage_rules': { action: 'list' | 'read' | 'save' | 'delete', name?: string, description?: string, globs?: string[], always_apply?: boolean, body?: string },
 	'render_interactive_widget': { title: string, kind?: 'diagram' | 'chart' | 'ui_preview' | 'interactive' | 'table' | 'other', html: string, height_px?: number },
+	'workspace_search_replace': { query: string, replacement: string, is_regex?: boolean, case_sensitive?: boolean, include_glob?: string, dry_run?: boolean, max_files?: number },
+	'api_test_sse_stream': { url: string, method?: 'GET' | 'POST', headers?: Record<string, string>, body?: string, max_events?: number, timeout_ms?: number },
+	'open_live_preview': { url: string },
+	'manage_env_file': { action: 'inspect' | 'set' | 'delete', path?: string, key?: string, value?: string },
 }
 
 // RESULT OF TOOL CALL
@@ -1375,6 +1384,10 @@ export type BuiltinToolResultType = {
 	'manage_notepads': { action: string, notepads?: Array<{ name: string, path: string }>, name?: string, path?: string, content?: string, deleted?: boolean },
 	'manage_rules': { action: string, rules?: ScopedRuleDocument[], rule?: ScopedRuleDocument, deleted?: boolean },
 	'render_interactive_widget': { widget: InteractiveWidgetPayload },
+	'workspace_search_replace': { dryRun: boolean, filesMatched: number, totalReplacements: number, changes: Array<{ file: string, count: number }> },
+	'api_test_sse_stream': SseStreamTestResult,
+	'open_live_preview': { opened: boolean, url: string },
+	'manage_env_file': { path: string, gitignored: boolean, warning?: string, entries: Array<{ key: string, maskedValue: string, isSecret: boolean }> },
 }
 
 

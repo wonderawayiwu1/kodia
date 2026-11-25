@@ -17,10 +17,10 @@ export const TOOLS_SHARE_OF_CONTEXT = 0.5;
 // What a coding agent needs most, most important first. Tools not listed come after, in their usual order.
 const TOOL_PRIORITY: readonly string[] = [
 	// read, find, change files
-	'read_file', 'edit_file', 'multi_edit_file', 'write_file', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
+	'read_file', 'edit_file', 'multi_edit_file', 'workspace_search_replace', 'write_file', 'create_file_or_folder', 'ls_dir', 'search_for_files', 'search_pathnames_only', 'search_in_file',
 	'view_file_outline', 'view_code_item', 'code_semantic_search', 'code_keyword_search', 'rewrite_file', 'delete_file_or_folder', 'get_dir_tree', 'read_lint_errors',
-	// run things
-	'run_command', 'open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal',
+	// run things, SSE, live preview & masked .env
+	'run_command', 'open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal', 'api_test_sse_stream', 'open_live_preview', 'manage_env_file',
 	// understand code & automated review
 	'go_to_definition', 'find_references', 'search_symbols', 'review_code_changes',
 	// plan, live progress, interactive clarification, artifacts, notepads, rules, widgets & verification

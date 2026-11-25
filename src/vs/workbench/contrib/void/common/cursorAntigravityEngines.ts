@@ -274,6 +274,16 @@ export function analyzeGitDiffForBugs(diffText: string, scope: string): CodeRevi
 		if (line.startsWith('+++ b/')) {
 			currentFile = line.slice(6).trim();
 			files.add(currentFile);
+			if (isSensitiveEnvFilePath(currentFile)) {
+				findings.push({
+					severity: 'critical',
+					category: 'security',
+					file: currentFile,
+					line: 1,
+					message: 'Sensitive `.env` file is included in git diff! Never commit real `.env` secrets — add `.env` to `.gitignore` and commit `.env.example` instead.',
+					snippet: currentFile,
+				});
+			}
 			continue;
 		}
 		const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
@@ -391,4 +401,147 @@ export function sanitizeWorkspaceDocName(raw: string, ext: '.md' | '.mdc' = '.md
 		.replace(/[^a-zA-Z0-9._-]/g, '_')
 		.replace(/^_+|_+$/g, '') || 'untitled';
 	return `${base}${ext}`;
+}
+
+// ---------- 4. Real-World App-Build Pitfall Guard (Instant Write-Time Diagnostics) ----------
+
+export interface BuildPitfallDiagnostic {
+	code: string;
+	line: number;
+	message: string;
+}
+
+/**
+ * Catches high-frequency real-world app-build traps immediately on file write/edit:
+ * - SQLite single-row `CHECK (id = 1)` on multi-key settings tables (causes silent overwrites)
+ * - OpenAI SDK v4-v7 `baseUrl` typo instead of `baseURL`
+ * - Tailwind CSS v4 vs v3 config mismatch (`@tailwind base` / v3 postcss config with Tailwind v4)
+ * - ESM `export default` in `.js` config files when sibling `package.json` lacks `"type": "module"`
+ */
+export function detectRealWorldBuildPitfalls(
+	filePath: string,
+	content: string,
+	packageJsonContent?: string,
+): BuildPitfallDiagnostic[] {
+	const issues: BuildPitfallDiagnostic[] = [];
+	const normalizedPath = filePath.replace(/\\/g, '/');
+	const baseName = normalizedPath.split('/').pop()?.toLowerCase() ?? '';
+	const lines = content.split(/\r?\n/);
+
+	const findLine = (re: RegExp): number => {
+		for (let i = 0; i < lines.length; i++) {
+			if (re.test(lines[i])) return i + 1;
+		}
+		return 1;
+	};
+
+	// 1. SQLite single-row CHECK (id = 1) on settings/config tables with key/value semantics
+	if (/CREATE\s+TABLE[\s\S]{0,220}settings[\s\S]{0,300}CHECK\s*\(\s*id\s*=\s*1\s*\)/i.test(content)) {
+		if (/ON\s+CONFLICT\s*\(\s*id\s*\)|setting_key|key\s+TEXT/i.test(content)) {
+			issues.push({
+				code: 'kodia-sqlite-single-row-settings',
+				line: findLine(/CHECK\s*\(\s*id\s*=\s*1\s*\)/i),
+				message: 'SQLite pitfall: `CHECK (id = 1)` with `ON CONFLICT(id)` forces every setting into row 1 and overwrites other settings (e.g. API key / model / base URL). Use `setting_key TEXT PRIMARY KEY` (or `UNIQUE`) with `ON CONFLICT(setting_key) DO UPDATE SET ...`.',
+			});
+		}
+	}
+
+	// 2. OpenAI JS/TS SDK `baseUrl` casing bug (must be `baseURL`)
+	if (/\bnew\s+OpenAI\s*\([\s\S]{0,250}\bbaseUrl\s*:/m.test(content)) {
+		issues.push({
+			code: 'kodia-openai-baseurl-casing',
+			line: findLine(/\bbaseUrl\s*:/),
+			message: 'OpenAI SDK typing bug: the official `openai` package expects `baseURL` (capital URL), not `baseUrl`. Rename `baseUrl` -> `baseURL`.',
+		});
+	}
+
+	// Parse sibling package.json if available
+	let pkg: { type?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> } | undefined;
+	if (packageJsonContent) {
+		try { pkg = JSON.parse(packageJsonContent); } catch { }
+	}
+	const twVersion = pkg?.dependencies?.tailwindcss ?? pkg?.devDependencies?.tailwindcss;
+	const isTailwindV4 = typeof twVersion === 'string' && /^\s*[\^~>=<]*4(?:\.|$)/.test(twVersion);
+
+	// 3. Tailwind CSS v4 vs v3 config mismatch
+	if (isTailwindV4) {
+		if (baseName.endsWith('.css') && /@tailwind\s+base\s*;/i.test(content)) {
+			issues.push({
+				code: 'kodia-tailwind-v4-directive',
+				line: findLine(/@tailwind\s+base/i),
+				message: `Tailwind v4 mismatch: package.json installs tailwindcss (${twVersion}) which uses \`@import "tailwindcss";\` + \`@tailwindcss/postcss\`, NOT v3 \`@tailwind base;\`. Either migrate to v4 syntax or pin \`tailwindcss@^3.4\`.`,
+			});
+		}
+		if (baseName.startsWith('postcss.config.') && /\btailwindcss\s*:\s*\{/.test(content) && !content.includes('@tailwindcss/postcss')) {
+			issues.push({
+				code: 'kodia-tailwind-v4-postcss',
+				line: findLine(/\btailwindcss\s*:/),
+				message: `Tailwind v4 PostCSS mismatch: tailwindcss (${twVersion}) requires \`@tailwindcss/postcss\` plugin in postcss.config instead of \`tailwindcss: {}\` (or pin \`tailwindcss@^3.4\`).`,
+			});
+		}
+	}
+
+	// 4. ESM `export default` in `.js` config files without `"type": "module"` in package.json
+	if (
+		/^(?:vite|postcss|tailwind|eslint|vitest|playwright|next)\.config\.js$/i.test(baseName) &&
+		/^\s*export\s+default\b/m.test(content) &&
+		pkg &&
+		pkg.type !== 'module'
+	) {
+		issues.push({
+			code: 'kodia-esm-config-type-module',
+			line: findLine(/^\s*export\s+default\b/),
+			message: `Node ESM mismatch: \`${baseName}\` uses \`export default\` but package.json is missing \`"type": "module"\` (Node will throw \`Unexpected token 'export'\`). Add \`"type": "module"\` to package.json, rename to \`.mjs\`, or use \`module.exports =\`.`,
+		});
+	}
+
+	return issues;
+}
+
+/** Checks if a path points to a real secret-bearing `.env` file (excluding safe templates like `.env.example`). */
+export function isSensitiveEnvFilePath(filePath: string): boolean {
+	const base = filePath.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
+	if (!base.startsWith('.env')) return false;
+	if (/\.(?:example|sample|template|dist|schema)$/i.test(base)) return false;
+	return true;
+}
+
+/** Parses SSE (`text/event-stream`) text into structured events. */
+export interface SseStreamEvent {
+	index: number;
+	timestampMs: number;
+	event: string;
+	id?: string;
+	data: string;
+}
+
+export interface SseStreamTestResult {
+	url: string;
+	method: string;
+	status: number;
+	contentType: string;
+	ttftMs: number | null;
+	totalDurationMs: number;
+	eventCount: number;
+	events: SseStreamEvent[];
+	assembledText: string;
+	completedNormally: boolean;
+	error?: string;
+}
+
+export function extractSseTextDelta(data: string): string {
+	const trimmed = data.trim();
+	if (!trimmed || trimmed === '[DONE]') return '';
+	try {
+		const parsed = JSON.parse(trimmed);
+		const delta = parsed?.choices?.[0]?.delta?.content
+			?? parsed?.delta?.text
+			?? parsed?.text
+			?? parsed?.content
+			?? parsed?.token;
+		if (typeof delta === 'string') return delta;
+	} catch {
+		return trimmed;
+	}
+	return '';
 }

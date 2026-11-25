@@ -227,6 +227,10 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	manage_notepads: { done: 'Updated notepads', proposed: 'Manage notepads', running: 'Managing notepads' },
 	manage_rules: { done: 'Updated rules', proposed: 'Manage rules', running: 'Managing rules' },
 	render_interactive_widget: { done: 'Rendered widget', proposed: 'Render widget', running: 'Rendering interactive widget' },
+	workspace_search_replace: { done: 'Replaced across workspace', proposed: 'Workspace search & replace', running: 'Replacing across workspace' },
+	api_test_sse_stream: { done: 'Tested SSE stream', proposed: 'Test SSE stream', running: 'Streaming SSE endpoint' },
+	open_live_preview: { done: 'Opened live preview', proposed: 'Open live preview', running: 'Opening live preview' },
+	manage_env_file: { done: 'Updated .env (masked)', proposed: 'Manage .env (masked)', running: 'Inspecting .env (masked)' },
 
 	// API / Notebooks
 	api_request: { done: 'Sent API request', proposed: 'Send API request', running: 'Sending API request' },

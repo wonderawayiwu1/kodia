@@ -3621,6 +3621,48 @@ export const builtinTools: {
 			height_px: { description: 'Optional frame height in pixels (default 340, range 140-680).' },
 		},
 	},
+	workspace_search_replace: {
+		name: 'workspace_search_replace',
+		description: `Workspace-wide multi-file search and replace (literal or regex, optional include_glob, case_sensitive, and dry_run preview). Ideal for renaming identifiers like baseUrl -> baseURL across an entire project in one atomic call.`,
+		params: {
+			query: { description: 'Literal text or regex pattern to find.' },
+			replacement: { description: 'Replacement text.' },
+			is_regex: { description: 'Optional boolean (default false).' },
+			case_sensitive: { description: 'Optional boolean (default true).' },
+			include_glob: { description: 'Optional glob filter (e.g. "src/**/*.{ts,tsx}").' },
+			dry_run: { description: 'Optional boolean (default false). Set true to preview matched files & replacement counts without editing disk.' },
+			max_files: { description: 'Optional safety cap on number of files to modify (default 100).' },
+		},
+	},
+	api_test_sse_stream: {
+		name: 'api_test_sse_stream',
+		description: `Tests and debugs live Server-Sent Events (text/event-stream) streaming endpoints (e.g. AI chat streams): connects via GET/POST, records incremental chunks with per-chunk timestamps, measures Time-To-First-Token (TTFT ms) and total duration, stops cleanly on [DONE] / max_events / timeout_ms, and returns assembled streamed text.`,
+		params: {
+			url: { description: 'Full SSE endpoint URL (e.g. "http://localhost:3001/api/chat/stream").' },
+			method: { description: 'Optional. "POST" (default if body provided) or "GET".' },
+			headers: { description: 'Optional JSON object of HTTP headers.' },
+			body: { description: 'Optional JSON string body for POST streaming endpoints.' },
+			max_events: { description: 'Optional max SSE events to capture before stopping (default 100).' },
+			timeout_ms: { description: 'Optional stream timeout in ms (default 20000).' },
+		},
+	},
+	open_live_preview: {
+		name: 'open_live_preview',
+		description: `Opens a live local web app URL (e.g. http://localhost:5173) directly inside an embedded Live Preview tab inside Kodia so the user can view and interact with their app side-by-side without leaving the editor.`,
+		params: {
+			url: { description: 'HTTP/HTTPS URL to preview inside the editor.' },
+		},
+	},
+	manage_env_file: {
+		name: 'manage_env_file',
+		description: `Safely inspects or updates a project .env file with automatic secret masking (API keys, tokens, secrets, passwords are NEVER shown in plaintext) and verifies whether .env is properly listed in .gitignore so secrets are never accidentally committed.`,
+		params: {
+			action: { description: '"inspect" | "set" | "delete".' },
+			path: { description: 'Optional workspace-relative path to the env file (default ".env").' },
+			key: { description: 'Environment variable name (required for set/delete).' },
+			value: { description: 'Environment variable value (required for set).' },
+		},
+	},
 
 	// go_to_definition
 	// go_to_usages
@@ -3790,7 +3832,12 @@ ${workspaceFolders.join('\n') || 'NO FOLDERS OPEN'}
 - STRUCTURED ARTIFACTS: For substantial implementation plans, architecture audits, or final walkthroughs, save structured markdown artifacts via \`create_artifact\` / \`update_artifact\` (with \`request_feedback: true\` when asking the user to approve a plan before coding).
 - NEXT-GEN VISUAL BROWSER ENGINE: When launching a visible browser (\`browser_launch\`), omit fixed \`viewport\` so Chrome opens cleanly maximized and responsive. Drive live web apps with full precision using \`browser_screenshot(annotated: true)\` (overlays numbered [1]..[N] visual badges so you can target "@3" directly), \`browser_accessibility_snapshot\` (semantic ARIA tree), \`browser_hover\`, \`browser_type_text\`, \`browser_press_key\`, \`browser_scroll\`, \`browser_drag_and_drop\`, \`browser_click_at\`, \`browser_evaluate\`, \`browser_wait_for_text\`, \`browser_wait_for_network_idle\`, \`browser_network_log\` (full XHR/fetch inspection), \`browser_handle_dialog\`, \`browser_storage\`, and \`browser_upload_file\`.
 - SCHEDULER & DYNAMIC MULTI-AGENT WORKFLOWS: Use \`schedule_task\` / \`manage_scheduled_tasks\` for timers and recurring cron tasks (never shell \`sleep\`). Use \`define_subagent\` to create bespoke domain specialists on demand, \`manage_subagents\` to inspect/cancel running subagents, and \`run_parallel_workflow\` to fan out staged parallel workstreams across independent modules.
-- CURSOR + ANTIGRAVITY CODE VELOCITY & GENERATIVE UI: Use \`view_file_outline\` and \`view_code_item\` to inspect large files efficiently without wasting tokens; use \`multi_edit_file\` for atomic multi-file/multi-hunk edits; run \`review_code_changes\` before finishing to catch security/bug regressions; store reusable specs in \`manage_notepads\` and persistent conventions in \`manage_rules\` (compatible with both \`.kodia/rules/*.md\` and \`.cursor/rules/*.mdc\`); and use \`render_interactive_widget\` whenever a visual diagram, chart, or interactive preview explains something better than plain text.`)
+- CURSOR + ANTIGRAVITY CODE VELOCITY & GENERATIVE UI: Use \`view_file_outline\` and \`view_code_item\` to inspect large files efficiently without wasting tokens; use \`multi_edit_file\` for atomic multi-file/multi-hunk edits and \`workspace_search_replace\` for project-wide renames; run \`review_code_changes\` before finishing to catch security/bug regressions; store reusable specs in \`manage_notepads\` and persistent conventions in \`manage_rules\` (compatible with both \`.kodia/rules/*.md\` and \`.cursor/rules/*.mdc\`); debug streaming AI endpoints with \`api_test_sse_stream\`, inspect/update \`.env\` safely with \`manage_env_file\`, open embedded in-editor previews with \`open_live_preview\`, inspect SQLite DB tables/rows live with \`db_inspect\` / \`db_query\`, and use \`render_interactive_widget\` whenever a visual diagram, chart, or interactive preview explains something better than plain text.
+- REAL-WORLD FULL-STACK RELIABILITY GUARDRAILS:
+  * SQLite key/value settings tables: NEVER use single-row \`CHECK (id = 1)\` with \`ON CONFLICT(id)\` for multi-setting tables (it overwrites previous keys!); ALWAYS use \`setting_key TEXT PRIMARY KEY\` (or \`UNIQUE\`) with \`ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value\`. Verify real persisted rows via \`db_inspect\` / \`db_query\`.
+  * OpenAI-compatible SDKs (NVIDIA NIM, Groq, OpenRouter): Official \`openai\` JS/TS SDK uses \`baseURL\` (capital URL, NOT \`baseUrl\`). For non-OpenAI extensions on OpenAI-compatible providers, type responses cleanly or use native \`fetch\` streaming without weakening TypeScript \`strict\` mode.
+  * Tailwind CSS v4 vs v3 & Node ESM configs: Match Tailwind config syntax to the installed major version (v4 uses \`@import "tailwindcss";\` + \`@tailwindcss/postcss\`; v3 uses \`@tailwind base/components/utilities\` + \`tailwind.config.js\`). If any \`*.config.js\` uses \`export default\`, ensure \`package.json\` has \`"type": "module"\` (or use \`.mjs\`).
+  * Dev server auto-restart & Windows shell hygiene: Prefer \`tsx watch\` / \`nodemon\` / \`vite\` for backend/frontend hot-reload via \`dev_server_start\`; on Windows prefer PowerShell/Node cross-platform commands over Unix-only \`tail\`/\`head\`/\`rm\`. Never commit real \`.env\` files (keep \`.env\` in \`.gitignore\` and provide \`.env.example\`).`)
 		details.push(`TWO-ENGINE UNIFIED ORCHESTRATION (Universal Software Engine + AI Engineering Engine):
 - Do NOT force AI into ordinary non-AI software requests. When a request is pure software engineering (websites, CRUD apps, utilities, games, APIs without AI), keep it clean and use Kodia's Universal Software Engineering Engine & Design Intelligence directly.
 - When a request involves AI systems, chatbots, RAG, ML/DL models, computer vision, speech/audio, autonomous agents, workflows, or full-stack AI products, coordinate both engines via ai_orchestrate_project / ai_scaffold_product_factory, probe real hardware (ai_probe_compute_hardware), profile datasets (ai_profile_dataset), build/evaluate RAG (ai_rag_build_index, ai_rag_query, ai_rag_evaluate), track experiments/models (ai_experiment_manage, ai_model_registry), run quantitative evaluations (ai_evaluate_system) and AI security audits (ai_audit_security), and delegate independent workstreams to AI specialists (ai_architect, ml_engineer, llm_engineer, rag_engineer, agentic_engineer, data_engineer, cv_engineer, mlops, ai_security, ai_eval).

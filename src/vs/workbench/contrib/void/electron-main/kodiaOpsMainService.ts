@@ -25,6 +25,7 @@ import {
 	isReadOnlySqlQuery,
 	isValidDockerContainerName,
 } from '../common/kodiaOpsTypes.js';
+import { normalizeCommandForPlatform } from '../common/terminalUtils.js';
 
 const MAX_SQL_ROWS = 200;
 
@@ -164,12 +165,15 @@ export class KodiaOpsMainService extends Disposable implements IKodiaOpsMainServ
 
 	async execFastCommand(req: FastCommandRequest): Promise<FastCommandResult> {
 		const startedAt = Date.now();
+		const normalized = normalizeCommandForPlatform(req.command, process.platform);
+		const effectiveCommand = normalized.command;
 		const maxChars = (typeof req.maxChars === 'number' && Number.isFinite(req.maxChars) && req.maxChars > 1000)
 			? req.maxChars
 			: 50_000;
+		const defaultTimeout = normalized.isPackageInstall ? 300_000 : 120_000;
 		const inactiveTimeoutMs = (typeof req.inactiveTimeoutMs === 'number' && Number.isFinite(req.inactiveTimeoutMs) && req.inactiveTimeoutMs >= 1000)
-			? Math.min(req.inactiveTimeoutMs, 2_147_483_000)
-			: 120_000;
+			? Math.min(Math.max(req.inactiveTimeoutMs, normalized.isPackageInstall ? 300_000 : 0), 2_147_483_000)
+			: defaultTimeout;
 
 		const cwd = req.cwd && fs.existsSync(req.cwd) ? req.cwd : undefined;
 		const maxRawBuffer = Math.max(maxChars * 4, 250_000);
@@ -195,7 +199,7 @@ export class KodiaOpsMainService extends Disposable implements IKodiaOpsMainServ
 
 			let proc: cp.ChildProcess;
 			try {
-				proc = cp.spawn(req.command, [], {
+				proc = cp.spawn(effectiveCommand, [], {
 					cwd,
 					shell: true,
 					windowsHide: true,

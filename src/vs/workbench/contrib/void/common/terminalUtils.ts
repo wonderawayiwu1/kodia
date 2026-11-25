@@ -205,3 +205,48 @@ export function containsPowerShellKeyword(command: string): boolean {
 	const firstWord = command.trim().split(/\s+/)[0].toLowerCase();
 	return keywords.includes(firstWord);
 }
+
+/**
+ * Normalizes common Unix shell idioms for Windows `cmd.exe` / PowerShell and speeds up
+ * package manager installs (`npm install` -> adds `--no-audit --no-fund`) so commands
+ * never fail on missing `rm`/`tail`/`head`/`touch` or hang for 120s+ on audit checks.
+ */
+export function normalizeCommandForPlatform(command: string, platform: string = isWindows ? 'win32' : 'linux'): {
+	command: string;
+	isPackageInstall: boolean;
+} {
+	let cmd = command.trim();
+	const isPackageInstall = /^\s*(?:npm|pnpm|yarn|bun|pip|pip3|uv|composer|cargo|dotnet|mvn|gradle)\s+(?:install|i|add|ci|update|restore|build)\b/i.test(cmd);
+
+	// Speed up `npm install` / `npm i` dramatically by skipping redundant audit/fund network stalls
+	if (/^\s*npm\s+(?:install|i)\b/i.test(cmd) && !/--(?:help|audit|no-audit)\b/i.test(cmd)) {
+		cmd = `${cmd} --no-audit --no-fund`;
+	}
+
+	if (platform === 'win32') {
+		// Translate standalone `rm -rf <paths>` / `rm -f <paths>` to cross-platform Node fs.rmSync
+		const rmMatch = /^rm\s+-(?:rf|fr|f|r)\s+(.+)$/i.exec(cmd);
+		if (rmMatch && !/[|&;<>]/.test(rmMatch[1])) {
+			cmd = `node -e "const fs=require('fs'); for(const p of process.argv.slice(1)) fs.rmSync(p,{recursive:true,force:true});" ${rmMatch[1].trim()}`;
+		}
+		// Translate standalone `tail -n N file` or `tail -N file`
+		const tailMatch = /^tail\s+(?:-n\s*)?-?(\d+)\s+(.+)$/i.exec(cmd);
+		if (tailMatch && !/[|&;<>]/.test(tailMatch[2])) {
+			const target = tailMatch[2].trim().replace(/^["']|["']$/g, '').replace(/'/g, `''`);
+			cmd = `powershell -NoProfile -Command "Get-Content -Tail ${tailMatch[1]} '${target}'"`;
+		}
+		// Translate standalone `head -n N file` or `head -N file`
+		const headMatch = /^head\s+(?:-n\s*)?-?(\d+)\s+(.+)$/i.exec(cmd);
+		if (headMatch && !/[|&;<>]/.test(headMatch[2])) {
+			const target = headMatch[2].trim().replace(/^["']|["']$/g, '').replace(/'/g, `''`);
+			cmd = `powershell -NoProfile -Command "Get-Content -TotalCount ${headMatch[1]} '${target}'"`;
+		}
+		// Translate standalone `touch <file>`
+		const touchMatch = /^touch\s+(.+)$/i.exec(cmd);
+		if (touchMatch && !/[|&;<>]/.test(touchMatch[1])) {
+			cmd = `node -e "const fs=require('fs'); for(const p of process.argv.slice(1)) fs.closeSync(fs.openSync(p,'a'));" ${touchMatch[1].trim()}`;
+		}
+	}
+
+	return { command: cmd, isPackageInstall };
+}
