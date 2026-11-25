@@ -3585,10 +3585,11 @@ const CommandBarInChat = ({ messages }: { messages: ChatMessage[] }) => {
 
 
 const EditToolSoFar = ({ toolCallSoFar, }: { toolCallSoFar: RawToolCallObj }) => {
+	// Hooks MUST run unconditionally before any early return (toolCallSoFar.name streams chunk-by-chunk,
+	// so returning early before useAccessor() causes React Error "Rendered more hooks than during the previous render")
+	const accessor = useAccessor()
 
 	if (!isABuiltinToolName(toolCallSoFar.name)) return null
-
-	const accessor = useAccessor()
 
 	const uri = toolCallSoFar.rawParams.uri ? URI.file(toolCallSoFar.rawParams.uri) : undefined
 

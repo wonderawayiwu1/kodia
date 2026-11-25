@@ -114,7 +114,18 @@ const SimpleModelSettingsDialog = ({
 	modelInfo: { modelName: string; providerName: ProviderName; type: 'autodetected' | 'custom' | 'default' } | null;
 }) => {
 	if (!isOpen || !modelInfo) return null;
+	return <SimpleModelSettingsDialogContent isOpen={isOpen} onClose={onClose} modelInfo={modelInfo} />;
+};
 
+const SimpleModelSettingsDialogContent = ({
+	isOpen,
+	onClose,
+	modelInfo,
+}: {
+	isOpen: boolean;
+	onClose: () => void;
+	modelInfo: { modelName: string; providerName: ProviderName; type: 'autodetected' | 'custom' | 'default' };
+}) => {
 	const { modelName, providerName, type } = modelInfo;
 	const accessor = useAccessor()
 	const settingsState = useSettingsState()

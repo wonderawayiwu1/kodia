@@ -13,6 +13,149 @@
 import { InternalToolInfo } from './prompt/prompts.js';
 
 export const TOOLS_SHARE_OF_CONTEXT = 0.5;
+/**
+ * Maximum number of tools sent to an LLM in a single turn.
+ * OpenAI hard-caps at 128 tools; Groq, NVIDIA NIM, Gemini, and OpenRouter achieve peak
+ * function-calling accuracy and lowest latency when kept <= 56 focused tools instead of 360+.
+ */
+export const MAX_FOCUSED_TOOLS_PER_TURN = 56;
+
+// Core software-building toolset: every essential capability to plan, read, write, edit,
+// search, run commands/servers, query SQLite, test, inspect live browser, research latest models,
+// review diffs, and delegate to subagents — ~46 razor-sharp tools!
+const CORE_FOCUSED_TOOLS: readonly string[] = [
+	// Files, editing & navigation
+	'read_file', 'write_file', 'edit_file', 'multi_edit_file', 'workspace_search_replace',
+	'create_file_or_folder', 'delete_file_or_folder', 'move_or_rename_file',
+	'ls_dir', 'get_dir_tree', 'search_for_files', 'search_pathnames_only', 'search_in_file',
+	'view_file_outline', 'view_code_item', 'read_lint_errors', 'workspace_diagnostics',
+	// Commands, dev servers, DB & masked .env
+	'run_command', 'dev_server_start', 'dev_server_stop', 'dev_server_status',
+	'open_persistent_terminal', 'run_persistent_command', 'kill_persistent_terminal',
+	'db_inspect', 'db_query', 'manage_env_file',
+	// Testing, Git & BugBot review
+	'test_discover', 'test_run', 'test_rerun_failed', 'git_status', 'git_diff', 'review_code_changes',
+	// Live web/AI research & API / SSE testing
+	'web_search', 'fetch_url', 'lei_discover_models', 'api_request', 'api_test_sse_stream',
+	// Visual Browser QA & Embedded Live Preview
+	'browser_launch', 'browser_new_tab', 'browser_navigate', 'browser_inspect_page',
+	'browser_click_element', 'browser_fill_element', 'browser_screenshot', 'browser_console',
+	'browser_close', 'open_live_preview',
+	// Antigravity UX & multi-agent delegation
+	'update_focus', 'update_steps', 'ask_user_question', 'create_artifact', 'subagent',
+];
+
+// Context-activated specialist tool packs: added ONLY when the user's request actually needs them
+const DOMAIN_TOOL_PACKS: ReadonlyArray<{ pattern: RegExp; tools: readonly string[] }> = [
+	{
+		pattern: /\b(ui|ux|design|css|tailwind|dashboard|frontend|website|landing|saas|component|layout|responsive|accessibility|wcag|visual|screenshot)\b/i,
+		tools: ['inspect_visual_quality', 'audit_accessibility', 'discover_visual_assets', 'download_visual_assets', 'browser_accessibility_snapshot', 'browser_set_viewport'],
+	},
+	{
+		pattern: /\b(browser|click|hover|scroll|drag|playwright|e2e|selenium|puppeteer|aria|dialog|cookie|localstorage|upload)\b/i,
+		tools: ['browser_hover', 'browser_type_text', 'browser_press_key', 'browser_scroll', 'browser_evaluate', 'browser_wait_for_text', 'browser_network_log', 'browser_storage', 'browser_upload_file'],
+	},
+	{
+		pattern: /\b(commit|push|pull|branch|merge|rebase|stash|cherry|worktree|pr\b|pull\s+request|git\s+log)\b/i,
+		tools: ['git_log', 'git_branch_list', 'git_branch_create', 'git_branch_switch', 'git_stage', 'git_unstage', 'git_commit', 'git_commit_context', 'git_pr_prepare', 'git_worktree_add'],
+	},
+	{
+		pattern: /\b(android|ios|mobile|flutter|react\s+native|expo|kotlin|swift|apk|emulator|simulator)\b/i,
+		tools: ['mobile_open_studio', 'mobile_probe_environment', 'mobile_inspect_project', 'mobile_design_architecture', 'mobile_scaffold_project', 'mobile_build_and_test', 'mobile_device_action'],
+	},
+	{
+		pattern: /\b(n8n|automation\s+studio|uaep|webhook\s+workflow|portable\s+automation|embedded\s+automation)\b/i,
+		tools: ['uaep_open_studio', 'uaep_generate_workflow', 'uaep_modify_workflow', 'uaep_compile_workflow', 'uaep_execute_workflow', 'uaep_save_credential', 'uaep_export_portable_package'],
+	},
+	{
+		pattern: /\b(\.ipynb|jupyter|notebook|kernel|cell)\b/i,
+		tools: ['read_notebook', 'write_notebook', 'edit_notebook', 'execute_notebook', 'execute_notebook_cell', 'validate_notebook', 'list_notebook_kernels'],
+	},
+	{
+		pattern: /\b(breakpoint|debugger|step\s+over|step\s+into|stack\s+trace|dap)\b/i,
+		tools: ['debug_start_session', 'debug_set_breakpoint', 'debug_continue', 'debug_step_over', 'debug_get_stack_trace', 'debug_get_variables', 'debug_evaluate_expression', 'debug_stop_session'],
+	},
+	{
+		pattern: /\b(api\s+studio|load\s+test|websocket|openapi|swagger|postman)\b/i,
+		tools: ['api_open_studio', 'api_discover_project', 'api_send_request', 'api_run_test_suite', 'api_run_load_test', 'api_security_audit'],
+	},
+	{
+		pattern: /\b(schedule|cron|timer|every\s+\d+|recurring|parallel\s+workflow|teamwork|custom\s+subagent|notepad|cursor\s+rule|widget|diagram)\b/i,
+		tools: ['schedule_task', 'manage_scheduled_tasks', 'define_subagent', 'manage_subagents', 'run_parallel_workflow', 'manage_notepads', 'manage_rules', 'render_interactive_widget'],
+	},
+	{
+		pattern: /\b(ai\s+model|llm|rag|nvidia|groq|openrouter|gemini|openai|anthropic|ollama|embedding|fine-?tun|vector)\b/i,
+		tools: ['lei_research_technology', 'lei_verify_model', 'lei_check_dependency', 'lei_diagnose_error'],
+	},
+	{
+		pattern: /\b(docker|container|compose|redis|postgres|mysql|sqlite|migration)\b/i,
+		tools: ['docker_status', 'docker_logs', 'dep_install', 'db_migrate', 'port_check'],
+	},
+];
+
+/**
+ * Selects a focused, high-signal toolset (<= MAX_FOCUSED_TOOLS_PER_TURN) tailored to the user's
+ * current request so LLMs NEVER drown in 360+ tool schemas (eliminates OpenAI >128 errors,
+ * Groq/NVIDIA tool-calling collapse, and ~45k tokens/turn of wasted schema overhead).
+ */
+export function selectFocusedToolset(
+	allTools: InternalToolInfo[],
+	userText: string,
+	contextWindow: number,
+	countTokens: (s: string) => number,
+	maxTools: number = MAX_FOCUSED_TOOLS_PER_TURN,
+): ToolBudgetResult {
+	const byName = new Map(allTools.map(t => [t.name, t]));
+	const selectedNames = new Set<string>();
+
+	// 1. Always include MCP tools (explicitly installed by the user)
+	for (const t of allTools) {
+		if (t.name.includes('__') || !TOOL_PRIORITY.includes(t.name) && t.name.startsWith('mcp_')) {
+			selectedNames.add(t.name);
+		}
+	}
+
+	// 2. Include any tool explicitly mentioned by exact name in the user prompt
+	if (userText) {
+		for (const t of allTools) {
+			if (t.name.length >= 6 && userText.includes(t.name)) {
+				selectedNames.add(t.name);
+			}
+		}
+	}
+
+	// 3. Add core software-engineering tools first
+	for (const name of CORE_FOCUSED_TOOLS) {
+		if (byName.has(name)) selectedNames.add(name);
+	}
+
+	// 4. Add relevant domain packs matched by user intent (staying within maxTools)
+	if (userText) {
+		for (const pack of DOMAIN_TOOL_PACKS) {
+			if (!pack.pattern.test(userText)) continue;
+			for (const name of pack.tools) {
+				if (selectedNames.size >= maxTools) break;
+				if (byName.has(name)) selectedNames.add(name);
+			}
+		}
+	}
+
+	// Trim to maxTools if needed (preserving explicit mentions & core order)
+	const orderedSelected: InternalToolInfo[] = [];
+	for (const t of allTools) {
+		if (selectedNames.has(t.name)) orderedSelected.push(t);
+	}
+	const capped = orderedSelected.length > maxTools ? orderedSelected.slice(0, maxTools) : orderedSelected;
+
+	// Finally enforce token budget for small-context models (e.g. 8k-32k local models)
+	const tokenBudgeted = toolsWithinBudget(capped, contextWindow, countTokens);
+	const finalTools = tokenBudgeted ? tokenBudgeted.tools : capped;
+	const finalSet = new Set(finalTools.map(t => t.name));
+	const omitted = allTools.filter(t => !finalSet.has(t.name)).map(t => t.name);
+	const usedTokens = finalTools.reduce((sum, t) => sum + toolDefinitionTokens(t, countTokens), 0);
+	const fullTokens = allTools.reduce((sum, t) => sum + toolDefinitionTokens(t, countTokens), 0);
+	return { tools: finalTools, omitted, usedTokens, fullTokens };
+}
 
 // What a coding agent needs most, most important first. Tools not listed come after, in their usual order.
 const TOOL_PRIORITY: readonly string[] = [

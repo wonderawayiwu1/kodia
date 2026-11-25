@@ -127,22 +127,30 @@ const prepareMessages_openai_tools = (messages: SimpleLLMMessage[], imageFormat:
 			continue
 		}
 
-		// edit the turn's assistant message to have called the tool
-		if (turnAssistant) {
-			(turnAssistant.tool_calls ??= []).push({
-				type: 'function',
-				id: currMsg.id,
-				function: {
-					name: currMsg.name,
-					arguments: JSON.stringify(currMsg.rawParams)
-				}
-			})
+		// Ensure every OpenAI/Groq/NVIDIA tool result has a matching preceding assistant tool_calls
+		// entry and a non-empty tool_call_id (orphan `role: 'tool'` messages cause immediate HTTP 400!)
+		const safeCallId = (currMsg.id && currMsg.id.trim()) ? currMsg.id.trim() : `call_kodia_recovered_${i}`
+		if (!turnAssistant) {
+			turnAssistant = {
+				role: 'assistant',
+				content: '',
+				tool_calls: [],
+			}
+			newMessages.push(turnAssistant)
 		}
+		;(turnAssistant.tool_calls ??= []).push({
+			type: 'function',
+			id: safeCallId,
+			function: {
+				name: currMsg.name,
+				arguments: JSON.stringify(currMsg.rawParams ?? {})
+			}
+		})
 
 		// add the tool
 		newMessages.push({
 			role: 'tool',
-			tool_call_id: currMsg.id,
+			tool_call_id: safeCallId,
 			content: currMsg.content,
 		})
 	}

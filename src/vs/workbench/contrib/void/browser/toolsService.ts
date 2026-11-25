@@ -603,26 +603,60 @@ export class ToolsService implements IToolsService {
 		const uabeMainService = ProxyChannel.toService<IKodiaUniversalAppBuilderMainService>(mainProcessService.getChannel(KODIA_UABE_CHANNEL))
 		const uaepMainService = ProxyChannel.toService<IKodiaUniversalAutomationMainService>(mainProcessService.getChannel(KODIA_UAEP_CHANNEL))
 
-		// FPERE + Real-World Pitfall Write-Time Guard: immediately verify imports/exports AND catch
-		// SQLite single-row settings traps, OpenAI baseUrl typos, Tailwind v4/v3 mismatches, and ESM config bugs.
+		// FPERE + Real-World Pitfall + Missing node_modules Write-Time Guard:
+		// Walks UP ancestor directories (supports monorepo server/ + frontend/ sub-packages!),
+		// immediately flags uninstalled node_modules before cascading TS2307 noise spirals,
+		// and catches SQLite single-row settings traps, OpenAI baseUrl typos, Tailwind v4/v3 & ESM bugs.
 		const runFpereWriteGuard = async (uri: URI, existingLintErrors: LintErrorItem[] | null): Promise<LintErrorItem[] | null> => {
 			const extraErrs: LintErrorItem[] = []
+			let missingNodeModulesDir: string | null = null
+			const folder = workspaceContextService.getWorkspaceFolder(uri)
+			const wsRootFs = folder?.uri.fsPath ?? workspaceFolderPaths()[0] ?? ''
+
 			if (/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|css|sql)$/i.test(uri.fsPath)) {
 				try {
 					const content = (await fileService.readFile(uri)).value.toString()
 					let pkgContent: string | undefined
-					// Look for package.json in the file's directory, parent directory, or workspace root
-					const candidates: URI[] = [
-						URI.joinPath(URI.file(uri.fsPath.replace(/[\\/][^\\/]+$/, '')), 'package.json'),
-					]
-					const folder = workspaceContextService.getWorkspaceFolder(uri)
-					if (folder) candidates.push(URI.joinPath(folder.uri, 'package.json'))
-					for (const cand of candidates) {
+					let nearestPkgDir: URI | undefined
+					// Walk up ancestor directories from the file's directory up to the workspace root
+					let curDirPath = uri.fsPath.replace(/[\\/][^\\/]+$/, '')
+					const normRootLower = wsRootFs.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+					for (let depth = 0; depth < 8 && curDirPath; depth++) {
+						const dirUri = URI.file(curDirPath)
+						const cand = URI.joinPath(dirUri, 'package.json')
 						try {
 							pkgContent = (await fileService.readFile(cand)).value.toString()
+							nearestPkgDir = dirUri
 							break
 						} catch { }
+						const normCur = curDirPath.replace(/\\/g, '/').toLowerCase().replace(/\/+$/, '')
+						if (!normRootLower || normCur === normRootLower || !normCur.startsWith(normRootLower)) break
+						const parent = curDirPath.replace(/[\\/][^\\/]+$/, '')
+						if (parent === curDirPath) break
+						curDirPath = parent
 					}
+
+					// Check if package.json declares dependencies but node_modules is missing!
+					if (pkgContent && nearestPkgDir && /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/i.test(uri.fsPath)) {
+						try {
+							const pkgJson = JSON.parse(pkgContent)
+							const hasDeps = Object.keys({ ...(pkgJson.dependencies ?? {}), ...(pkgJson.devDependencies ?? {}) }).length > 0
+							if (hasDeps) {
+								const localNmExists = await fileService.exists(URI.joinPath(nearestPkgDir, 'node_modules'))
+								const rootNmExists = wsRootFs ? await fileService.exists(URI.joinPath(URI.file(wsRootFs), 'node_modules')) : false
+								if (!localNmExists && !rootNmExists) {
+									missingNodeModulesDir = nearestPkgDir.fsPath
+									extraErrs.push({
+										code: 'MISSING_NODE_MODULES',
+										message: `[Kodia Dependency Guard] Dependencies in "${nearestPkgDir.fsPath}\\package.json" are NOT installed yet (node_modules is missing). Run \`npm install\` in "${nearestPkgDir.fsPath}" IMMEDIATELY before writing more TypeScript files so all package imports and @types/* resolve cleanly.`,
+										startLineNumber: 1,
+										endLineNumber: 1,
+									})
+								}
+							}
+						} catch { }
+					}
+
 					for (const pitfall of detectRealWorldBuildPitfalls(uri.fsPath, content, pkgContent)) {
 						extraErrs.push({
 							code: pitfall.code,
@@ -654,8 +688,15 @@ export class ToolsService implements IToolsService {
 				}
 			}
 
-			if (extraErrs.length === 0) return existingLintErrors
-			return [...(existingLintErrors ?? []), ...extraErrs]
+			// If node_modules isn't installed yet, suppress noisy cascading TS2307 "Cannot find module" markers
+			// so the agent immediately sees the single root cause (run npm install) instead of 20 false squiggles.
+			const filteredExisting = missingNodeModulesDir && existingLintErrors
+				? existingLintErrors.filter(e => !/Cannot find module|Cannot find type definition|TS2307|TS2688|TS2580/i.test(`${e.code} ${e.message}`))
+				: (existingLintErrors ?? [])
+
+			const merged = [...extraErrs, ...filteredExisting]
+			if (merged.length === 0) return null
+			return merged
 		}
 		const notebookKernelMainService = ProxyChannel.toService<IKodiaNotebookKernelMainService>(mainProcessService.getChannel(KODIA_NOTEBOOK_KERNEL_CHANNEL))
 		const notebookEditHistoryByUri = new Map<string, NotebookEditHistoryState>()
@@ -8091,7 +8132,7 @@ export class ToolsService implements IToolsService {
 			edit_file: (params, result) => {
 				const lintErrsString = (
 					this.voidSettingsService.state.globalSettings.includeToolLintErrors ?
-						(result.lintErrors ? ` Lint errors found after change:\n${stringifyLintErrors(result.lintErrors)}.\nIf this is related to a change made while calling this tool, you might want to fix the error.`
+						(result.lintErrors ? ` Errors found after change:\n${stringifyLintErrors(result.lintErrors)}\nFix real syntax/type/dependency issues before moving on (if node_modules is missing, run npm install first).`
 							: ` No lint errors found.`)
 						: '')
 
@@ -8100,7 +8141,7 @@ export class ToolsService implements IToolsService {
 			rewrite_file: (params, result) => {
 				const lintErrsString = (
 					this.voidSettingsService.state.globalSettings.includeToolLintErrors ?
-						(result.lintErrors ? ` Lint errors found after change:\n${stringifyLintErrors(result.lintErrors)}.\nIf this is related to a change made while calling this tool, you might want to fix the error.`
+						(result.lintErrors ? ` Errors found after change:\n${stringifyLintErrors(result.lintErrors)}\nFix real syntax/type/dependency issues before moving on (if node_modules is missing, run npm install first).`
 							: ` No lint errors found.`)
 						: '')
 
@@ -8109,7 +8150,7 @@ export class ToolsService implements IToolsService {
 			write_file: (params, result) => {
 				const lintErrsString = (
 					this.voidSettingsService.state.globalSettings.includeToolLintErrors ?
-						(result.lintErrors ? ` Lint errors found after change:\n${stringifyLintErrors(result.lintErrors)}.\nIf this is related to a change made while calling this tool, you might want to fix the error.`
+						(result.lintErrors ? ` Errors found after change:\n${stringifyLintErrors(result.lintErrors)}\nFix real syntax/type/dependency issues before moving on (if node_modules is missing, run npm install first).`
 							: ` No lint errors found.`)
 						: '')
 
@@ -9074,7 +9115,13 @@ export class ToolsService implements IToolsService {
 			define_subagent: (_params, r) => `Defined custom subagent "${r.subagent.name}" (${r.subagent.canChangeFiles ? 'read+write' : 'read-only'}).`,
 			manage_subagents: (_params, r) => r.cancelled ? `Cancelled ${r.cancelled.length} subagent(s).` : `${r.sessions?.length ?? 0} subagent session(s).`,
 			run_parallel_workflow: (_params, r) => `Parallel workflow "${r.description}": ${r.succeeded}/${r.totalTasks} tasks succeeded across ${r.totalStages} stage(s).`,
-			multi_edit_file: (_params, r) => `Atomically applied ${r.totalReplacements} edit(s) across ${r.filesEdited.length} file(s): ${r.filesEdited.join(', ')}.`,
+			multi_edit_file: (_params, r) => {
+				const base = `Atomically applied ${r.totalReplacements} edit(s) across ${r.filesEdited.length} file(s): ${r.filesEdited.join(', ')}.`
+				if (this.voidSettingsService.state.globalSettings.includeToolLintErrors && r.lintErrors && r.lintErrors.length > 0) {
+					return `${base} Errors found after change:\n${stringifyLintErrors(r.lintErrors)}\nFix real syntax/type/dependency issues before moving on.`
+				}
+				return base
+			},
 			view_file_outline: (_params, r) => {
 				if (r.items.length === 0) return `No top-level symbols found in ${r.uri} (${r.totalLines} lines).`
 				return `Outline of ${r.uri} (${r.totalLines} lines, ${r.items.length} symbol(s)):\n` +

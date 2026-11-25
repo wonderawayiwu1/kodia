@@ -13,7 +13,7 @@ export interface ToolParamRepairResult {
 const URI_TOOLS = new Set([
 	'read_file', 'write_file', 'rewrite_file', 'edit_file', 'create_file_or_folder',
 	'delete_file_or_folder', 'ls_dir', 'get_dir_tree', 'search_in_file', 'read_lint_errors',
-	'go_to_definition', 'find_references', 'file_metadata',
+	'go_to_definition', 'find_references', 'file_metadata', 'view_file_outline', 'view_code_item',
 	'read_notebook', 'write_notebook', 'edit_notebook', 'execute_notebook', 'execute_notebook_cell',
 	'restart_notebook_kernel', 'interrupt_notebook_kernel', 'search_notebook', 'validate_notebook', 'select_notebook_kernel',
 ]);
@@ -81,7 +81,26 @@ export function repairToolParams(
 		}
 	}
 
-	// 1b. Task plan & notebook index alias remapping
+	// 1b. Browser camelCase -> snake_case alias remapping (NVIDIA/Groq/Llama often emit sessionId/tabId)
+	if (toolName.startsWith('browser_')) {
+		if (!next.session_id && typeof next.sessionId === 'string') { next.session_id = next.sessionId; repairs.push('sessionId→session_id'); }
+		if (!next.tab_id && typeof next.tabId === 'string') { next.tab_id = next.tabId; repairs.push('tabId→tab_id'); }
+		if (!next.timeout_ms && next.timeoutMs !== undefined) { next.timeout_ms = next.timeoutMs; repairs.push('timeoutMs→timeout_ms'); }
+	}
+	if (toolName === 'view_code_item' && !next.symbol_name) {
+		const found = pickFirstString(next, ['symbol', 'name', 'symbolName', 'item']);
+		if (found) { next.symbol_name = found.value; repairs.push(`${found.key}→symbol_name`); }
+	}
+	if (toolName === 'workspace_search_replace' && !next.query) {
+		const found = pickFirstString(next, ['search', 'pattern', 'find', 'old_text', 'old_string']);
+		if (found) { next.query = found.value; repairs.push(`${found.key}→query`); }
+	}
+	if (toolName === 'workspace_search_replace' && next.replacement === undefined) {
+		const found = pickFirstString(next, ['replace', 'new_text', 'new_string', 'replace_with']);
+		if (found) { next.replacement = found.value; repairs.push(`${found.key}→replacement`); }
+	}
+
+	// 1c. Task plan & notebook index alias remapping
 	if (toolName === 'update_task_plan' && (next.task_id === undefined || next.task_id === null || next.task_id === '')) {
 		const found = pickFirstString(next, ['taskId', 'id', 'step_id']);
 		if (found) {
@@ -181,6 +200,15 @@ export function repairToolParams(
 		if (!next.description && typeof next.prompt === 'string') {
 			next.description = next.prompt.trim().slice(0, 60);
 			repairs.push('synthesized description');
+		}
+	}
+
+	// 8b. workspace_search_replace include_glob alias
+	if (toolName === 'workspace_search_replace' && !next.include_glob) {
+		const found = pickFirstString(next, ['glob', 'include', 'includeGlob', 'file_pattern']);
+		if (found) {
+			next.include_glob = found.value;
+			repairs.push(`${found.key}→include_glob`);
 		}
 	}
 

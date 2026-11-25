@@ -18,7 +18,7 @@ import { IKodiaHooksMainService, KodiaHookEvent, KodiaHookPayload, KodiaHookRunR
 import { IExecutionObservabilityService } from '../common/executionObservability.js';
 import { ICustomCommandsService } from './customCommandsService.js';
 import { FILE_CHANGING_TOOLS } from '../common/completionCheck.js';
-import { describeOmittedTools, toolsWithinBudget } from '../common/toolBudget.js';
+import { describeOmittedTools, selectFocusedToolset, toolsWithinBudget } from '../common/toolBudget.js';
 import { estimateTokens } from '../common/tokenizer.js';
 import { InternalToolInfo } from '../common/prompt/prompts.js';
 import { chooseSummaryKeepIdx, transcriptForSummary } from '../common/helpers/threadSummary.js';
@@ -93,7 +93,7 @@ const MAX_AGENT_STEPS_PER_TURN = 999999
 // A model stream that produces nothing for this long is treated as hung (see armInactivityTimer).
 const LLM_INACTIVITY_TIMEOUT_MS = 120_000
 // How many times one turn may shrink its budget after a provider's context-length error before giving up.
-const MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN = 2
+const MAX_CONTEXT_OVERFLOW_RECOVERIES_PER_TURN = 5
 
 // Recovery snapshots are kept in the thread: bounded per file and per change (a bigger file cannot be rewound).
 const MAX_SNAPSHOT_FILE_BYTES = 2 * 1024 * 1024
@@ -104,8 +104,9 @@ const THREADS_FLUSH_DELAY_MS = 1_000
 const THREADS_STORE_DEBOUNCE_MS = 400
 const STREAM_UI_THROTTLE_MS = 60
 
-// Stuck detection disabled - agent runs until work is complete.
-const MAX_STUCK_STEPS = 999999
+// Smart stuck-loop circuit breaker: after active recovery nudges at 3 and 6 stuck steps,
+// pause cleanly at 10 consecutive zero-progress / looping steps instead of spinning forever.
+const MAX_STUCK_STEPS = 10
 
 // Track progress across steps: files modified/created, terminal commands run,
 // test results obtained. Used by stuck detection and for resumable checkpoints.
@@ -122,9 +123,15 @@ const FILE_ACCESS_TOOLS: Set<BuiltinToolName> = new Set([
 	'read_lint_errors',
 	'create_file_or_folder',
 	'delete_file_or_folder',
+	'move_or_rename_file',
 	'rewrite_file',
 	'write_file',
 	'edit_file',
+	'multi_edit_file',
+	'workspace_search_replace',
+	'manage_env_file',
+	'view_file_outline',
+	'view_code_item',
 	'search_for_files',
 ]);
 
@@ -1067,8 +1074,9 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		this._setStreamState(threadId, undefined)
 	}
 
-	// The thread no longer fits the model's context window: from now on, send the results of the tool calls made
-	// before the latest user message as a stub (ContextClearedEntry). Returns false if there was nothing to clear.
+	// The thread no longer fits (or is nearing) the model's context window: replace older tool outputs
+	// with a short stub (ContextClearedEntry). Works BOTH across earlier turns AND inside long single-turn
+	// autonomous builds (keeping the most recent 5 assistant/tool steps verbatim).
 	private _clearOldToolResults(threadId: string): boolean {
 		const messages = this.state.allThreads[threadId]?.messages
 		if (!messages) return false
@@ -1076,11 +1084,29 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		const latestUserIdx = findLastIdx(messages, m => m.role === 'user')
 		const lastClearing = findLast(messages, m => m.role === 'context_cleared')
 		const alreadyClearedBefore = lastClearing?.role === 'context_cleared' ? lastClearing.keepFromIdx : 0
-		if (latestUserIdx <= alreadyClearedBefore) return false
-		if (!messages.slice(alreadyClearedBefore, latestUserIdx).some(m => m.role === 'tool')) return false
 
-		this._addMessageToThread(threadId, { role: 'context_cleared', keepFromIdx: latestUserIdx })
-		return true
+		// 1. First clear tool results from turns before the latest user message
+		if (latestUserIdx > alreadyClearedBefore && messages.slice(alreadyClearedBefore, latestUserIdx).some(m => m.role === 'tool')) {
+			this._addMessageToThread(threadId, { role: 'context_cleared', keepFromIdx: latestUserIdx })
+			return true
+		}
+
+		// 2. Inside a long autonomous multi-step turn: clear stale tool outputs older than the last 5 assistant steps
+		const KEEP_RECENT_STEPS = 5
+		const searchStart = Math.max(latestUserIdx + 1, alreadyClearedBefore)
+		const assistantIndices: number[] = []
+		for (let i = searchStart; i < messages.length; i++) {
+			if (messages[i].role === 'assistant') assistantIndices.push(i)
+		}
+		if (assistantIndices.length > KEEP_RECENT_STEPS) {
+			const keepFromIdx = assistantIndices[assistantIndices.length - KEEP_RECENT_STEPS]
+			if (keepFromIdx > alreadyClearedBefore && messages.slice(alreadyClearedBefore, keepFromIdx).some(m => m.role === 'tool')) {
+				this._addMessageToThread(threadId, { role: 'context_cleared', keepFromIdx })
+				return true
+			}
+		}
+
+		return false
 	}
 
 	// the keepFromIdx of the latest summary tried per thread, so a summary that failed isn't retried on every request
@@ -1256,6 +1282,14 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 
 		if (!opts.preapproved) { // skip this if pre-approved
+			// 0. Surface malformed/truncated streamed tool-call JSON directly to the model for instant self-recovery
+			const malformedJsonErr = opts.unvalidatedToolParams && typeof (opts.unvalidatedToolParams as Record<string, unknown>).__kodia_malformed_json_error__ === 'string'
+				? String((opts.unvalidatedToolParams as Record<string, unknown>).__kodia_malformed_json_error__)
+				: null
+			if (malformedJsonErr) {
+				this._addMessageToThread(threadId, { role: 'tool', type: 'invalid_params', rawParams: opts.unvalidatedToolParams, result: null, name: toolName, content: malformedJsonErr, id: toolId, mcpServerName })
+				return {}
+			}
 			// 1. Deterministic BYOK argument auto-repair + param validation
 			try {
 				if (isBuiltInTool) {
@@ -2394,9 +2428,8 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 	/** Update progress tracking based on tool result, used by stuck detection. */
 	private _updateProgressTracking(threadId: string, toolName: ToolName, toolParams: ToolCallParams<ToolName>, toolResult: any): void {
 		const progress = this._progress(threadId)
-		progress.stepsSinceLastProgress = 0 // reset stuck counter on any progress
 
-		// Track file touches
+		// Track file touches (only count as clear progress if no new lint errors or newly touched file)
 		if (isFileAccessTool(toolName)) {
 			const uri = getFileToolUri(toolName, toolParams)
 			if (uri) {
@@ -2463,6 +2496,12 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 		let nMessagesSent = 0
 		let nudgedForUnfulfilledAction = false
 		let requestedCompletionCheck = false
+		// Smart Anti-Stuck Loop Detector state (scoped to this turn):
+		// Detects duplicate calls, repeated failing commands, and edit thrashing on the same file.
+		const recentCallSignatures: string[] = []
+		const fileLintCountHistory = new Map<string, number>()
+		let lastRecoveryNudgeStep = -99
+		let lastStuckDetail = ''
 		// messages from here on belong to this turn; an approved tool's request message (updated in place) is the turn's first
 		const nMessagesBeforeTurn = this.state.allThreads[threadId]?.messages.length ?? 0
 		const turnStartIdx = callThisToolFirst ? Math.max(0, nMessagesBeforeTurn - 1) : nMessagesBeforeTurn
@@ -2483,13 +2522,26 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 			? this._toolInfosOf(toolPolicy.allowed).filter(t => !disabledSet?.has(t.name))
 			: undefined
 		const baseAvailable = policyTools ?? availableTools(chatMode, this._mcpService.getMCPTools(), undefined, disabledTools) ?? []
-		// a small-context model gets a prioritized subset of the tools when all of them would take over half its window
-		const budgeted = activeModelSelection ? toolsWithinBudget(
-			baseAvailable,
-			getModelCapabilities(activeModelSelection.providerName, activeModelSelection.modelName, overridesOfModel).contextWindow,
-			estimateTokens,
-		) : undefined
-		const explicitTools: InternalToolInfo[] | undefined = budgeted?.tools ?? policyTools ?? (disabledSet ? baseAvailable : undefined)
+		const threadMsgsForContext = this.state.allThreads[threadId]?.messages ?? []
+		const recentUserText = threadMsgsForContext
+			.filter(m => m.role === 'user')
+			.slice(-3)
+			.map(m => (m.role === 'user' ? m.displayContent : ''))
+			.join('\n')
+			.slice(0, 6000)
+
+		// Send a lean, task-focused toolset (<= 56 tools instead of all 364!) so OpenAI (128-tool hard cap),
+		// Groq, NVIDIA NIM, and OpenRouter reliably call tools without schema overload or 400 errors.
+		const activeContextWindowInit = activeModelSelection
+			? getModelCapabilities(activeModelSelection.providerName, activeModelSelection.modelName, overridesOfModel).contextWindow
+			: 128_000
+		const focusedSelection = (!toolPolicy && activeModelSelection && baseAvailable.length > 0)
+			? selectFocusedToolset(baseAvailable, recentUserText, activeContextWindowInit, estimateTokens)
+			: undefined
+		const budgeted = (toolPolicy && activeModelSelection)
+			? toolsWithinBudget(baseAvailable, activeContextWindowInit, estimateTokens)
+			: undefined
+		const explicitTools: InternalToolInfo[] | undefined = focusedSelection?.tools ?? budgeted?.tools ?? policyTools ?? (disabledSet ? baseAvailable : undefined)
 
 		// Automatic Turn-Aware UI/UX Design Intelligence & Live Research Injection:
 		// Guarantees that whenever the user asks to build/redesign software or AI products, Kodia's Design Engine
@@ -2584,15 +2636,15 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				break
 			}
 
-			// Stuck detection: if no file/terminal/test progress for too many steps,
-			// pause and report so the user can intervene or break the task down.
+			// Stuck detection: if too many consecutive steps fail or loop with zero progress
+			// even after active recovery nudges, pause cleanly with a clear diagnostic report.
 			if (progress.stepsSinceLastProgress >= MAX_STUCK_STEPS) {
 				this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' })
 				const filesList = Array.from(progress.filesTouched).slice(0, 10).join(', ')
 				const cmdsList = Array.from(progress.terminalCommands).slice(0, 5).join(', ')
-				const msg = `Agent appears stuck: no file changes, terminal commands, or test results for ${MAX_STUCK_STEPS} consecutive steps. ` +
-					`Progress so far: files touched [${filesList || 'none'}], commands run [${cmdsList || 'none'}]. ` +
-					`Send another message to resume, or break the request into smaller steps.`
+				const msg = `Agent paused to prevent an infinite loop: ${progress.stepsSinceLastProgress} consecutive steps made no net progress.${lastStuckDetail ? `\n\nLast loop signal: ${lastStuckDetail}` : ''}\n` +
+					`Files touched: [${filesList || 'none'}] | Commands run: [${cmdsList || 'none'}].\n` +
+					`Inspect the error above and send a follow-up message to resume or adjust direction.`
 				this._addMessageToThread(threadId, {
 					role: 'assistant',
 					displayContent: msg,
@@ -2618,8 +2670,14 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 				subagent: subagentPrompt,
 			})
 			let prepared = await prepare()
-			// too long for the model: clear old tool results once, rather than truncating messages on every request
-			if (prepared.wasStillOverBudgetAfterTrimming && this._clearOldToolResults(threadId)) prepared = await prepare()
+			// Proactive mid-build compaction: in long 40-100 step builds, clear stale older tool results
+			// once input crosses 72% of the model's context window (prevents 7M+ token bloat & 400 overflows).
+			const activeWindowNow = activeModelSelection
+				? getModelCapabilities(activeModelSelection.providerName, activeModelSelection.modelName, overridesOfModel).contextWindow
+				: 128_000
+			if ((prepared.wasStillOverBudgetAfterTrimming || prepared.estimatedInputTokens > activeWindowNow * 0.72) && this._clearOldToolResults(threadId)) {
+				prepared = await prepare()
+			}
 			// still too long: summarize the older messages (when that fails, prepare's truncation is the fallback)
 			if (prepared.wasStillOverBudgetAfterTrimming && activeModelSelection && !interruptedWhenIdle) {
 				const summarized = await this._summarizeOlderMessages(threadId, { modelSelection: activeModelSelection, modelSelectionOptions, overridesOfModel, onInterrupt: () => { interruptedWhenIdle = true } })
@@ -2893,16 +2951,102 @@ export class ChatThreadService extends Disposable implements IChatThreadService 
 
 				// call the tools if there are any
 				if (toolCalls && toolCalls.length > 0) {
+					const preToolMsgCount = this.state.allThreads[threadId]?.messages.length ?? 0
 					const { awaitingUserApproval, interrupted } = await this._runToolCallsOfTurn(threadId, toolCalls)
 					if (interrupted) {
 						this._setStreamState(threadId, undefined)
 						return
 					}
 					if (awaitingUserApproval) { isRunningWhenEnd = 'awaiting_user' }
-					else { 
-						shouldSendAnotherMessage = true 
-						// Increment stuck counter - _updateProgressTracking resets to 0 when progress is made
-						progress.stepsSinceLastProgress++
+					else {
+						shouldSendAnotherMessage = true
+						// Smart Anti-Stuck Loop Detector: inspect actual tool outcomes from this step
+						const stepMsgs = (this.state.allThreads[threadId]?.messages ?? []).slice(preToolMsgCount)
+						const stepToolMsgs = stepMsgs.filter((m): m is ToolMessage<ToolName> => m.role === 'tool')
+						const stepSigs = toolCalls.map(tc => {
+							const rp = (tc.rawParams ?? {}) as Record<string, unknown>
+							const key = String(rp.uri ?? rp.command ?? rp.query ?? rp.url ?? rp.path ?? rp.symbol_name ?? '').slice(0, 120)
+							return `${tc.name}:${key}`
+						})
+						const duplicateHit = stepSigs.some(sig => recentCallSignatures.filter(prev => prev === sig).length >= 2)
+						recentCallSignatures.push(...stepSigs)
+						if (recentCallSignatures.length > 14) recentCallSignatures.splice(0, recentCallSignatures.length - 14)
+
+						let hadGenuineProgress = false
+						let stepStuckReason = ''
+						let missingDepsDetected = false
+						let failingEditFile = ''
+						let failingCmd = ''
+
+						for (const tm of stepToolMsgs) {
+							if (tm.type === 'tool_error' || tm.type === 'invalid_params') {
+								stepStuckReason = `${tm.name} failed (${String(tm.content ?? '').slice(0, 160)})`
+								if (tm.name === 'edit_file' || tm.name === 'write_file' || tm.name === 'rewrite_file' || tm.name === 'multi_edit_file') {
+									failingEditFile = String((tm.rawParams as any)?.uri ?? '')
+								}
+								continue
+							}
+							if (tm.type === 'success') {
+								const contentStr = String(tm.content ?? '')
+								if (/MISSING_NODE_MODULES|node_modules is missing/i.test(contentStr)) {
+									missingDepsDetected = true
+									stepStuckReason = `Missing node_modules detected while writing ${String((tm.rawParams as any)?.uri ?? 'file')}`
+									continue
+								}
+								if (tm.name === 'run_command' || tm.name === 'run_persistent_command') {
+									const exitMatch = /\(exit code (\d+)\)\s*$/.exec(contentStr)
+									const exitCode = exitMatch ? Number(exitMatch[1]) : 0
+									if (exitCode !== 0) {
+										failingCmd = String((tm.rawParams as any)?.command ?? 'command').slice(0, 120)
+										stepStuckReason = `Command failed (exit ${exitCode}): ${failingCmd}`
+										continue
+									}
+									hadGenuineProgress = true
+								} else if (tm.name === 'write_file' || tm.name === 'rewrite_file' || tm.name === 'edit_file' || tm.name === 'multi_edit_file') {
+									const targetUri = String((tm.rawParams as any)?.uri ?? tm.name)
+									const lintErrs = Array.isArray((tm.result as any)?.lintErrors) ? ((tm.result as any).lintErrors as unknown[]).length : 0
+									const prevErrs = fileLintCountHistory.get(targetUri)
+									fileLintCountHistory.set(targetUri, lintErrs)
+									if (lintErrs === 0 || prevErrs === undefined || lintErrs < prevErrs) {
+										hadGenuineProgress = true
+									} else {
+										failingEditFile = targetUri
+										stepStuckReason = `Repeated edit on ${targetUri} still has ${lintErrs} error(s) (was ${prevErrs})`
+									}
+								} else {
+									if (!duplicateHit) hadGenuineProgress = true
+								}
+							}
+						}
+
+						if (hadGenuineProgress && !duplicateHit) {
+							progress.stepsSinceLastProgress = 0
+							lastStuckDetail = ''
+						} else {
+							progress.stepsSinceLastProgress += 1
+							lastStuckDetail = stepStuckReason || (duplicateHit ? `Repeated identical tool call: ${stepSigs[0]}` : 'No net progress on last step')
+						}
+
+						// Active Self-Recovery Intervention at 3 and 6 stuck steps (breaks loops BEFORE stalling!)
+						const shouldInjectRecovery = (progress.stepsSinceLastProgress === 3 || progress.stepsSinceLastProgress === 6)
+							&& (nMessagesSent - lastRecoveryNudgeStep >= 3)
+						if (shouldInjectRecovery) {
+							lastRecoveryNudgeStep = nMessagesSent
+							const recoveryAdvice = missingDepsDetected
+								? `STOP writing more source files — dependencies are NOT installed yet. Run \`npm install\` in the package directory FIRST, then continue.`
+								: failingEditFile
+									? `STOP repeating failing edits on "${failingEditFile}". Call \`read_file\` on the exact error lines AND on any imported module whose exports mismatched, diagnose the real type/import root cause, and apply ONE clean fix (or use \`write_file\` with the complete corrected file).`
+									: failingCmd
+										? `STOP re-running failing command "${failingCmd}" unchanged. Read the exact compiler/runtime error output above, fix the underlying source/config/dependency root cause first, and ONLY then re-run.`
+										: `STOP repeating identical tool calls (${stepSigs[0] ?? 'unknown'}). Change approach immediately: read the actual error/file once, fix the root cause, or move forward to the next concrete implementation step.`
+							this._addMessageToThread(threadId, {
+								role: 'user',
+								displayContent: `Kodia Auto-Recovery: ${recoveryAdvice}`,
+								content: `[KODIA LOOP RECOVERY DIRECTIVE — ${lastStuckDetail}]\n${recoveryAdvice}`,
+								selections: null,
+								state: { stagingSelections: [], isBeingEdited: false },
+							})
+						}
 					}
 
 					this._setStreamState(threadId, { isRunning: 'idle', interrupt: 'not_needed' }) // just decorative, for clarity

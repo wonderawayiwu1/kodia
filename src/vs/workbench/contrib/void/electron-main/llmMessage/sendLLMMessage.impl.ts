@@ -20,6 +20,7 @@ import { ChatMode, displayInfoOfProviderName, ModelSelectionOptions, OverridesOf
 import { getSendableReasoningInfo, getModelCapabilities, getProviderCapabilities, defaultProviderSettings, getReservedOutputTokenSpace, anthropicModelFeatures } from '../../common/modelCapabilities.js';
 import { extractReasoningWrapper, extractXMLToolsWrapper } from './extractGrammar.js';
 import { availableTools, InternalToolInfo } from '../../common/prompt/prompts.js';
+import { finalizeStreamedToolCalls, inferToolParamSchema, mergeStreamedToolDelta, StreamedToolDeltaState } from '../../common/toolCallJsonRepair.js';
 import { generateUuid } from '../../../../../base/common/uuid.js';
 import { estimateTokens, getTokenizer } from '../../common/tokenizer.js';
 import { KODIA_REPO_URL } from '../../common/kodiaLinks.js';
@@ -281,20 +282,19 @@ const _sendOpenAICompatibleFIM = async ({ messages: { prefix, suffix, stopTokens
 const toOpenAICompatibleTool = (toolInfo: InternalToolInfo) => {
 	const { name, description, params } = toolInfo
 
-	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
-	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
+	const paramsWithType: Record<string, Record<string, unknown>> = {}
+	for (const key in params) {
+		paramsWithType[key] = inferToolParamSchema(key, params[key].description)
+	}
 
 	return {
 		type: 'function',
 		function: {
 			name: name,
-			// strict: true, // strict mode - https://platform.openai.com/docs/guides/function-calling?api-mode=chat
 			description: description,
 			parameters: {
 				type: 'object',
 				properties: paramsWithType,
-				// required: Object.keys(params), // in strict mode, all params are required and additionalProperties is false
-				// additionalProperties: false,
 			},
 		}
 	} satisfies OpenAI.Chat.Completions.ChatCompletionTool
@@ -304,30 +304,18 @@ const openAITools = (chatMode: ChatMode | null, mcpTools: InternalToolInfo[] | u
 	const allowedTools = availableTools(chatMode, mcpTools, explicitTools)
 	if (!allowedTools || Object.keys(allowedTools).length === 0) return null
 
+	// Hard OpenAI/Groq/NVIDIA safety cap (OpenAI rejects >128 tools with HTTP 400)
+	const cappedTools = allowedTools.length > 96 ? allowedTools.slice(0, 96) : allowedTools
 	const openAITools: OpenAI.Chat.Completions.ChatCompletionTool[] = []
-	for (const t in allowedTools ?? {}) {
-		openAITools.push(toOpenAICompatibleTool(allowedTools[t]))
+	for (const t of cappedTools) {
+		openAITools.push(toOpenAICompatibleTool(t))
 	}
 	return openAITools
 }
 
 
-// convert LLM tool call to our tool format
-const rawToolCallObjOfParamsStr = (name: string, toolParamsStr: string, id: string): RawToolCallObj | null => {
-	let input: unknown
-	try { input = JSON.parse(toolParamsStr) }
-	catch (e) { return null }
-
-	if (input === null) return null
-	if (typeof input !== 'object') return null
-
-	const rawParams: RawToolParamsObj = input
-	return { id, name, rawParams, doneParams: Object.keys(rawParams), isDone: true }
-}
-
-
 // a tool call whose name/id/params arrive in pieces while streaming
-type StreamedToolCall = { name: string; id: string; paramsStr: string }
+type StreamedToolCall = StreamedToolDeltaState
 
 // the call currently being generated (the latest one), for display while streaming
 const streamingToolCallOf = (calls: StreamedToolCall[]): RawToolCallObj | undefined => {
@@ -338,11 +326,7 @@ const streamingToolCallOf = (calls: StreamedToolCall[]): RawToolCallObj | undefi
 	return undefined
 }
 
-// calls whose params aren't valid JSON are dropped, as before
-const finalToolCallsOf = (calls: StreamedToolCall[]): RawToolCallObj[] =>
-	calls.filter(t => !!t?.name)
-		.map(t => rawToolCallObjOfParamsStr(t.name, t.paramsStr, t.id))
-		.filter((t): t is RawToolCallObj => t !== null)
+const finalToolCallsOf = (calls: StreamedToolCall[]): RawToolCallObj[] => finalizeStreamedToolCalls(calls)
 
 const rawToolCallObjOfAnthropicParams = (toolBlock: Anthropic.Messages.ToolUseBlock): RawToolCallObj | null => {
 	const { id, name, input } = toolBlock
@@ -392,12 +376,8 @@ const parseOpenAICompatibleDeltaContent = (content: unknown): { text: string; re
 
 
 // convertToLLMMessageService (browser side) trims message *content* against contextWindow, but it
-// has no visibility into the tool-call schemas assembled here in the main process. That's invisible
-// slack on any normal-sized context window, but on tiny local models (a 4k-token window) the tool
-// schemas alone can be a third of the whole budget —
-// so a request that looks correctly trimmed still overflows the real session limit. Only kicks in
-// below SMALL_CONTEXT_WINDOW_THRESHOLD so normal cloud providers pay no extra tokenization cost.
-const SMALL_CONTEXT_WINDOW_THRESHOLD = 16_000
+// has no visibility into the tool-call schemas assembled here in the main process. Accounting for
+// tool-schema tokens across ALL context windows prevents surprise mid-build HTTP 400 overflows.
 const _messageContentText = (content: unknown): string => {
 	if (typeof content === 'string') return content
 	if (Array.isArray(content)) return content.map(c => (c && typeof c === 'object' && typeof (c as { text?: unknown }).text === 'string') ? (c as { text: string }).text : '').join('')
@@ -410,12 +390,12 @@ const _trimMessagesForToolBudget = (
 	reservedOutputTokenSpace: number | null | undefined,
 	tokenizer?: { countTokens: (text: string) => number },
 ): OpenAI.Chat.Completions.ChatCompletionMessageParam[] => {
-	if (contextWindow > SMALL_CONTEXT_WINDOW_THRESHOLD || !tools) return messages
+	if (!tools || !Number.isFinite(contextWindow) || contextWindow <= 0) return messages
 
 	const countTokens = tokenizer ? tokenizer.countTokens : estimateTokens;
 	const toolTokens = countTokens(JSON.stringify(tools))
-	const outputSpace = Math.max(contextWindow * 1 / 2, reservedOutputTokenSpace ?? 4_096)
-	const budget = Math.max(contextWindow - outputSpace - toolTokens, 1_250)
+	const outputSpace = Math.min(Math.floor(contextWindow * 0.4), reservedOutputTokenSpace ?? 8_192)
+	const budget = Math.max(contextWindow - outputSpace - toolTokens - 512, 1_250)
 
 	const msgs = messages.map(m => ({ ...m }))
 	let overflow = msgs.reduce((sum, m) => sum + countTokens(_messageContentText(m.content)), 0) - budget
@@ -724,14 +704,12 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 				fullTextSoFar += newText
 				fullReasoningSoFar += newReasoningFromContent
 
-				// tool calls
+				// tool calls (handles both delta-only and repeated-name/id OpenAI-compatible gateways)
 				const toolDeltas = chunk.choices[0]?.delta?.tool_calls ?? []
 				for (let j = 0; j < toolDeltas.length; j += 1) {
 					const tool = toolDeltas[j]
 					const t = streamedToolCalls[tool.index ?? j] ??= { name: '', id: '', paramsStr: '' } // some servers omit index
-					t.name += tool.function?.name ?? ''
-					t.paramsStr += tool.function?.arguments ?? ''
-					t.id += tool.id ?? ''
+					mergeStreamedToolDelta(t, { id: tool.id, name: tool.function?.name, arguments: tool.function?.arguments })
 				}
 
 
@@ -808,15 +786,16 @@ const _openaiCompatibleList = async ({ onSuccess: onSuccess_, onError: onError_,
 // ------------ ANTHROPIC (HELPERS) ------------
 const toAnthropicTool = (toolInfo: InternalToolInfo) => {
 	const { name, description, params } = toolInfo
-	const paramsWithType: { [s: string]: { description: string; type: 'string' } } = {}
-	for (const key in params) { paramsWithType[key] = { ...params[key], type: 'string' } }
+	const paramsWithType: Record<string, Record<string, unknown>> = {}
+	for (const key in params) {
+		paramsWithType[key] = inferToolParamSchema(key, params[key].description)
+	}
 	return {
 		name: name,
 		description: description,
 		input_schema: {
 			type: 'object',
 			properties: paramsWithType,
-			// required: Object.keys(params),
 		},
 	} satisfies Anthropic.Messages.Tool
 }
@@ -1159,15 +1138,24 @@ const sendOllamaFIM = async ({ messages, onFinalMessage, onError, settingsOfProv
 
 const toGeminiFunctionDecl = (toolInfo: InternalToolInfo, GeminiType: typeof Type) => {
 	const { name, description, params } = toolInfo
+	const mapType = (t: string) => {
+		if (t === 'boolean') return GeminiType.BOOLEAN
+		if (t === 'number' || t === 'integer') return GeminiType.NUMBER
+		if (t === 'array') return GeminiType.ARRAY
+		if (t === 'object') return GeminiType.OBJECT
+		return GeminiType.STRING
+	}
 	return {
 		name,
 		description,
 		parameters: {
 			type: GeminiType.OBJECT,
 			properties: Object.entries(params).reduce((acc, [key, value]) => {
+				const inferred = inferToolParamSchema(key, value.description)
 				acc[key] = {
-					type: GeminiType.STRING,
-					description: value.description
+					type: mapType(inferred.type),
+					description: value.description,
+					...(inferred.type === 'array' ? { items: { type: GeminiType.STRING } } : {}),
 				};
 				return acc;
 			}, {} as Record<string, Schema>)
