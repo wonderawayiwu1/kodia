@@ -614,15 +614,16 @@ const ProviderSetting =({ providerName, settingName, subTextMd }: { providerName
 	const settingsState = useSettingsState()
 
 	const settingValue = settingsState.settingsOfProvider[providerName][settingName] as string // this should always be a string in this component
-	if (typeof settingValue !== 'string') {
-		console.log('Error: Provider setting had a non-string value.')
-		return
-	}
 
-	// Create a stable callback reference using useCallback with proper dependencies
+	// Create a stable callback reference unconditionally before any early return
 	const handleChangeValue = useCallback((newVal: string) => {
 		voidSettingsService.setSettingOfProvider(providerName, settingName, newVal)
 	}, [voidSettingsService, providerName, settingName]);
+
+	if (typeof settingValue !== 'string') {
+		console.log('Error: Provider setting had a non-string value.')
+		return null
+	}
 
 	return <ErrorBoundary>
 		<div className='my-1'>

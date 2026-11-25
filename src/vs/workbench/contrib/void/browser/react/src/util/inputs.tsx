@@ -1597,6 +1597,102 @@ export const BlockCode = React.memo(({ initValue, language, maxHeight, showScrol
 		if (language) modelRef.current?.setLanguage(language)
 	}, [language])
 
+	// IMPORTANT: All hooks MUST be called unconditionally BEFORE any early return (such as `if (!isNearViewport)`),
+	// otherwise transitioning from placeholder <pre> to Monaco widget calls 4 extra hooks and crashes React with
+	// "Error: Rendered more hooks than during the previous render."!
+	const ctor = useCallback((container: HTMLDivElement) => {
+		return instantiationService.createInstance(
+			CodeEditorWidget,
+			container,
+			{
+				automaticLayout: true,
+				wordWrap: 'off',
+
+				scrollbar: {
+					alwaysConsumeMouseWheel: false,
+					...SHOW_SCROLLBARS ? {
+						vertical: 'auto',
+						verticalScrollbarSize: 8,
+						horizontal: 'auto',
+						horizontalScrollbarSize: 8,
+					} : {
+						vertical: 'hidden',
+						verticalScrollbarSize: 0,
+						horizontal: 'auto',
+						horizontalScrollbarSize: 8,
+						ignoreHorizontalScrollbarInContentHeight: true,
+
+					},
+				},
+				scrollBeyondLastLine: false,
+
+				lineNumbers: 'off',
+
+				readOnly: true,
+				domReadOnly: true,
+				readOnlyMessage: { value: '' },
+
+				minimap: {
+					enabled: false,
+					// maxColumn: 0,
+				},
+
+				hover: { enabled: 'off' },
+
+				selectionHighlight: false, // highlights whole words
+				renderLineHighlight: 'none',
+
+				folding: false,
+				lineDecorationsWidth: 0,
+				overviewRulerLanes: 0,
+				hideCursorInOverviewRuler: true,
+				overviewRulerBorder: false,
+				glyphMargin: false,
+
+				stickyScroll: {
+					enabled: false,
+				},
+			},
+			{
+				isSimpleWidget: true,
+			})
+	}, [instantiationService, SHOW_SCROLLBARS])
+
+	const onCreateInstance = useCallback((editor: CodeEditorWidget) => {
+		const languageId = languageRef.current ? languageRef.current : 'plaintext'
+
+		const model = modelOfEditorId[id] ?? modelService.createModel(
+			initValueRef.current, {
+			languageId: languageId,
+			onDidChange: (e) => { return { dispose: () => { } } } // no idea why they'd require this
+		})
+		modelRef.current = model
+		editor.setModel(model);
+
+		const container = editor.getDomNode()
+		const parentNode = container?.parentElement
+		const resize = () => {
+			const height = editor.getScrollHeight() + 1
+			if (parentNode) {
+				// const height = Math.min(, MAX_HEIGHT);
+				parentNode.style.height = `${height}px`;
+				parentNode.style.maxHeight = `${MAX_HEIGHT}px`;
+				editor.layout();
+			}
+		}
+
+		resize()
+		const disposable = editor.onDidContentSizeChange(() => { resize() });
+
+		return [disposable, model]
+	}, [modelService, id, MAX_HEIGHT])
+
+	const dispose = useCallback((editor: CodeEditorWidget) => {
+		editor.dispose();
+	}, [modelService])
+
+	const propsFn = useCallback(() => { return [] }, [])
+
 	if (!isNearViewport) {
 		return <div ref={divRef} className='relative z-0 px-2 py-1 bg-void-bg-3'>
 			<pre
@@ -1611,98 +1707,10 @@ export const BlockCode = React.memo(({ initValue, language, maxHeight, showScrol
 	return <div ref={divRef} className='relative z-0 px-2 py-1 bg-void-bg-3'>
 		<WidgetComponent
 			className='@@bg-editor-style-override' // text-sm
-			ctor={useCallback((container) => {
-				return instantiationService.createInstance(
-					CodeEditorWidget,
-					container,
-					{
-						automaticLayout: true,
-						wordWrap: 'off',
-
-						scrollbar: {
-							alwaysConsumeMouseWheel: false,
-							...SHOW_SCROLLBARS ? {
-								vertical: 'auto',
-								verticalScrollbarSize: 8,
-								horizontal: 'auto',
-								horizontalScrollbarSize: 8,
-							} : {
-								vertical: 'hidden',
-								verticalScrollbarSize: 0,
-								horizontal: 'auto',
-								horizontalScrollbarSize: 8,
-								ignoreHorizontalScrollbarInContentHeight: true,
-
-							},
-						},
-						scrollBeyondLastLine: false,
-
-						lineNumbers: 'off',
-
-						readOnly: true,
-						domReadOnly: true,
-						readOnlyMessage: { value: '' },
-
-						minimap: {
-							enabled: false,
-							// maxColumn: 0,
-						},
-
-						hover: { enabled: 'off' },
-
-						selectionHighlight: false, // highlights whole words
-						renderLineHighlight: 'none',
-
-						folding: false,
-						lineDecorationsWidth: 0,
-						overviewRulerLanes: 0,
-						hideCursorInOverviewRuler: true,
-						overviewRulerBorder: false,
-						glyphMargin: false,
-
-						stickyScroll: {
-							enabled: false,
-						},
-					},
-					{
-						isSimpleWidget: true,
-					})
-			}, [instantiationService])}
-
-			onCreateInstance={useCallback((editor: CodeEditorWidget) => {
-				const languageId = languageRef.current ? languageRef.current : 'plaintext'
-
-				const model = modelOfEditorId[id] ?? modelService.createModel(
-					initValueRef.current, {
-					languageId: languageId,
-					onDidChange: (e) => { return { dispose: () => { } } } // no idea why they'd require this
-				})
-				modelRef.current = model
-				editor.setModel(model);
-
-				const container = editor.getDomNode()
-				const parentNode = container?.parentElement
-				const resize = () => {
-					const height = editor.getScrollHeight() + 1
-					if (parentNode) {
-						// const height = Math.min(, MAX_HEIGHT);
-						parentNode.style.height = `${height}px`;
-						parentNode.style.maxHeight = `${MAX_HEIGHT}px`;
-						editor.layout();
-					}
-				}
-
-				resize()
-				const disposable = editor.onDidContentSizeChange(() => { resize() });
-
-				return [disposable, model]
-			}, [modelService])}
-
-			dispose={useCallback((editor: CodeEditorWidget) => {
-				editor.dispose();
-			}, [modelService])}
-
-			propsFn={useCallback(() => { return [] }, [])}
+			ctor={ctor}
+			onCreateInstance={onCreateInstance}
+			dispose={dispose}
+			propsFn={propsFn}
 		/>
 	</div>
 
