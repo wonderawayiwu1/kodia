@@ -7,29 +7,30 @@ import { mainWindow } from '../../../../base/browser/window.js';
 import { IntervalTimer, RunOnceScheduler } from '../../../../base/common/async.js';
 import { CancellationToken } from '../../../../base/common/cancellation.js';
 import { Disposable } from '../../../../base/common/lifecycle.js';
+import { CommandsRegistry } from '../../../../platform/commands/common/commands.js';
 import { ILogService } from '../../../../platform/log/common/log.js';
 import { asJson, IRequestService } from '../../../../platform/request/common/request.js';
 import { registerWorkbenchContribution2, WorkbenchPhase } from '../../../common/contributions.js';
 import { defaultModelsOfProvider } from '../common/modelCapabilities.js';
-import { freeCodingModelsOfOpenRouter, mostUsedModelsOfOpenRouter, OPENROUTER_MODELS_BY_USAGE_URL, OpenRouterModel, stillListedModelsOfOpenRouter } from '../common/openRouterModels.js';
+import { allFreeModelsOfOpenRouter, isFreeOpenRouterModel, mostUsedModelsOfOpenRouter, OPENROUTER_MODELS_BY_USAGE_URL, OpenRouterModel, stillListedModelsOfOpenRouter } from '../common/openRouterModels.js';
 import { detectedModelsOfProvider, ListableProviderName, listableProviderNames, mostUsedModelNames } from '../common/providerModels.js';
 import { ILLMMessageService } from '../common/sendLLMMessageService.js';
 import { IVoidSettingsService } from '../common/voidSettingsService.js';
 
+export const KODIA_REFRESH_OPENROUTER_MODELS_COMMAND = 'kodia.refreshOpenRouterModels';
+
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const KEY_CHANGE_DELAY_MS = 2_000; // a key being typed or pasted
 const MOST_USED_COUNT = 5;
-const BEST_FREE_COUNT = 5;
 
 // the providers whose key changes what Kodia lists
 const keyedProviderNames = [...listableProviderNames, 'openRouter'] as const;
 type KeyedProviderName = typeof keyedProviderNames[number];
 
 // Kodia: lists in each provider's section, besides its default model, the models its API has, with the capabilities
-// the API gives: for OpenRouter, the 5 best free models for code and the 5 most used others that can run the agent;
-// for every provider with an API key, its chat models. These OpenRouter models and each provider's 5 most used on
-// OpenRouter last week start switched on, the others switched off. At startup, then every day, and when a key changes.
-// Kodia reads OpenRouter's list (public) only once a provider has a key: until then, it contacts no one.
+// the API gives: for OpenRouter, ALL free chat/coding models (switched ON automatically!) plus the 5 most-used paid
+// models (switched OFF by default so $0-credit accounts never hit HTTP 402); for every provider with an API key,
+// its chat models. Refreshes at startup, daily, when a key changes, and on-demand via kodia.refreshOpenRouterModels.
 export class ProviderModelsContrib extends Disposable {
 	static readonly ID = 'workbench.contrib.kodia.providerModels';
 
@@ -44,6 +45,12 @@ export class ProviderModelsContrib extends Disposable {
 		@ILogService private readonly logService: ILogService,
 	) {
 		super();
+
+		// On-demand refresh command triggered from Settings -> Models ("Refresh Free Models")
+		this._register(CommandsRegistry.registerCommand(KODIA_REFRESH_OPENROUTER_MODELS_COMMAND, async () => {
+			this._openRouterModels = undefined;
+			return this._refreshOpenRouter({ forceFetch: true, enableAllFree: true });
+		}));
 
 		this.voidSettingsService.waitForInitState.then(() => {
 			this._refreshAll();
@@ -73,7 +80,7 @@ export class ProviderModelsContrib extends Disposable {
 	private _keyChangeScheduler(providerName: KeyedProviderName): RunOnceScheduler {
 		let scheduler = this._refreshOnKeyChange.get(providerName);
 		if (!scheduler) {
-			scheduler = this._register(new RunOnceScheduler(() => providerName === 'openRouter' ? this._refreshOpenRouter() : this._refreshProvider(providerName), KEY_CHANGE_DELAY_MS));
+			scheduler = this._register(new RunOnceScheduler(() => providerName === 'openRouter' ? this._refreshOpenRouter({ forceFetch: true, enableAllFree: true }) : this._refreshProvider(providerName), KEY_CHANGE_DELAY_MS));
 			this._refreshOnKeyChange.set(providerName, scheduler);
 		}
 		return scheduler;
@@ -81,17 +88,19 @@ export class ProviderModelsContrib extends Disposable {
 
 	private _refreshAll(): void {
 		this._openRouterModels = undefined; // fetched again, once
-		this._refreshOpenRouter();
+		void this._refreshOpenRouter();
 		for (const providerName of listableProviderNames) {
 			this._refreshProvider(providerName);
 		}
 	}
 
-	// OpenRouter's list by usage, when a provider has a key
-	private _openRouterModelsByUsage(): Promise<OpenRouterModel[] | undefined> {
-		const apiKeys = Object.values(this._apiKeys());
-		if (!apiKeys.some(apiKey => !!apiKey)) {
-			return Promise.resolve(undefined);
+	// OpenRouter's list by usage (public endpoint, no key needed when forceFetch=true)
+	private _openRouterModelsByUsage(forceFetch = false): Promise<OpenRouterModel[] | undefined> {
+		if (!forceFetch) {
+			const apiKeys = Object.values(this._apiKeys());
+			if (!apiKeys.some(apiKey => !!apiKey)) {
+				return Promise.resolve(undefined);
+			}
 		}
 		this._openRouterModels ??= this._fetchOpenRouterModels();
 		return this._openRouterModels;
@@ -108,22 +117,38 @@ export class ProviderModelsContrib extends Disposable {
 		}
 	}
 
-	private async _refreshOpenRouter(): Promise<void> {
-		const models = await this._openRouterModelsByUsage();
+	private async _refreshOpenRouter(opts?: { forceFetch?: boolean; enableAllFree?: boolean }): Promise<number> {
+		const models = await this._openRouterModelsByUsage(opts?.forceFetch);
 		if (!models) {
 			// no key yet, offline, or OpenRouter is down: keep the models found last time
-			return;
+			return 0;
 		}
 		const now = Date.now();
-		// the best free models for code first, then the most used
-		const free = freeCodingModelsOfOpenRouter(models, now).slice(0, BEST_FREE_COUNT);
+		// ALL free chat/coding models on OpenRouter first (no 5-model cap!), then top 5 paid models (switched OFF by default)
+		const free = allFreeModelsOfOpenRouter(models, now);
 		const mostUsed = mostUsedModelsOfOpenRouter(models, now, MOST_USED_COUNT);
 		// a model selected in the chat (or another feature) stays when it leaves these lists
 		const selected = Object.values(this.voidSettingsService.state.modelSelectionOfFeature)
 			.flatMap(selection => selection?.providerName === 'openRouter' ? [selection.modelName] : []);
 		const detected = [...free, ...mostUsed, ...stillListedModelsOfOpenRouter(models, now, selected)];
 		const unique = detected.filter((m, i) => detected.findIndex(other => other.modelName === m.modelName) === i);
-		this.voidSettingsService.setDetectedModels('openRouter', unique, [...free, ...mostUsed].map(m => m.modelName));
+		// ONLY free models start switched ON; paid models stay OFF unless the user explicitly enables them!
+		this.voidSettingsService.setDetectedModels('openRouter', unique, free.map(m => m.modelName));
+		if (opts?.enableAllFree) {
+			const visibility: Record<string, boolean> = {};
+			for (const m of free) {
+				visibility[m.modelName] = false; // show all free models
+			}
+			// If none of the free models were previously visible, also turn off paid defaults/auto-enabled ones on manual refresh?
+			// Keep user's explicit paid toggles untouched unless they click "Free Only" — just ensure all free models are visible!
+			for (const existing of this.voidSettingsService.state.settingsOfProvider.openRouter.models) {
+				if (isFreeOpenRouterModel('openRouter', existing.modelName, existing.detectedCapabilities)) {
+					visibility[existing.modelName] = false;
+				}
+			}
+			this.voidSettingsService.setModelsHiddenBatch('openRouter', visibility);
+		}
+		return free.length;
 	}
 
 	private async _refreshProvider(providerName: ListableProviderName): Promise<void> {

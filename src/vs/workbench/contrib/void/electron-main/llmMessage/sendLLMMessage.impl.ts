@@ -274,6 +274,12 @@ const _sendOpenAICompatibleFIM = async ({ messages: { prefix, suffix, stopTokens
 		})
 		.catch(error => {
 			if (error instanceof OpenAI.APIError && error.status === 401) { onError({ message: invalidApiKeyMessage(providerName), fullError: error }); }
+			else if (providerName === 'openRouter' && error instanceof OpenAI.APIError && error.status === 402) {
+				onError({
+					message: `${error}\n\nTip: "${modelName}" is a paid OpenRouter model (or exceeds your key credit limit). Switch to any ":free" model under OpenRouter → Free in the model picker, or click "Free Only" in Kodia Settings → Models.`,
+					fullError: error,
+				});
+			}
 			else { onError({ message: error + '', fullError: error }); }
 		})
 }
@@ -741,6 +747,12 @@ const _sendOpenAICompatibleChat = async ({ messages, onText, onFinalMessage, onE
 		// when error/fail - this catches errors of both .create() and .then(for await)
 		.catch(error => {
 			if (error instanceof OpenAI.APIError && error.status === 401) { onError({ message: invalidApiKeyMessage(providerName), fullError: error }); }
+			else if (providerName === 'openRouter' && error instanceof OpenAI.APIError && error.status === 402) {
+				onError({
+					message: `${error}\n\nTip: "${modelName}" is a paid OpenRouter model (or exceeds your key credit limit). Switch to any ":free" model under OpenRouter → Free in the model picker, or click "Free Only" in Kodia Settings → Models.`,
+					fullError: error,
+				});
+			}
 			else { onError({ message: error + '', fullError: error }); }
 		})
 }

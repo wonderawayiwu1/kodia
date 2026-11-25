@@ -328,6 +328,7 @@ const SimpleModelSettingsDialogContent = ({
 export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderName[] }) => {
 	const accessor = useAccessor()
 	const settingsStateService = accessor.get('IVoidSettingsService')
+	const commandService = accessor.get('ICommandService')
 	const settingsState = useSettingsState()
 
 	// State to track which model's settings dialog is open
@@ -343,6 +344,34 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 	const [userChosenProviderName, setUserChosenProviderName] = useState<ProviderName | null>(null);
 	const [modelName, setModelName] = useState<string>('');
 	const [errorString, setErrorString] = useState('');
+	const [isRefreshingOpenRouter, setIsRefreshingOpenRouter] = useState(false);
+	const [openRouterRefreshNote, setOpenRouterRefreshNote] = useState<string | null>(null);
+
+	const handleRefreshOpenRouterFree = useCallback(async () => {
+		setIsRefreshingOpenRouter(true);
+		setOpenRouterRefreshNote(null);
+		try {
+			const count = await commandService.executeCommand<number>('kodia.refreshOpenRouterModels');
+			setOpenRouterRefreshNote(typeof count === 'number' && count > 0 ? `Loaded ${count} free models` : 'Refreshed');
+			setTimeout(() => setOpenRouterRefreshNote(null), 4000);
+		} catch {
+			setOpenRouterRefreshNote('Refresh failed (check internet)');
+		} finally {
+			setIsRefreshingOpenRouter(false);
+		}
+	}, [commandService]);
+
+	const handleOpenRouterFreeOnly = useCallback(() => {
+		const orModels = settingsState.settingsOfProvider.openRouter?.models ?? [];
+		const batch: Record<string, boolean> = {};
+		for (const m of orModels) {
+			const free = isFreeOpenRouterModel('openRouter', m.modelName, m.detectedCapabilities);
+			batch[m.modelName] = !free; // show all free, hide all paid
+		}
+		settingsStateService.setModelsHiddenBatch('openRouter', batch);
+		setOpenRouterRefreshNote('Enabled Free Only');
+		setTimeout(() => setOpenRouterRefreshNote(null), 3000);
+	}, [settingsState.settingsOfProvider.openRouter?.models, settingsStateService]);
 
 	// a dump of all the enabled providers' models
 	const modelDump: (VoidStatefulModelInfo & { providerName: ProviderName, providerEnabled: boolean })[] = []
@@ -352,14 +381,22 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 
 	for (let providerName of providersToShow) {
 		const providerSettings = settingsState.settingsOfProvider[providerName]
-		// if (!providerSettings.enabled) continue
-		modelDump.push(...providerSettings.models.map(model => ({ ...model, providerName, providerEnabled: !!providerSettings._didFillInProviderSettings })))
+		const providerModels = providerName === 'openRouter'
+			? [...providerSettings.models].sort((a, b) =>
+				Number(isFreeOpenRouterModel('openRouter', b.modelName, b.detectedCapabilities)) -
+				Number(isFreeOpenRouterModel('openRouter', a.modelName, a.detectedCapabilities))
+			)
+			: providerSettings.models
+		modelDump.push(...providerModels.map(model => ({ ...model, providerName, providerEnabled: !!providerSettings._didFillInProviderSettings })))
 	}
 
-	// sort by hidden
+	// sort by enabled provider
 	modelDump.sort((a, b) => {
 		return Number(b.providerEnabled) - Number(a.providerEnabled)
 	})
+
+	const openRouterFreeCount = (settingsState.settingsOfProvider.openRouter?.models ?? [])
+		.filter(m => isFreeOpenRouterModel('openRouter', m.modelName, m.detectedCapabilities)).length
 
 	// Add model handler
 	const handleAddModel = () => {
@@ -407,35 +444,64 @@ export const ModelDump = ({ filteredProviders }: { filteredProviders?: ProviderN
 			)
 
 
+			const isFree = isFreeOpenRouterModel(providerName, modelName, m.detectedCapabilities)
+
 			const detailAboutModel = type === 'autodetected' ?
-				<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content={providerName === 'openRouter' ? (modelName.endsWith(':free') ? 'Among OpenRouter\'s best free models for code (checked daily)' : 'Among OpenRouter\'s most used (checked daily)') : (nonlocalProviderNames as readonly string[]).includes(providerName) ? `In ${providerTitle}'s model list (checked daily)` : 'Detected locally'} />
+				<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content={providerName === 'openRouter' ? (isFree ? 'Free OpenRouter model ($0/M tokens — auto-loaded from OpenRouter)' : 'Paid OpenRouter model (requires OpenRouter credits)') : (nonlocalProviderNames as readonly string[]).includes(providerName) ? `In ${providerTitle}'s model list (checked daily)` : 'Detected locally'} />
 				: type === 'custom' ?
 					<Asterisk size={14} className="inline-block align-text-top brightness-115 stroke-[2] text-[#0e70c0]" data-tooltip-id='void-tooltip' data-tooltip-place='right' data-tooltip-content='Custom model' />
 					: undefined
 
 			const hasOverrides = !!settingsState.overridesOfModel?.[providerName]?.[modelName]
 
-			// Kodia: OpenRouter's free models under a "Free" heading, and a line between them and the others
+			// Kodia: OpenRouter's free models under a "Free (N)" heading with live refresh & Free Only buttons, and paid models clearly labeled below
 			const previous = i > 0 ? modelDump[i - 1] : undefined
-			const isFree = isFreeOpenRouterModel(providerName, modelName)
-			const previousIsFree = !isNewProviderName && !!previous && isFreeOpenRouterModel(previous.providerName, previous.modelName)
+			const previousIsFree = !isNewProviderName && !!previous && isFreeOpenRouterModel(previous.providerName, previous.modelName, previous.detectedCapabilities)
+			const openRouterToolbar = providerName === 'openRouter' && isNewProviderName ? (
+				<div className='flex items-center gap-2 ml-auto'>
+					{openRouterRefreshNote && <span className='text-[11px] text-emerald-400'>{openRouterRefreshNote}</span>}
+					<button
+						type='button'
+						onClick={handleRefreshOpenRouterFree}
+						disabled={isRefreshingOpenRouter}
+						className='inline-flex items-center gap-1 px-2 py-0.5 text-[11px] rounded border border-void-border-2 bg-void-bg-2 hover:bg-void-bg-3 text-void-fg-1 cursor-pointer disabled:opacity-50'
+						title='Fetch all current free models directly from OpenRouter'
+					>
+						{isRefreshingOpenRouter ? <Loader2 size={11} className='animate-spin' /> : <RefreshCw size={11} />}
+						<span>Refresh Free</span>
+					</button>
+					<button
+						type='button'
+						onClick={handleOpenRouterFreeOnly}
+						className='px-2 py-0.5 text-[11px] rounded border border-emerald-500/40 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 cursor-pointer'
+						title='Enable all free OpenRouter models and turn off paid models'
+					>
+						Free Only
+					</button>
+				</div>
+			) : null
 			const freeHeading = isFree && !previousIsFree
-				? <div className='flex items-center gap-4 pt-1 px-3'>
-					<span className='w-full max-w-32'>{isNewProviderName ? providerTitle : ''}</span>
-					<span className='text-xs text-void-fg-3'>Free</span>
+				? <div className='flex items-center gap-4 pt-1.5 pb-0.5 px-3'>
+					<span className='w-full max-w-32 font-medium'>{isNewProviderName ? providerTitle : ''}</span>
+					<span className='text-xs text-emerald-400 font-medium'>Free ({openRouterFreeCount})</span>
+					{openRouterToolbar}
 				</div>
 				: null
-			const separator = previousIsFree && !isFree
-				? <div className='my-1 mx-3 border-t border-void-border-2' />
+			const paidHeading = providerName === 'openRouter' && !isFree && (previousIsFree || isNewProviderName)
+				? <div className='mt-1.5 pt-1.5 mx-3 border-t border-void-border-2 flex items-center gap-4'>
+					<span className='w-full max-w-32 font-medium'>{isNewProviderName ? providerTitle : ''}</span>
+					<span className='text-xs text-amber-400/90'>Paid (requires OpenRouter credits)</span>
+					{isNewProviderName ? openRouterToolbar : null}
+				</div>
 				: null
 
-			return <React.Fragment key={`${modelName}${providerName}`}>{freeHeading}{separator}<div
+			return <React.Fragment key={`${modelName}${providerName}`}>{freeHeading}{paidHeading}<div
 				className={`flex items-center justify-between gap-4 hover:bg-black/10 dark:hover:bg-gray-300/10 py-1 px-3 rounded-sm overflow-hidden cursor-default truncate group
 				`}
 			>
 				{/* left part is width:full */}
 				<div className={`flex flex-grow items-center gap-4`}>
-					<span className='w-full max-w-32'>{isNewProviderName && !freeHeading ? providerTitle : ''}</span>
+					<span className='w-full max-w-32'>{isNewProviderName && !freeHeading && !paidHeading ? providerTitle : ''}</span>
 					<span className='w-fit max-w-[400px] truncate'>{modelName}</span>
 				</div>
 

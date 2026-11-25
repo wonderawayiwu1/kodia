@@ -2684,7 +2684,13 @@ export const scoreModelForTask = (
 	// Penalty for unknown/unrecognized models: their context window is only a guess
 	if (caps.isUnrecognizedModel && caps.contextWindowSource === 'fallback') score -= 50
 
-	// Cost preference (cheaper models preferred for general tasks, but not at expense of capability)
+	// Cost preference: on OpenRouter strongly prefer free (:free / $0) models over paid ones so $0-credit accounts
+	// don't unexpectedly hit HTTP 402 when Auto mode runs
+	if (providerName === 'openRouter') {
+		const isFreeOr = modelName.endsWith(':free') || modelName === 'openrouter/free' || (caps.cost.input === 0 && caps.cost.output === 0)
+		if (isFreeOr) score += 20
+		else if (caps.cost.input > 0 || caps.cost.output > 0) score -= 15
+	}
 	if (taskType === 'general' && caps.cost.output > 0 && caps.cost.output < 1) score += 5
 
 	return Math.max(score, 0)

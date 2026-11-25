@@ -7,7 +7,7 @@ import assert from 'assert';
 import { deepClone } from '../../../../../base/common/objects.js';
 import { ensureNoDisposablesAreLeakedInTestSuite } from '../../../../../base/test/common/utils.js';
 import { getModelCapabilities, setDetectedModelOptions } from '../../common/modelCapabilities.js';
-import { freeCodingModelsOfOpenRouter, mostUsedModelsOfOpenRouter, OpenRouterModel, stillListedModelsOfOpenRouter } from '../../common/openRouterModels.js';
+import { allFreeModelsOfOpenRouter, freeCodingModelsOfOpenRouter, isFreeOpenRouterModel, mostUsedModelsOfOpenRouter, OpenRouterModel, stillListedModelsOfOpenRouter } from '../../common/openRouterModels.js';
 import { defaultOverridesOfModel, defaultSettingsOfProvider } from '../../common/voidSettingsTypes.js';
 
 const now = Date.parse('2026-10-27T12:00:00Z');
@@ -133,5 +133,36 @@ suite('Kodia - OpenRouter\'s most used models', () => {
 	test('a selected model stays while OpenRouter lists it and it can run the agent', () => {
 		const models = [paid('a/still'), paid('a/no-tools-now', { supported_parameters: [] })];
 		assert.deepStrictEqual(stillListedModelsOfOpenRouter(models, now, ['a/still', 'a/no-tools-now', 'a/gone']).map(m => m.modelName), ['a/still']);
+	});
+
+	test('allFreeModelsOfOpenRouter loads ALL free chat/vision models (including Gemma 4, Flint, non-tool free & openrouter/free) without a 5-model cap', () => {
+		const manyFree = Array.from({ length: 12 }, (_, idx) => model(`org/free-model-${idx}:free`));
+		const models = [
+			...manyFree,
+			model('google/gemma-4-26b-a4b-it:free'),
+			model('google/gemma-4-31b-it:free'),
+			model('recursive/flint-v1.0:free'),
+			model('openrouter/free', { pricing: { prompt: '0', completion: '0' } }),
+			model('a/no-native-tools:free', { supported_parameters: ['max_tokens'] }),
+			model('fish-audio/s2.1-pro-free:free', { architecture: { input_modalities: ['text'], output_modalities: ['audio'] } }),
+			model('nvidia/nemotron-3.5-embed-1b:free', { architecture: { input_modalities: ['text'], output_modalities: ['embeddings'] } }),
+			paid('x-ai/grok-4.7'),
+		];
+		const res = allFreeModelsOfOpenRouter(models, now);
+		const names = res.map(m => m.modelName);
+		assert.strictEqual(res.length, 17, `expected all 17 free chat models, got ${res.length}`);
+		assert.ok(names.includes('google/gemma-4-26b-a4b-it:free'));
+		assert.ok(names.includes('google/gemma-4-31b-it:free'));
+		assert.ok(names.includes('recursive/flint-v1.0:free'));
+		assert.ok(names.includes('openrouter/free'));
+		assert.ok(names.includes('a/no-native-tools:free'));
+		assert.ok(!names.includes('fish-audio/s2.1-pro-free:free'), 'audio/TTS-only model should be excluded');
+		assert.ok(!names.includes('nvidia/nemotron-3.5-embed-1b:free'), 'embedding-only model should be excluded');
+		assert.ok(!names.includes('x-ai/grok-4.7'), 'paid model must not be in free list');
+		// Non-tool free model falls back cleanly to XML tool calling (specialToolFormat: undefined)
+		const noToolEntry = res.find(m => m.modelName === 'a/no-native-tools:free');
+		assert.strictEqual(noToolEntry?.capabilities.specialToolFormat, undefined);
+		assert.strictEqual(isFreeOpenRouterModel('openRouter', 'openrouter/free'), true);
+		assert.strictEqual(isFreeOpenRouterModel('openRouter', 'x-ai/grok-4.7'), false);
 	});
 });

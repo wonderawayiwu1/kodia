@@ -130,6 +130,7 @@ export interface IVoidSettingsService {
 	// Kodia: the models a provider's API lists besides its default one (on OpenRouter, its free and most used models),
 	// with their capabilities. New ones are switched off, but for `shownModelNames` (the most used, OpenRouter's free ones)
 	setDetectedModels(providerName: ProviderName, models: DetectedModel[], shownModelNames?: readonly string[]): void;
+	setModelsHiddenBatch(providerName: ProviderName, hiddenByModelName: Record<string, boolean>): void;
 	toggleModelHidden(providerName: ProviderName, modelName: string): void;
 	addModel(providerName: ProviderName, modelName: string): void;
 	deleteModel(providerName: ProviderName, modelName: string): boolean;
@@ -741,6 +742,23 @@ class VoidSettingsService extends Disposable implements IVoidSettingsService {
 		const newModels = _modelsWithSwappedInNewModels({ providerName, existingModels: models, models: detectedModels.map(m => m.modelName), type: 'autodetected', capabilitiesOfModel, hideNewModels: true, shownNewModels: shownModelNames })
 		// every window refreshes them: only the first one with a change saves it
 		if (JSON.stringify(newModels) === JSON.stringify(models)) return
+		this.setSettingOfProvider(providerName, 'models', newModels)
+	}
+
+	setModelsHiddenBatch(providerName: ProviderName, hiddenByModelName: Record<string, boolean>) {
+		const { models } = this.state.settingsOfProvider[providerName]
+		let changed = false
+		const newModels: VoidStatefulModelInfo[] = models.map(m => {
+			if (Object.prototype.hasOwnProperty.call(hiddenByModelName, m.modelName)) {
+				const targetHidden = !!hiddenByModelName[m.modelName]
+				if (!!m.isHidden !== targetHidden) {
+					changed = true
+					return { ...m, isHidden: targetHidden }
+				}
+			}
+			return m
+		})
+		if (!changed) return
 		this.setSettingOfProvider(providerName, 'models', newModels)
 	}
 
