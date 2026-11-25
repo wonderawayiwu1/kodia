@@ -139,6 +139,12 @@ export const displayInfoOfProviderName = (providerName: ProviderName): DisplayIn
 	else if (providerName === 'nvidia') {
 		return { title: 'NVIDIA', }
 	}
+	else if (providerName === 'cloudflare') {
+		return { title: 'Cloudflare Workers AI', }
+	}
+	else if (providerName === 'aionLabs') {
+		return { title: 'Aion Labs (aionlabs.ai)', }
+	}
 
 	throw new Error(`descOfProviderName: Unknown provider name: "${providerName}"`)
 }
@@ -158,6 +164,8 @@ export const subTextMdOfProviderName = (providerName: ProviderName): string => {
 	if (providerName === 'microsoftAzure') return 'Read more about endpoints [here](https://learn.microsoft.com/en-us/rest/api/aifoundry/model-inference/get-chat-completions/get-chat-completions?view=rest-aifoundry-model-inference-2024-05-01-preview&tabs=HTTP), and get your API key [here](https://learn.microsoft.com/en-us/azure/search/search-security-api-keys?tabs=rest-use%2Cportal-find%2Cportal-query#find-existing-keys).'
 	if (providerName === 'awsBedrock') return 'Connect via a LiteLLM proxy or the AWS [Bedrock-Access-Gateway](https://github.com/aws-samples/bedrock-access-gateway). LiteLLM Bedrock setup docs are [here](https://docs.litellm.ai/docs/providers/bedrock).'
 	if (providerName === 'nvidia') return 'Get your [API Key here](https://build.nvidia.com/). NVIDIA hosted inference API: https://integrate.api.nvidia.com/v1'
+	if (providerName === 'cloudflare') return 'Free daily Workers AI tier! Get your [API Token & Account ID here](https://dash.cloudflare.com/?to=/:account/ai/workers-ai) (OpenAI-compatible endpoint: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1).'
+	if (providerName === 'aionLabs') return 'Get your [API Key here](https://aionlabs.ai). OpenAI-compatible endpoint: https://api.aionlabs.ai/v1'
 	if (providerName === 'ollama') return 'Read more about custom [Endpoints here](https://github.com/ollama/ollama/blob/main/docs/faq.md#how-can-i-expose-ollama-on-my-network).'
 	if (providerName === 'vLLM') return 'Read more about custom [Endpoints here](https://docs.vllm.ai/en/latest/getting_started/quickstart.html#openai-compatible-server).'
 	if (providerName === 'lmStudio') return 'Read more about custom [Endpoints here](https://lmstudio.ai/docs/app/api/endpoints/openai).'
@@ -192,7 +200,9 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 													providerName === 'microsoftAzure' ? 'key-...' :
 														providerName === 'awsBedrock' ? 'key-...' :
 															providerName === 'nvidia' ? 'nvapi-key...' :
-																'',
+																providerName === 'cloudflare' ? 'cf-api-token...' :
+																	providerName === 'aionLabs' ? 'aion-key...' :
+																		'',
 
 			isPasswordField: true,
 		}
@@ -255,6 +265,12 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 		}
 
 	}
+	else if (settingName === 'accountId') {
+		return {
+			title: 'Account ID',
+			placeholder: '32-char Cloudflare Account ID',
+		}
+	}
 	else if (settingName === '_didFillInProviderSettings') {
 		return {
 			title: '(never)',
@@ -274,6 +290,7 @@ export const displayInfoOfSettingName = (providerName: ProviderName, settingName
 
 const defaultCustomSettings: Record<CustomSettingName, undefined> = {
 	apiKey: undefined,
+	accountId: undefined, // cloudflare
 	endpoint: undefined,
 	region: undefined, // googleVertex
 	project: undefined,
@@ -400,6 +417,18 @@ export const defaultSettingsOfProvider: SettingsOfProvider = {
 		...defaultCustomSettings,
 		...defaultProviderSettings.nvidia,
 		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.nvidia),
+		_didFillInProviderSettings: undefined,
+	},
+	cloudflare: {
+		...defaultCustomSettings,
+		...defaultProviderSettings.cloudflare,
+		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.cloudflare),
+		_didFillInProviderSettings: undefined,
+	},
+	aionLabs: {
+		...defaultCustomSettings,
+		...defaultProviderSettings.aionLabs,
+		...modelInfoOfDefaultModelNames(defaultModelsOfProvider.aionLabs),
 		_didFillInProviderSettings: undefined,
 	},
 }

@@ -83,7 +83,7 @@ export class LLMMessageChannel implements IServerChannel {
 			}
 			// Kodia: a cloud provider's list of models, with the user's key
 			else if (command === 'listProviderModels') {
-				return await listProviderModels(params.providerName, params.apiKey)
+				return await listProviderModels(params.providerName, params.apiKey, params.extra)
 			}
 			else {
 				throw new Error(`Kodia sendLLM: command "${command}" not recognized.`)

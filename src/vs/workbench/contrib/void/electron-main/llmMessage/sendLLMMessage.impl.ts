@@ -236,6 +236,24 @@ const newOpenAICompatibleSDK = async ({ settingsOfProvider, providerName }: { se
 		const thisConfig = settingsOfProvider[providerName]
 		return new OpenAI({ baseURL: 'https://integrate.api.nvidia.com/v1', apiKey: thisConfig.apiKey, ...commonPayloadOpts })
 	}
+	else if (providerName === 'cloudflare') {
+		const thisConfig = settingsOfProvider[providerName]
+		const accountId = (thisConfig.accountId || '').trim()
+		if (!accountId) throw new Error('Cloudflare Workers AI requires your Cloudflare Account ID in Kodia Settings → Models.')
+		return new OpenAI({
+			baseURL: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/v1`,
+			apiKey: thisConfig.apiKey,
+			...commonPayloadOpts,
+		})
+	}
+	else if (providerName === 'aionLabs') {
+		const thisConfig = settingsOfProvider[providerName]
+		return new OpenAI({
+			baseURL: 'https://api.aionlabs.ai/v1',
+			apiKey: thisConfig.apiKey,
+			...commonPayloadOpts,
+		})
+	}
 
 	else throw new Error(`Kodia providerName was invalid: ${providerName}.`)
 }
@@ -1397,6 +1415,16 @@ export const sendLLMMessageToProviderImplementation = {
 	},
 
 	nvidia: {
+		sendChat: (params) => _sendOpenAICompatibleChat(params),
+		sendFIM: null,
+		list: null,
+	},
+	cloudflare: {
+		sendChat: (params) => _sendOpenAICompatibleChat(params),
+		sendFIM: null,
+		list: null,
+	},
+	aionLabs: {
 		sendChat: (params) => _sendOpenAICompatibleChat(params),
 		sendFIM: null,
 		list: null,

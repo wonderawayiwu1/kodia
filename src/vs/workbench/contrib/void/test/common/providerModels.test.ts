@@ -169,4 +169,28 @@ suite('Kodia - models listed by the providers\' APIs', () => {
 		const llama = getModelCapabilities('nvidia', 'meta/llama-3.1-8b-instruct', undefined);
 		assert.strictEqual(llama.supportsVision, false, 'vision not inferred from the model name');
 	});
+
+	test('Cloudflare Workers AI & Aion Labs: detects free text models, filters non-chat endpoints, and resolves catalog capabilities', () => {
+		const cfDetected = detectedModelsOfProvider('cloudflare', [
+			{ name: '@cf/openai/gpt-oss-120b' }, // already a default
+			{ name: '@cf/qwen/qwen2.5-coder-32b-instruct', properties: [{ property_id: 'context_window', value: 32768 }] },
+			{ name: '@cf/baai/bge-large-en-v1.5' }, // embedding: excluded
+			{ name: '@cf/openai/whisper' }, // audio: excluded
+		]);
+		assert.deepStrictEqual(names(cfDetected), ['@cf/qwen/qwen2.5-coder-32b-instruct']);
+		const cfCaps = getModelCapabilities('cloudflare', '@cf/openai/gpt-oss-120b', undefined);
+		assert.strictEqual(cfCaps.contextWindow, 128_000);
+		assert.strictEqual(cfCaps.cost.input, 0);
+		assert.strictEqual(cfCaps.specialToolFormat, 'openai-style');
+
+		const aionDetected = detectedModelsOfProvider('aionLabs', [
+			{ id: 'aion-labs/aion-3.5' }, // already a default
+			{ id: 'aion-labs/aion-2.0', context_length: 131_072 },
+			{ id: 'aion-labs/aion-embed-1' }, // embedding: excluded
+		]);
+		assert.deepStrictEqual(names(aionDetected), ['aion-labs/aion-2.0']);
+		const aionCaps = getModelCapabilities('aionLabs', 'aion-labs/aion-3.5', undefined);
+		assert.strictEqual(aionCaps.contextWindow, 262_144);
+		assert.strictEqual(aionCaps.specialToolFormat, 'openai-style');
+	});
 });

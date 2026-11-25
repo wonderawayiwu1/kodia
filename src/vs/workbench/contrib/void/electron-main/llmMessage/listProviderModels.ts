@@ -9,8 +9,8 @@ const TIMEOUT_MS = 20_000;
 const MAX_PAGES = 10;
 
 // the fields of the responses Kodia reads here; providerModels.ts reads the models
-type ListResponse = { data?: unknown; models?: unknown; has_more?: unknown; last_id?: unknown; nextPageToken?: unknown };
-type Model = { id?: unknown; context_length?: unknown };
+type ListResponse = { data?: unknown; models?: unknown; result?: unknown; has_more?: unknown; last_id?: unknown; nextPageToken?: unknown };
+type Model = { id?: unknown; name?: unknown; context_length?: unknown };
 
 const getJson = async (url: string, headers: Record<string, string>): Promise<ListResponse> => {
 	const response = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
@@ -27,7 +27,7 @@ const bearer = (apiKey: string) => ({ Authorization: `Bearer ${apiKey}` });
 
 // Kodia: a provider's list of models, fetched with the user's key, as its API returns it (providerModels.ts keeps the
 // chat models Kodia's catalog doesn't have). Throws when the provider can't be reached or refuses the key.
-export const listProviderModels = async (providerName: ListableProviderName, apiKey: string): Promise<unknown[]> => {
+export const listProviderModels = async (providerName: ListableProviderName, apiKey: string, extra?: { accountId?: string }): Promise<unknown[]> => {
 	switch (providerName) {
 		case 'anthropic': {
 			// https://platform.claude.com/docs/en/api/models/list
@@ -63,6 +63,16 @@ export const listProviderModels = async (providerName: ListableProviderName, api
 			return arrayOf((await getJson('https://api.deepseek.com/models', bearer(apiKey))).data);
 		case 'nvidia': { // https://docs.api.nvidia.com/nim/reference/overview — GET /v1/models
 			return arrayOf((await getJson('https://integrate.api.nvidia.com/v1/models', bearer(apiKey))).data);
+		}
+		case 'cloudflare': { // https://developers.cloudflare.com/api/resources/ai/subresources/models/methods/list/
+			const accountId = (extra?.accountId ?? '').trim();
+			if (!accountId) return [];
+			const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/ai/models/search?task=Text%20Generation&per_page=100`;
+			return arrayOf((await getJson(url, bearer(apiKey))).result);
+		}
+		case 'aionLabs': { // https://api.aionlabs.ai/v1/models (OpenAI-compatible)
+			const headers: Record<string, string> = apiKey ? bearer(apiKey) : {};
+			return arrayOf((await getJson('https://api.aionlabs.ai/v1/models', headers)).data);
 		}
 		case 'xAI': {
 			// https://docs.x.ai/developers/rest-api-reference/inference/models: /v1/language-models has the modalities,

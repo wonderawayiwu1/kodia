@@ -57,6 +57,8 @@ const refreshBasedOn: { [k in RefreshableProviderName]: (keyof SettingsOfProvide
 	groq: ['_didFillInProviderSettings', 'apiKey'],
 	deepseek: ['_didFillInProviderSettings', 'apiKey'],
 	nvidia: ['_didFillInProviderSettings', 'apiKey'],
+	cloudflare: ['_didFillInProviderSettings', 'apiKey', 'accountId'],
+	aionLabs: ['_didFillInProviderSettings', 'apiKey'],
 	// openAICompatible: ['_didFillInProviderSettings', 'endpoint', 'apiKey'],
 }
 const REFRESH_INTERVAL = 5_000
@@ -163,6 +165,8 @@ export class RefreshModelService extends Disposable implements IRefreshModelServ
 		groq: { state: 'init', timeoutId: null },
 		deepseek: { state: 'init', timeoutId: null },
 		nvidia: { state: 'init', timeoutId: null },
+		cloudflare: { state: 'init', timeoutId: null },
+		aionLabs: { state: 'init', timeoutId: null },
 	}
 
 

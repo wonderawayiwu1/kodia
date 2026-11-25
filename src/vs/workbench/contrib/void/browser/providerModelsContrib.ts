@@ -74,7 +74,13 @@ export class ProviderModelsContrib extends Disposable {
 
 	private _apiKeys(): Record<KeyedProviderName, string> {
 		const { settingsOfProvider } = this.voidSettingsService.state;
-		return Object.fromEntries(keyedProviderNames.map(providerName => [providerName, settingsOfProvider[providerName].apiKey])) as Record<KeyedProviderName, string>;
+		return Object.fromEntries(keyedProviderNames.map(providerName => {
+			const cfg = settingsOfProvider[providerName];
+			const fingerprint = providerName === 'cloudflare'
+				? (cfg.apiKey || cfg.accountId ? `${cfg.apiKey}|${cfg.accountId ?? ''}` : '')
+				: cfg.apiKey;
+			return [providerName, fingerprint];
+		})) as Record<KeyedProviderName, string>;
 	}
 
 	private _keyChangeScheduler(providerName: KeyedProviderName): RunOnceScheduler {
@@ -152,11 +158,16 @@ export class ProviderModelsContrib extends Disposable {
 	}
 
 	private async _refreshProvider(providerName: ListableProviderName): Promise<void> {
-		const { apiKey } = this.voidSettingsService.state.settingsOfProvider[providerName];
+		const providerCfg = this.voidSettingsService.state.settingsOfProvider[providerName];
+		const { apiKey } = providerCfg;
 		if (!apiKey) {
 			return;
 		}
-		const models = await this.llmMessageService.listProviderModels(providerName, apiKey);
+		const accountId = providerName === 'cloudflare' ? providerCfg.accountId : undefined;
+		if (providerName === 'cloudflare' && !accountId?.trim()) {
+			return;
+		}
+		const models = await this.llmMessageService.listProviderModels(providerName, apiKey, accountId ? { accountId } : undefined);
 		if (!models) {
 			// the provider couldn't be reached, or refused the key: keep the models found last time
 			this.logService.info(`[Kodia] Could not list ${providerName}'s models`);
@@ -164,8 +175,11 @@ export class ProviderModelsContrib extends Disposable {
 		}
 		const detected = detectedModelsOfProvider(providerName, models);
 		const modelNames = [...defaultModelsOfProvider[providerName], ...detected.map(m => m.modelName)];
-		const mostUsed = mostUsedModelNames(providerName, modelNames, await this._openRouterModelsByUsage() ?? [], MOST_USED_COUNT);
-		this.voidSettingsService.setDetectedModels(providerName, detected, mostUsed);
+		// Cloudflare Workers AI & Aion Labs: enable all newly discovered free-tier text models automatically!
+		const shownModelNames = (providerName === 'cloudflare' || providerName === 'aionLabs')
+			? detected.map(m => m.modelName)
+			: mostUsedModelNames(providerName, modelNames, await this._openRouterModelsByUsage() ?? [], MOST_USED_COUNT);
+		this.voidSettingsService.setDetectedModels(providerName, detected, shownModelNames);
 	}
 }
 

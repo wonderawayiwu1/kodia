@@ -73,6 +73,13 @@ export const defaultProviderSettings = {
 	nvidia: {
 		apiKey: '', // NVIDIA API key (nvapi-...), obtained from https://build.nvidia.com/
 	},
+	cloudflare: {
+		apiKey: '', // Cloudflare API Token with Workers AI permission
+		accountId: '', // Cloudflare Account ID from Cloudflare Dashboard -> Workers AI
+	},
+	aionLabs: {
+		apiKey: '', // Aion Labs (aionlabs.ai) API key
+	},
 
 } as const
 
@@ -169,6 +176,27 @@ export const catalogModelsOfProvider = {
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
 		'nvidia/nemotron-3.5-bolt-e4b',
 	],
+	cloudflare: [ // https://developers.cloudflare.com/workers-ai/models/ — OpenAI-compatible free daily neurons tier
+		'@cf/openai/gpt-oss-120b',
+		'@cf/openai/gpt-oss-20b',
+		'@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+		'@cf/deepseek-ai/deepseek-v4-pro-0813',
+		'@cf/qwen/qwen3.8-27b',
+		'@cf/qwen/qwen2.5-coder-32b-instruct',
+		'@cf/zai-org/glm-5.3',
+		'@cf/zai-org/glm-5.3-flash',
+		'@cf/moonshotai/kimi-k2.7-code',
+		'@cf/meta/llama-4-scout-17b-16e-instruct',
+		'@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+	],
+	aionLabs: [ // https://api.aionlabs.ai/v1/models — OpenAI-compatible API
+		'aion-labs/aion-3.5',
+		'aion-labs/aion-3.5-mini',
+		'aion-labs/aion-3.0',
+		'aion-labs/aion-3.0-mini',
+		'aion-labs/aion-2.0',
+		'aion-labs/aion-rp-llama-3.1-8b',
+	],
 
 
 } as const satisfies Record<ProviderName, string[]>
@@ -199,6 +227,20 @@ export const defaultModelsOfProvider = {
 		'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
 		'nvidia/nemotron-3.5-lightning-30b-a3b',
 		'nvidia/nemotron-3.5-bolt-e4b',
+	],
+	cloudflare: [ // Top free-tier Workers AI coding & reasoning models ready immediately
+		'@cf/openai/gpt-oss-120b',
+		'@cf/deepseek-ai/deepseek-v4.1-flash-1017',
+		'@cf/qwen/qwen3.8-27b',
+		'@cf/moonshotai/kimi-k2.7-code',
+		'@cf/zai-org/glm-5.3-flash',
+		'@cf/meta/llama-4-scout-17b-16e-instruct',
+	],
+	aionLabs: [ // Core Aion Labs models ready immediately (+ live auto-discovery via GET /v1/models)
+		'aion-labs/aion-3.5',
+		'aion-labs/aion-3.5-mini',
+		'aion-labs/aion-3.0',
+		'aion-labs/aion-3.0-mini',
 	],
 } as const satisfies { [providerName in ProviderName]: typeof catalogModelsOfProvider[providerName][number][] }
 
@@ -2251,6 +2293,216 @@ const openRouterSettings: VoidStaticProviderInfo = {
 
 
 
+// ---------------- CLOUDFLARE WORKERS AI ----------------
+const cloudflareModelOptions = {
+	'@cf/openai/gpt-oss-120b': {
+		contextWindow: 128_000,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: openAIReasoningEffortCapabilities,
+	},
+	'@cf/openai/gpt-oss-20b': {
+		contextWindow: 128_000,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: openAIReasoningEffortCapabilities,
+	},
+	'@cf/deepseek-ai/deepseek-v4.1-flash-1017': {
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/deepseek-ai/deepseek-v4-pro-0813': {
+		contextWindow: 1_048_576,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/qwen/qwen3.8-27b': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/qwen/qwen2.5-coder-32b-instruct': {
+		contextWindow: 32_768,
+		reservedOutputTokenSpace: 16_384,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+	'@cf/zai-org/glm-5.3': {
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/zai-org/glm-5.3-flash': {
+		contextWindow: 1_000_000,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/moonshotai/kimi-k2.7-code': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'@cf/meta/llama-4-scout-17b-16e-instruct': {
+		contextWindow: 131_072,
+		reservedOutputTokenSpace: 16_384,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsVision: true,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+	'@cf/meta/llama-3.3-70b-instruct-fp8-fast': {
+		contextWindow: 24_000,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+} as const satisfies { [s: string]: VoidStaticModelInfo }
+
+const cloudflareSettings: VoidStaticProviderInfo = {
+	modelOptions: cloudflareModelOptions,
+	modelOptionsFallback: (modelName) => {
+		const res = extensiveModelOptionsFallback(modelName)
+		if (res) {
+			return { ...res, specialToolFormat: 'openai-style', cost: { input: 0, output: 0 } }
+		}
+		return null
+	},
+	providerReasoningIOSettings: {
+		input: { includeInPayload: () => null },
+		output: { nameOfFieldInDelta: 'reasoning_content' },
+	},
+}
+
+// ---------------- AION LABS (aionlabs.ai) ----------------
+const aionLabsModelOptions = {
+	'aion-labs/aion-3.5': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'aion-labs/aion-3.5-mini': {
+		contextWindow: 262_144,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'aion-labs/aion-3.0': {
+		contextWindow: 131_072,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: { supportsReasoning: true, canIOReasoning: true, canTurnOffReasoning: true, openSourceThinkTags: ['<think>', '</think>'] },
+	},
+	'aion-labs/aion-3.0-mini': {
+		contextWindow: 131_072,
+		reservedOutputTokenSpace: 32_768,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+	'aion-labs/aion-2.0': {
+		contextWindow: 131_072,
+		reservedOutputTokenSpace: 16_384,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+	'aion-labs/aion-rp-llama-3.1-8b': {
+		contextWindow: 32_768,
+		reservedOutputTokenSpace: 8_192,
+		cost: { input: 0, output: 0 },
+		downloadable: false,
+		supportsFIM: false,
+		supportsSystemMessage: 'system-role',
+		specialToolFormat: 'openai-style',
+		reasoningCapabilities: false,
+	},
+} as const satisfies { [s: string]: VoidStaticModelInfo }
+
+const aionLabsSettings: VoidStaticProviderInfo = {
+	modelOptions: aionLabsModelOptions,
+	modelOptionsFallback: (modelName) => {
+		const res = extensiveModelOptionsFallback(modelName)
+		if (res) {
+			return { ...res, specialToolFormat: 'openai-style', cost: { input: 0, output: 0 } }
+		}
+		return null
+	},
+	providerReasoningIOSettings: {
+		input: { includeInPayload: () => null },
+		output: { nameOfFieldInDelta: 'reasoning_content' },
+	},
+}
+
 // ---------------- model settings of everything above ----------------
 
 const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProviderInfo } = {
@@ -2278,6 +2530,8 @@ const modelSettingsOfProvider: { [providerName in ProviderName]: VoidStaticProvi
 	microsoftAzure: microsoftAzureSettings,
 	awsBedrock: awsBedrockSettings,
 	nvidia: nvidiaSettings,
+	cloudflare: cloudflareSettings,
+	aionLabs: aionLabsSettings,
 } as const
 
 

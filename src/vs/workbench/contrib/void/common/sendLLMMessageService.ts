@@ -27,7 +27,7 @@ export interface ILLMMessageService {
 	ollamaList: (params: ServiceModelListParams<OllamaModelResponse>) => void;
 	openAICompatibleList: (params: ServiceModelListParams<OpenaiCompatibleModelResponse>) => void;
 	// Kodia: a cloud provider's list of models, as its API returns it. Undefined when the provider can't be reached or refuses the key
-	listProviderModels: (providerName: ListableProviderName, apiKey: string) => Promise<unknown[] | undefined>;
+	listProviderModels: (providerName: ListableProviderName, apiKey: string, extra?: { accountId?: string }) => Promise<unknown[] | undefined>;
 }
 
 
@@ -196,8 +196,8 @@ export class LLMMessageService extends Disposable implements ILLMMessageService 
 		} satisfies MainModelListParams<OpenaiCompatibleModelResponse>)
 	}
 
-	listProviderModels = async (providerName: ListableProviderName, apiKey: string): Promise<unknown[] | undefined> => {
-		const models: unknown = await this.channel.call('listProviderModels', { providerName, apiKey })
+	listProviderModels = async (providerName: ListableProviderName, apiKey: string, extra?: { accountId?: string }): Promise<unknown[] | undefined> => {
+		const models: unknown = await this.channel.call('listProviderModels', { providerName, apiKey, extra })
 		return Array.isArray(models) ? models : undefined
 	}
 

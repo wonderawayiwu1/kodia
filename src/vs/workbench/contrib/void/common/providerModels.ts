@@ -12,7 +12,7 @@ import { ProviderName } from './voidSettingsTypes.js';
 export type DetectedModel = { modelName: string; capabilities?: Partial<VoidStaticModelInfo> };
 
 // the providers whose model list Kodia reads with the user's API key (OpenRouter's is public, see openRouterModels.ts)
-export const listableProviderNames = ['anthropic', 'openAI', 'gemini', 'mistral', 'xAI', 'groq', 'deepseek', 'nvidia'] as const satisfies ProviderName[];
+export const listableProviderNames = ['anthropic', 'openAI', 'gemini', 'mistral', 'xAI', 'groq', 'deepseek', 'nvidia', 'cloudflare', 'aionLabs'] as const satisfies ProviderName[];
 export type ListableProviderName = typeof listableProviderNames[number];
 
 // the fields Kodia reads, from each provider's API reference
@@ -43,6 +43,8 @@ type XAIModel = { id: string; aliases?: string[]; input_modalities?: string[]; o
 type GroqModel = { id: string; active?: boolean; context_window?: number; max_completion_tokens?: number };
 type DeepSeekModel = { id: string; context_window?: number; max_output_tokens?: number; input_modalities?: string[] };
 type NvidiaModel = { id: string; context_length?: number; type?: string; owned_by?: string };
+type CloudflareModel = { id?: string; name?: string; properties?: Array<{ property_id?: string; value?: unknown }> };
+type AionLabsModel = { id: string; context_length?: number; max_completion_tokens?: number };
 
 // what isn't a chat model, by name: these lists mix in embeddings, images, voice, moderation...
 const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
@@ -55,6 +57,8 @@ const notChatModel: { [providerName in ListableProviderName]?: RegExp } = {
 	mistral: /voxtral|leanstral|ocr|embed|moderation|shieldstral|timestral/,
 	xAI: /voice|tts|speech|transcri/,
 	nvidia: /embedding|whisper|tts|transcribe|dall-e|image|audio|live|voice|speech|search|moderation|computer-use|deep-research|sora|davinci|babbage|-pro\b|guard|safety|rerank|reranker|ocr|embed/,
+	cloudflare: /embed|bge-|whisper|melotts|aura-|flux|stable-diffusion|dreamshaper|resnet|detr|m2m100|bart-|distilbert|rerank|speech|tts|audio|guard/i,
+	aionLabs: /embed|whisper|tts|audio|voice|speech|image|rerank/i,
 };
 
 // what Kodia no longer offers though the API still lists it: Gemini 1 and 2; 3.7 and 3.5 Flash, whose requests Google
@@ -181,6 +185,34 @@ const nvidiaModels = (models: NvidiaModel[]): DetectedModel[] => models.map(m =>
 	// Preserve the exact model ID NVIDIA returns, including any owner prefix (e.g. nvidia/nemotron-3.5-super-vl-120b-a12b).
 }));
 
+const cloudflareModels = (models: CloudflareModel[]): DetectedModel[] => models
+	.filter(m => typeof (m.name || m.id) === 'string')
+	.map(m => {
+		const modelName = String(m.name || m.id);
+		const props = Array.isArray(m.properties) ? m.properties : [];
+		const ctxProp = props.find(p => p.property_id === 'context_window' || p.property_id === 'max_input_tokens');
+		const ctxNum = typeof ctxProp?.value === 'number' ? ctxProp.value : typeof ctxProp?.value === 'string' ? Number(ctxProp.value) : undefined;
+		const hasTools = props.some(p => p.property_id === 'function_calling' && (p.value === 'true' || p.value === true));
+		return {
+			modelName,
+			capabilities: definedOnly({
+				contextWindow: positive(ctxNum),
+				specialToolFormat: hasTools ? 'openai-style' : 'openai-style',
+				cost: { input: 0, output: 0 },
+			}),
+		};
+	});
+
+const aionLabsModels = (models: AionLabsModel[]): DetectedModel[] => models.map(m => ({
+	modelName: m.id,
+	capabilities: definedOnly({
+		contextWindow: positive(m.context_length),
+		reservedOutputTokenSpace: positive(m.max_completion_tokens),
+		specialToolFormat: 'openai-style',
+		cost: { input: 0, output: 0 },
+	}),
+}));
+
 // the providers' authors on OpenRouter; Groq serves other authors' models
 const openRouterAuthorOf: { [providerName in ListableProviderName]?: string } = { anthropic: 'anthropic', openAI: 'openai', gemini: 'google', xAI: 'x-ai', deepseek: 'deepseek', mistral: 'mistralai' };
 
@@ -209,7 +241,7 @@ export const mostUsedModelNames = (providerName: ListableProviderName, modelName
 // capabilities Kodia has; the snapshots of another listed model are left out.
 export const detectedModelsOfProvider = (providerName: ListableProviderName, response: unknown): DetectedModel[] => {
 	const models = listOf(response).filter((m): m is { id?: unknown; name?: unknown } => typeof m === 'object' && m !== null);
-	const withName = models.filter(m => typeof (providerName === 'gemini' ? m.name : m.id) === 'string');
+	const withName = models.filter(m => typeof (providerName === 'gemini' || providerName === 'cloudflare' ? (m.name ?? m.id) : m.id) === 'string');
 	const detected =
 		providerName === 'anthropic' ? anthropicModels(withName as AnthropicModel[])
 			: providerName === 'openAI' ? (withName as OpenAIModel[]).filter(m => !m.shutdown_date).map(m => ({ modelName: m.id }))
@@ -219,7 +251,9 @@ export const detectedModelsOfProvider = (providerName: ListableProviderName, res
 							: providerName === 'groq' ? groqModels(withName as GroqModel[])
 								: providerName === 'deepseek' ? deepseekModels(withName as DeepSeekModel[])
 									: providerName === 'nvidia' ? nvidiaModels(withName as NvidiaModel[])
-										: deepseekModels(withName as DeepSeekModel[]);
+										: providerName === 'cloudflare' ? cloudflareModels(withName as CloudflareModel[])
+											: providerName === 'aionLabs' ? aionLabsModels(withName as AionLabsModel[])
+												: deepseekModels(withName as DeepSeekModel[]);
 
 	const notChat = notChatModel[providerName];
 	const notOffered = notOfferedModel[providerName];
