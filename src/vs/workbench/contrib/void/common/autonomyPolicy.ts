@@ -279,6 +279,25 @@ const BUILTIN_TOOL_NAMES: ReadonlySet<string> = new Set([
 	'api_manage_environment',
 	'api_assess_production_readiness',
 	'api_correlate_failure',
+	// KACRAE Autonomous Code Review & Software Assurance Engine (8 tools)
+	'kacrae_open_workbench',
+	'kacrae_run_review',
+	'kacrae_index_repository',
+	'kacrae_query_graph',
+	'kacrae_update_finding',
+	'kacrae_apply_repair',
+	'kacrae_export_report',
+	'kacrae_run_benchmark',
+	'kacrae_verify_functional_completeness',
+	// ARPEI Autonomous Research-to-Product Engineering Intelligence (8 tools)
+	'arpei_open_workspace',
+	'arpei_plan_research',
+	'arpei_explore_reference',
+	'arpei_research_technical',
+	'arpei_discover_assets',
+	'arpei_evaluate_readiness_gate',
+	'arpei_compare_visuals',
+	'arpei_query_research_memory',
 	// Kodia Deep Debugging, Software Correctness & Independent Verification Engine (14 tools)
 	'correctness_open_hub',
 	'correctness_analyze_workspace',
@@ -732,6 +751,28 @@ export function assessRisk(toolName: string, params: unknown): OperationRisk {
 		case 'api_mock_server':
 		case 'api_manage_collection':
 		case 'api_manage_environment':
+			return 'medium';
+
+		// KACRAE Autonomous Code Review & Software Assurance Engine
+		case 'kacrae_open_workbench':
+		case 'kacrae_run_review':
+		case 'kacrae_index_repository':
+		case 'kacrae_query_graph':
+		case 'kacrae_export_report':
+		case 'kacrae_run_benchmark':
+		case 'kacrae_verify_functional_completeness':
+		case 'arpei_open_workspace':
+		case 'arpei_plan_research':
+		case 'arpei_explore_reference':
+		case 'arpei_research_technical':
+		case 'arpei_evaluate_readiness_gate':
+		case 'arpei_compare_visuals':
+		case 'arpei_query_research_memory':
+			return 'low';
+
+		case 'kacrae_update_finding':
+		case 'kacrae_apply_repair':
+		case 'arpei_discover_assets':
 			return 'medium';
 
 		// Kodia Deep Debugging & Software Correctness — read/analyze/plan/assess tools are low risk

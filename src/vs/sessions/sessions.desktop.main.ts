@@ -232,7 +232,23 @@ import '../workbench/contrib/policyExport/electron-browser/policyExport.contribu
 // Keybindings Export
 import '../workbench/contrib/keybindingsExport/electron-browser/keybindingsExport.contribution.js';
 
-// Kodia: runs Kodia's models, so the Agents Window works with no editor window open
+// Kodia: register all main-process IPC services & full Kodia settings, studios, engines & tools natively in the Agents Window
+import '../workbench/contrib/void/electron-browser/webSearchService.js';
+import '../workbench/contrib/void/electron-browser/browserService.js';
+import '../workbench/contrib/void/electron-browser/kodiaGitService.js';
+import '../workbench/contrib/void/electron-browser/kodiaHooksService.js';
+import '../workbench/contrib/void/electron-browser/kodiaOpsService.js';
+import '../workbench/contrib/void/electron-browser/designAssetService.js';
+import '../workbench/contrib/void/electron-browser/aiEngineService.js';
+import '../workbench/contrib/void/electron-browser/apiStudioService.js';
+import '../workbench/contrib/void/electron-browser/codeReviewService.js';
+import '../workbench/contrib/void/electron-browser/arpeiService.js';
+import '../workbench/contrib/void/electron-browser/correctnessService.js';
+import '../workbench/contrib/void/electron-browser/evolutionService.js';
+import '../workbench/contrib/void/electron-browser/mobileEngineeringService.js';
+import '../workbench/contrib/void/electron-browser/liveIntelligenceService.js';
+import '../workbench/contrib/void/electron-browser/diagnosticReliabilityService.js';
+import '../workbench/contrib/void/electron-browser/firstPassReliabilityService.js';
 import '../workbench/contrib/void/browser/kodiaAgentsWindow.contribution.js';
 
 //#endregion

@@ -38,6 +38,8 @@ import { OperationsDiagnosticsSection } from './OperationsDiagnosticsSettings.js
 import { DesignIntelligenceSection } from './DesignIntelligenceSettings.js';
 import { AIEngineSettingsSection } from './AIEngineSettings.js';
 import { ApiStudioSettingsSection } from './ApiStudioSettings.js';
+import { CodeReviewSettingsSection } from './CodeReviewSettings.js';
+import { ArpeiSettingsSection } from './ArpeiSettings.js';
 import { CorrectnessSettingsSection } from './CorrectnessSettings.js';
 import { EvolutionSettingsSection } from './EvolutionSettings.js';
 import { AppBuilderSettingsSection } from './AppBuilderSettings.js';
@@ -175,6 +177,29 @@ const SECTIONS: readonly NavSectionDef[] = [
 		},
 	},
 	{
+		id: 'code_review',
+		group: 'Intelligence & Ops',
+		label: 'Code Review (KACRAE)',
+		icon: <ShieldCheck size={14} />,
+		keywordsOfGroup: {
+			'General': ['code review', 'kacrae', 'review', 'inline', 'decorations', 'notifications', 'review on save', 'background'],
+			'Review Behavior': ['severity', 'confidence', 'suppression', 'retention', 'false positive', 'exclusions'],
+			'AI Review Council & Free/Local Inference': ['council', 'ollama', 'lm studio', 'vllm', 'free', 'local', 'byok', 'multi-model'],
+			'Performance & Large-Repository Budgets': ['large repo', 'monorepo', 'indexing', 'concurrency', 'memory', 'throughput'],
+			'Security, Privacy & Enterprise Governance': ['local only', 'offline', 'air-gapped', 'redact', 'rbac', 'audit', 'compliance', 'release'],
+		},
+	},
+	{
+		id: 'arpei',
+		group: 'Intelligence & Ops',
+		label: 'Research Intelligence (ARPEI)',
+		icon: <Compass size={14} />,
+		keywordsOfGroup: {
+			'Research Decision & Deep Discovery Gate': ['arpei', 'research', 'product discovery', 'reference', 'readiness gate', 'domain', 'browser', 'sitemap'],
+			'Visual Memory, Comparison & Responsible Research': ['screenshot', 'visual comparison', 'pixel diff', 'assets', 'license', 'freshness'],
+		},
+	},
+	{
 		id: 'correctness',
 		group: 'Intelligence & Ops',
 		label: 'Debugging & Correctness',
@@ -290,6 +315,8 @@ export const Settings = () => {
 			case 'automation': return <AutomationSettingsSection onRecordChange={recordChange} />;
 			case 'ai_engine': return <AIEngineSettingsSection onRecordChange={recordChange} />;
 			case 'api_studio': return <ApiStudioSettingsSection onRecordChange={recordChange} />;
+			case 'code_review': return <CodeReviewSettingsSection onRecordChange={recordChange} />;
+			case 'arpei': return <ArpeiSettingsSection onRecordChange={recordChange} />;
 			case 'correctness': return <CorrectnessSettingsSection onRecordChange={recordChange} />;
 			case 'evolution': return <EvolutionSettingsSection onRecordChange={recordChange} />;
 			case 'design': return <DesignIntelligenceSection onRecordChange={recordChange} />;

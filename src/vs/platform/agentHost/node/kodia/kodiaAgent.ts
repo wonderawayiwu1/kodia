@@ -3,6 +3,8 @@
  *  Licensed under the Apache License, Version 2.0. See LICENSE.txt for more information.
  *--------------------------------------------------------------------------------------------*/
 
+import * as fs from 'fs';
+import * as nodePath from 'path';
 import { SequencerByKey } from '../../../../base/common/async.js';
 import { CancellationTokenSource } from '../../../../base/common/cancellation.js';
 import { Emitter, Event } from '../../../../base/common/event.js';
@@ -15,7 +17,7 @@ import { localize } from '../../../../nls.js';
 import { createDecorator } from '../../../instantiation/common/instantiation.js';
 import { ILogService } from '../../../log/common/log.js';
 import type { AgentChatMigrationResult, AgentProvider, AgentSignal, IActiveClient, IAgent, IAgentChatConfigCompletionsParams, IAgentChatContext, IAgentChatDataChange, IAgentChatMetadata, IAgentChats, IAgentCreateChatOptions, IAgentCreateChatResult, IAgentDescriptor, IAgentDiscoveredChat, IAgentMaterializeChatEvent, IAgentModelInfo, IAgentResolveChatConfigParams, IAgentSpawnChatEvent } from '../../common/agent.js';
-import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
+import type { IByokLmBridgeConnection, IByokLmChatResult, IByokLmFunctionCallItem, IByokLmFunctionTool, IByokLmModelInfo } from '../../common/agentHostByokLm.js';
 import { createSchema, platformSessionSchema } from '../../common/agentHostSchema.js';
 import { KODIA_AGENT_PROVIDER_ID, KODIA_AGENT_RESOURCE } from '../../common/kodiaAgentHostLm.js';
 import { SessionConfigKey } from '../../common/sessionConfigKeys.js';
@@ -25,7 +27,7 @@ import type { ModelSelection, ProtectedResourceMetadata, ToolCallPendingConfirma
 import { createErrorResponsePart, MessageKind, ResponsePartKind, ToolCallConfirmationReason, ToolCallStatus, ToolResultContentType, TurnState, type ChatInputAnswer, type ChatInputResponseKind, type ClientPluginCustomization, type Customization, type MessageAttachment, type ResponsePart, type ToolCallResult, type Turn } from '../../common/state/sessionState.js';
 import type { IByokLmBridgeRegistry } from '../byokLmBridgeRegistry.js';
 import { KodiaAgentSession, projectForWorkingDirectory } from './kodiaAgentSession.js';
-import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, isMutatingTool, KODIA_TOOLS, toolDisplayName } from './kodiaTools.js';
+import { describeKodiaToolCall, executeKodiaTool, IKodiaToolResult, isMutatingTool, KODIA_TOOLS, LOCAL_KODIA_TOOL_NAMES, toolDisplayName } from './kodiaTools.js';
 
 /**
  * The bridge to the Kodia windows that run the Kodia agent's model requests,
@@ -52,10 +54,40 @@ function parseAgentModelId(id: string): { readonly vendor: string; readonly mode
 	return slash > 0 ? { vendor: id.slice(0, slash), modelId: id.slice(slash + 1) } : undefined;
 }
 
+const PROJECT_RULE_FILES = ['.voidrules', 'AGENTS.md', 'CLAUDE.md', '.cursorrules', '.windsurfrules'] as const;
+
 function instructionsFor(workingDirectory: URI | undefined): string {
-	const lines = ['You are a coding agent. Use the tools to look at and change the user\'s project, then say briefly what you did.'];
+	const lines = [
+		'You are Kodia — an autonomous full-stack software engineering, research, verification, security, and quality assurance agent.',
+		'You have full access to workspace file/search/git/shell tools AND all Kodia engineering engines: live web research & browser automation, ARPEI Research-to-Product discovery, KACRAE Autonomous Code Review & Functional Completeness verification, Live Engineering Intelligence (LEI), Universal App Builder (UABE & IRIRE), Automation Studio (UAEP), API Engineering Studio, Deep Debugging & Correctness (ERIC/FPERE/KDRE), UI/UX Design Intelligence & Visual Assets, AI Engineering Engine, Mobile Studio, Evolution/Ops, and Project Memory.',
+		'For any additional Kodia tool beyond your direct tool list, call `kodia_list_all_tools` to discover it and `kodia_invoke_tool` to run it.',
+		'Always inspect before editing, verify your changes with real builds/tests/browser checks where applicable, and report results honestly.',
+	];
 	if (workingDirectory) {
-		lines.push(`The project is at ${workingDirectory.fsPath}; relative paths resolve against it.`);
+		const root = workingDirectory.fsPath;
+		lines.push(`The project root is ${root}; relative paths resolve against it.`);
+		// Load project memory (.kodia/memory.md) and project rules if present
+		try {
+			const memPath = nodePath.join(root, '.kodia', 'memory.md');
+			if (fs.existsSync(memPath)) {
+				const mem = fs.readFileSync(memPath, 'utf8').trim();
+				if (mem) {
+					lines.push(`\n# Project Memory (.kodia/memory.md)\n${mem.slice(0, 6000)}`);
+				}
+			}
+		} catch { /* ignore */ }
+		for (const rf of PROJECT_RULE_FILES) {
+			try {
+				const rp = nodePath.join(root, rf);
+				if (fs.existsSync(rp)) {
+					const content = fs.readFileSync(rp, 'utf8').trim();
+					if (content) {
+						lines.push(`\n# Project Rules (${rf})\n${content.slice(0, 4000)}`);
+						break;
+					}
+				}
+			} catch { /* ignore */ }
+		}
 	}
 	return lines.join('\n');
 }
@@ -439,8 +471,9 @@ export class KodiaAgent extends Disposable implements IAgent {
 		session.turnIds.push(turnId);
 
 		try {
+			const turnTools = await this._resolveToolsForTurn(connection, signal);
 			for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-				const result = await this._chat(connection, session, model, signal);
+				const result = await this._chat(connection, session, model, turnTools, signal);
 				if (signal.aborted) {
 					return;
 				}
@@ -500,7 +533,28 @@ export class KodiaAgent extends Disposable implements IAgent {
 							confirmed: ToolCallConfirmationReason.NotNeeded,
 						});
 					}
-					const res = await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
+					let res: IKodiaToolResult;
+					if (LOCAL_KODIA_TOOL_NAMES.has(call.name)) {
+						res = await executeKodiaTool(call.name, call.argumentsJson, toolCtx);
+					} else if (connection.executeTool) {
+						const cts = new CancellationTokenSource();
+						const onAbort = () => cts.cancel();
+						signal.addEventListener('abort', onAbort, { once: true });
+						try {
+							res = await connection.executeTool({
+								name: call.name,
+								argumentsJson: call.argumentsJson,
+								workingDirectory: session.workingDirectory?.fsPath,
+							}, cts.token);
+						} catch (err) {
+							res = { success: false, output: err instanceof Error ? err.message : String(err) };
+						} finally {
+							signal.removeEventListener('abort', onAbort);
+							cts.dispose();
+						}
+					} else {
+						res = { success: false, output: `Unknown tool: ${call.name}` };
+					}
 					if (signal.aborted) {
 						return;
 					}
@@ -523,8 +577,34 @@ export class KodiaAgent extends Disposable implements IAgent {
 		}
 	}
 
+	private async _resolveToolsForTurn(connection: IByokLmBridgeConnection, signal: AbortSignal): Promise<IByokLmFunctionTool[]> {
+		const merged: IByokLmFunctionTool[] = [...KODIA_TOOLS];
+		if (!connection.listTools) {
+			return merged;
+		}
+		const cts = new CancellationTokenSource();
+		const onAbort = () => cts.cancel();
+		signal.addEventListener('abort', onAbort, { once: true });
+		try {
+			const bridged = await connection.listTools(cts.token);
+			const seen = new Set(merged.map(t => t.name));
+			for (const tool of bridged) {
+				if (tool?.name && !seen.has(tool.name)) {
+					seen.add(tool.name);
+					merged.push(tool);
+				}
+			}
+		} catch (err) {
+			this._logService.warn(`[Kodia] Could not enumerate bridged Kodia engine tools: ${err instanceof Error ? err.message : String(err)}`);
+		} finally {
+			signal.removeEventListener('abort', onAbort);
+			cts.dispose();
+		}
+		return merged;
+	}
+
 	/** One model request, run by the serving Kodia window and cancelled with the turn. */
-	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, signal: AbortSignal): Promise<IByokLmChatResult> {
+	private async _chat(connection: IByokLmBridgeConnection, session: KodiaAgentSession, model: { readonly vendor: string; readonly modelId: string }, tools: IByokLmFunctionTool[], signal: AbortSignal): Promise<IByokLmChatResult> {
 		const cts = new CancellationTokenSource();
 		const onAbort = () => cts.cancel();
 		signal.addEventListener('abort', onAbort, { once: true });
@@ -534,7 +614,7 @@ export class KodiaAgent extends Disposable implements IAgent {
 				modelId: model.modelId,
 				instructions: instructionsFor(session.workingDirectory),
 				input: session.history,
-				tools: KODIA_TOOLS,
+				tools,
 			}, cts.token);
 		} finally {
 			signal.removeEventListener('abort', onAbort);

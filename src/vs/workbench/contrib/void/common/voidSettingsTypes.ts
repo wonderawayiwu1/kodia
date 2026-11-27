@@ -16,6 +16,8 @@ import { CorrectnessEngineSettings, DEFAULT_CORRECTNESS_ENGINE_SETTINGS } from '
 import { DEFAULT_EVOLUTION_ENGINE_SETTINGS, EvolutionEngineSettings } from './evolutionTypes.js';
 import { DEFAULT_UABE_ENGINE_SETTINGS, UabeEngineSettings } from './universalAppBuilderTypes.js';
 import { DEFAULT_UAEP_ENGINE_SETTINGS, UaepEngineSettings } from './universalAutomationTypes.js';
+import { DEFAULT_KACRAE_SETTINGS, KacraeSettings } from './kacraeTypes.js';
+import { ArpeiSettings, DEFAULT_ARPEI_SETTINGS } from './arpeiTypes.js';
 import { VoidSettingsState } from './voidSettingsService.js'
 
 
@@ -566,6 +568,8 @@ export type GlobalSettings = {
 	evolution: EvolutionEngineSettings;
 	uabe: UabeEngineSettings;
 	uaep: UaepEngineSettings;
+	kacrae: KacraeSettings;
+	arpei: ArpeiSettings;
 }
 
 export const defaultGlobalSettings: GlobalSettings = {
@@ -617,6 +621,8 @@ export const defaultGlobalSettings: GlobalSettings = {
 	evolution: DEFAULT_EVOLUTION_ENGINE_SETTINGS,
 	uabe: DEFAULT_UABE_ENGINE_SETTINGS,
 	uaep: DEFAULT_UAEP_ENGINE_SETTINGS,
+	kacrae: DEFAULT_KACRAE_SETTINGS,
+	arpei: DEFAULT_ARPEI_SETTINGS,
 }
 
 export type GlobalSettingName = keyof GlobalSettings

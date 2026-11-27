@@ -47,6 +47,7 @@ import { buildRemodifyPromptRequest, extractRewrittenPrompt } from '../../../../
 import { EngineeringIntelligenceStatus } from './EngineeringIntelligenceStatus.js';
 import { AppBuilderChatBar } from './AppBuilderChatBar.js';
 import { AntigravityAgentUXStrip } from './AntigravityAgentUXStrip.js';
+import { ChatDockDismissWrapper, ChatDockSideRail, useChatDockVisibility } from './ChatDockSideRail.js';
 
 
 
@@ -4355,21 +4356,49 @@ export const SidebarChat = () => {
 		</div>
 	) : null
 
+	const { visible: dockVisible, toggle: toggleDockPanel, hide: hideDockPanel } = useChatDockVisibility();
+	const isAwaitingUser = isRunning === 'awaiting_user';
+
 	const threadPageInput = <div key={'input' + chatThreadsState.currentThreadId}>
 		<ErrorBoundary>
-			<AppBuilderChatBar />
-			<EngineeringIntelligenceStatus variant='chat' />
+			{dockVisible.appBuilder && (
+				<ChatDockDismissWrapper label='App Builder bar' onHide={() => hideDockPanel('appBuilder')}>
+					<AppBuilderChatBar />
+				</ChatDockDismissWrapper>
+			)}
+			{dockVisible.intelligence && (
+				<ChatDockDismissWrapper label='Engineering Intelligence bar' onHide={() => hideDockPanel('intelligence')}>
+					<EngineeringIntelligenceStatus variant='chat' />
+				</ChatDockDismissWrapper>
+			)}
 		</ErrorBoundary>
 		<LiveActivityStrip threadId={threadId} isRunning={isRunning} />
 		<ErrorBoundary>
 			<AntigravityAgentUXStrip threadId={threadId} isRunning={isRunning} />
 		</ErrorBoundary>
 		{queuedMessagesTray}
-		<div className='px-4'>
-			<CommandBarInChat messages={previousMessages} />
-		</div>
+		{dockVisible.changes && (
+			<div className='px-4'>
+				<ChatDockDismissWrapper label='File Changes & Usage bar' onHide={() => hideDockPanel('changes')}>
+					<CommandBarInChat messages={previousMessages} />
+				</ChatDockDismissWrapper>
+			</div>
+		)}
 		<div className='px-2 pb-2'>
-			{inputChatArea}
+			<div className='flex items-start gap-1.5'>
+				<div className='flex-1 min-w-0'>
+					{inputChatArea}
+				</div>
+				<ErrorBoundary>
+					<ChatDockSideRail
+						visible={dockVisible}
+						onToggle={toggleDockPanel}
+						showChangesToggle={true}
+						isRunning={Boolean(isRunning)}
+						awaitingUser={isAwaitingUser}
+					/>
+				</ErrorBoundary>
+			</div>
 			{/* While running: quick Send Now button to interrupt current turn & run new prompt immediately */}
 			{isRunning && !instructionsAreEmpty && (
 				<div className='flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>
@@ -4407,14 +4436,37 @@ export const SidebarChat = () => {
 	</div>
 
 	const landingPageInput = <div>
-		<div className='pt-4 space-y-1.5'>
-			<ErrorBoundary>
-				<AppBuilderChatBar />
-				<EngineeringIntelligenceStatus variant='chat' />
-			</ErrorBoundary>
-		</div>
+		{(dockVisible.appBuilder || dockVisible.intelligence) && (
+			<div className='pt-4 space-y-1.5'>
+				<ErrorBoundary>
+					{dockVisible.appBuilder && (
+						<ChatDockDismissWrapper label='App Builder bar' onHide={() => hideDockPanel('appBuilder')}>
+							<AppBuilderChatBar />
+						</ChatDockDismissWrapper>
+					)}
+					{dockVisible.intelligence && (
+						<ChatDockDismissWrapper label='Engineering Intelligence bar' onHide={() => hideDockPanel('intelligence')}>
+							<EngineeringIntelligenceStatus variant='chat' />
+						</ChatDockDismissWrapper>
+					)}
+				</ErrorBoundary>
+			</div>
+		)}
 		<div className='pt-4'>
-			{inputChatArea}
+			<div className='flex items-start gap-1.5'>
+				<div className='flex-1 min-w-0'>
+					{inputChatArea}
+				</div>
+				<ErrorBoundary>
+					<ChatDockSideRail
+						visible={dockVisible}
+						onToggle={toggleDockPanel}
+						showChangesToggle={false}
+						isRunning={Boolean(isRunning)}
+						awaitingUser={isAwaitingUser}
+					/>
+				</ErrorBoundary>
+			</div>
 			{/* Remodify Prompt button */}
 			{!isRunning && (
 				<div className='flex items-center gap-2 mt-1.5 pt-1.5 border-t border-zinc-700/20'>

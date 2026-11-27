@@ -115,6 +115,33 @@ import type {
 } from './apiStudioTypes.js';
 import type { ClientCodeTarget } from './apiStudioIntelligence.js';
 import type {
+	KacraeBenchmarkReport,
+	KacraeBlastRadiusReport,
+	KacraeExportReportRequest,
+	KacraeExportReportResult,
+	KacraeFinding,
+	KacraeFindingLifecycleState,
+	KacraeFunctionalCompletenessReport,
+	KacraeRepairRecord,
+	KacraeRepoGraph,
+	KacraeRepoIndexStats,
+	KacraeReviewDepth,
+	KacraeReviewScope,
+	KacraeReviewSession,
+	KacraeWorkbenchSection,
+} from './kacraeTypes.js';
+import type {
+	ArpeiAssetRecord,
+	ArpeiRequirementTraceNode,
+	ArpeiResearchMode,
+	ArpeiResearchReadinessGate,
+	ArpeiResearchSession,
+	ArpeiScreenshotRecord,
+	ArpeiSourceEvidence,
+	ArpeiVisualComparisonRecord,
+	ArpeiWorkspaceSection,
+} from './arpeiTypes.js';
+import type {
 	CompilerCheckOutcome,
 	CorrectnessHubSection,
 	DiagnosticSuppression,
@@ -387,6 +414,10 @@ export const approvalTypeOfBuiltinToolName: Partial<{ [T in BuiltinToolName]?: '
 	'manage_subagents': 'planning',
 	'run_parallel_workflow': 'planning',
 	// Cursor + Antigravity Superpower Tools
+	// KACRAE Autonomous Code Review & Software Assurance Engine
+	'kacrae_apply_repair': 'edits',
+	'kacrae_update_finding': 'debug',
+
 	'multi_edit_file': 'edits',
 	'view_file_outline': 'planning',
 	'view_code_item': 'planning',
@@ -984,6 +1015,32 @@ export type BuiltinToolCallParams = {
 	'workspace_search_replace': { query: string, replacement: string, is_regex?: boolean, case_sensitive?: boolean, include_glob?: string, dry_run?: boolean, max_files?: number },
 	'api_test_sse_stream': { url: string, method?: 'GET' | 'POST', headers?: Record<string, string>, body?: string, max_events?: number, timeout_ms?: number },
 	'open_live_preview': { url: string },
+	// KACRAE Autonomous Code Review & Software Assurance Engine (8 tools)
+	'kacrae_open_workbench': { section?: KacraeWorkbenchSection },
+	'kacrae_run_review': {
+		scope: KacraeReviewScope,
+		depth?: KacraeReviewDepth,
+		target_files?: string[],
+		git_base_ref?: string,
+		git_head_ref?: string,
+		test_command?: string,
+	},
+	'kacrae_index_repository': { incremental?: boolean, max_files?: number },
+	'kacrae_query_graph': { kind: 'dependents' | 'apis' | 'tests' | 'db_table' | 'blast_radius' | 'cycles', target?: string },
+	'kacrae_update_finding': { session_id: string, finding_id: string, next_state: KacraeFindingLifecycleState, reason?: string },
+	'kacrae_apply_repair': { session_id: string, finding_id: string, dry_run?: boolean, test_command?: string },
+	'kacrae_export_report': { session_id?: string, report_type?: KacraeExportReportRequest['reportType'], format?: KacraeExportReportRequest['format'] },
+	'kacrae_run_benchmark': { include_scale_files?: number },
+	'kacrae_verify_functional_completeness': { app_url?: string, api_base_url?: string, use_browser?: boolean, test_command?: string },
+	// ARPEI Autonomous Research-to-Product Engineering Intelligence (8 tools)
+	'arpei_open_workspace': { section?: ArpeiWorkspaceSection },
+	'arpei_plan_research': { user_prompt: string, reference_urls?: string[], mode?: ArpeiResearchMode },
+	'arpei_explore_reference': { session_id: string, root_url?: string, max_pages?: number, capture_screenshots?: boolean, test_interactions?: boolean },
+	'arpei_research_technical': { session_id: string, queries: string[], doc_urls?: string[] },
+	'arpei_discover_assets': { session_id: string, queries: Array<{ query: string, usage: string, altText: string }>, download_to_local?: boolean },
+	'arpei_evaluate_readiness_gate': { session_id: string, user_fast_track?: boolean },
+	'arpei_compare_visuals': { session_id: string, reference_screenshot_id: string, implementation_url: string, page_label?: string },
+	'arpei_query_research_memory': { query: string, session_id?: string },
 	'manage_env_file': { action: 'inspect' | 'set' | 'delete', path?: string, key?: string, value?: string },
 }
 
@@ -1387,6 +1444,31 @@ export type BuiltinToolResultType = {
 	'workspace_search_replace': { dryRun: boolean, filesMatched: number, totalReplacements: number, changes: Array<{ file: string, count: number }> },
 	'api_test_sse_stream': SseStreamTestResult,
 	'open_live_preview': { opened: boolean, url: string },
+	// KACRAE Autonomous Code Review & Software Assurance Engine
+	'kacrae_open_workbench': { opened: boolean, section: KacraeWorkbenchSection },
+	'kacrae_run_review': KacraeReviewSession,
+	'kacrae_index_repository': { stats: KacraeRepoIndexStats, graph: KacraeRepoGraph },
+	'kacrae_query_graph': { answer: string, files: readonly string[], blastRadius?: KacraeBlastRadiusReport },
+	'kacrae_update_finding': { updated: KacraeFinding | null },
+	'kacrae_apply_repair': KacraeRepairRecord,
+	'kacrae_export_report': KacraeExportReportResult,
+	'kacrae_run_benchmark': KacraeBenchmarkReport,
+	'kacrae_verify_functional_completeness': KacraeFunctionalCompletenessReport,
+	// ARPEI Autonomous Research-to-Product Engineering Intelligence
+	'arpei_open_workspace': { opened: boolean, section: ArpeiWorkspaceSection },
+	'arpei_plan_research': ArpeiResearchSession,
+	'arpei_explore_reference': ArpeiResearchSession,
+	'arpei_research_technical': ArpeiResearchSession,
+	'arpei_discover_assets': { assets: readonly ArpeiAssetRecord[] },
+	'arpei_evaluate_readiness_gate': ArpeiResearchReadinessGate,
+	'arpei_compare_visuals': ArpeiVisualComparisonRecord,
+	'arpei_query_research_memory': {
+		matchedEvidence: readonly ArpeiSourceEvidence[],
+		matchedScreenshots: readonly ArpeiScreenshotRecord[],
+		matchedRequirements: readonly ArpeiRequirementTraceNode[],
+		matchedAssets: readonly ArpeiAssetRecord[],
+		staleEvidenceCount: number,
+	},
 	'manage_env_file': { path: string, gitignored: boolean, warning?: string, entries: Array<{ key: string, maskedValue: string, isSecret: boolean }> },
 }
 

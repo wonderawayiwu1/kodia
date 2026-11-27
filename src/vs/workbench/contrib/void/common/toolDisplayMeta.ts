@@ -332,6 +332,26 @@ const EXPLICIT_TITLES: Readonly<Record<string, ToolDisplayTitles>> = {
 	api_assess_production_readiness: { done: 'Assessed API readiness', proposed: 'Assess production readiness', running: 'Evaluating 6-pillar API production readiness' },
 	api_correlate_failure: { done: 'Correlated API failure', proposed: 'Correlate API failure', running: 'Correlating failure with logs & source code' },
 	// Kodia Deep Debugging, Software Correctness & Independent Verification
+	// KACRAE Autonomous Code Review & Software Assurance Engine
+	kacrae_open_workbench: { done: 'Opened Code Review Workbench', proposed: 'Open Code Review Workbench', running: 'Opening KACRAE Code Review Workbench' },
+	kacrae_run_review: { done: 'Completed KACRAE review', proposed: 'Run KACRAE review', running: 'Running autonomous code review & assurance' },
+	kacrae_index_repository: { done: 'Indexed repository graph', proposed: 'Index repository', running: 'Building incremental repository intelligence graph' },
+	kacrae_query_graph: { done: 'Queried repository graph', proposed: 'Query repository graph', running: 'Querying repository dependencies & blast radius' },
+	kacrae_update_finding: { done: 'Updated finding lifecycle', proposed: 'Update finding status', running: 'Updating finding lifecycle & audit log' },
+	kacrae_apply_repair: { done: 'Executed controlled repair', proposed: 'Apply verified repair', running: 'Applying repair & running independent verification' },
+	kacrae_export_report: { done: 'Exported assurance report', proposed: 'Export review report', running: 'Generating KACRAE assurance report' },
+	kacrae_run_benchmark: { done: 'Completed KACRAE benchmark', proposed: 'Run quality benchmark', running: 'Measuring precision, recall & scale throughput' },
+	kacrae_verify_functional_completeness: { done: 'Verified functional completeness', proposed: 'Verify functional completeness', running: 'Checking static UI, wiring, APIs & live controls' },
+	// ARPEI Autonomous Research-to-Product Engineering Intelligence
+	arpei_open_workspace: { done: 'Opened Research Workspace', proposed: 'Open Research Workspace', running: 'Opening ARPEI Research Intelligence Workspace' },
+	arpei_plan_research: { done: 'Planned deep product discovery', proposed: 'Plan product research', running: 'Discovering domain, roles, workflows & readiness gate' },
+	arpei_explore_reference: { done: 'Explored reference product', proposed: 'Explore reference website', running: 'Inspecting pages, interactions & capturing screenshots' },
+	arpei_research_technical: { done: 'Researched technical docs', proposed: 'Research technical docs', running: 'Corroborating official docs, APIs & standards' },
+	arpei_discover_assets: { done: 'Discovered licensed assets', proposed: 'Discover & download assets', running: 'Searching & downloading licensed project assets' },
+	arpei_evaluate_readiness_gate: { done: 'Evaluated research readiness gate', proposed: 'Evaluate readiness gate', running: 'Evaluating 13-point Pre-Implementation Readiness Gate' },
+	arpei_compare_visuals: { done: 'Compared reference vs implementation', proposed: 'Compare visual screenshots', running: 'Capturing live app & computing pixel/layout diff' },
+	arpei_query_research_memory: { done: 'Queried research memory', proposed: 'Query research memory', running: 'Retrieving persisted screenshots, evidence & specs' },
+
 	correctness_open_hub: { done: 'Opened Correctness Hub', proposed: 'Open Correctness Hub', running: 'Opening Debugging & Correctness Hub' },
 	correctness_analyze_workspace: { done: 'Analyzed workspace correctness', proposed: 'Analyze correctness', running: 'Running incremental & deep defect analysis' },
 	correctness_run_compilers: { done: 'Ran multi-language compilers', proposed: 'Run compiler checks', running: 'Executing native compilers & syntax checks' },
@@ -447,7 +467,8 @@ export function getToolDisplayTitles(toolName: string): ToolDisplayTitles {
 export function getToolCategory(toolName: string): ToolCategory {
 	if (toolName.startsWith('ai_') || toolName.startsWith('uabe_') || toolName.startsWith('uaep_')) { return 'ai'; }
 	if (toolName.startsWith('api_') || toolName.startsWith('oauth2_')) { return 'api'; }
-	if (toolName.startsWith('correctness_') || toolName.startsWith('eric_') || toolName.startsWith('fpere_') || toolName.startsWith('kdre_')) { return 'debug'; }
+	if (toolName.startsWith('correctness_') || toolName.startsWith('kacrae_') || toolName.startsWith('eric_') || toolName.startsWith('fpere_') || toolName.startsWith('kdre_')) { return 'debug'; }
+	if (toolName.startsWith('arpei_')) { return 'web'; }
 	if (toolName.startsWith('evolution_')) { return 'ai'; }
 	if (
 		toolName.includes('design_')

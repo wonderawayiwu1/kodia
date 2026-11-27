@@ -14,7 +14,10 @@ import {
 	IByokLmBridgeConnection,
 	IByokLmChatRequest,
 	IByokLmChatResult,
+	IByokLmFunctionTool,
 	IByokLmModelInfo,
+	IByokLmToolExecutionRequest,
+	IByokLmToolExecutionResult,
 } from './agentHostByokLm.js';
 
 /**
@@ -38,6 +41,8 @@ export function createAgentHostClientByokLmConnection(channel: IChannel): IByokL
 	return {
 		chat: (request, token) => channel.call('chat', request, token) as Promise<IByokLmChatResult>,
 		onDidChangeModels: channel.listen<IByokLmModelInfo[]>('models'),
+		listTools: token => channel.call('listTools', undefined, token) as Promise<IByokLmFunctionTool[]>,
+		executeTool: (request, token) => channel.call('executeTool', request, token) as Promise<IByokLmToolExecutionResult>,
 	};
 }
 
@@ -106,6 +111,17 @@ export class AgentHostClientByokLmChannel implements IServerChannel {
 		switch (command) {
 			case 'chat': {
 				const result = await this._handler.chat(arg as IByokLmChatRequest, cancellationToken ?? CancellationToken.None);
+				return result as T;
+			}
+			case 'listTools': {
+				const tools = this._handler.listTools ? await this._handler.listTools(cancellationToken ?? CancellationToken.None) : [];
+				return tools as T;
+			}
+			case 'executeTool': {
+				if (!this._handler.executeTool) {
+					return { success: false, output: 'This window does not expose bridged Kodia engine tools.' } as T;
+				}
+				const result = await this._handler.executeTool(arg as IByokLmToolExecutionRequest, cancellationToken ?? CancellationToken.None);
 				return result as T;
 			}
 		}

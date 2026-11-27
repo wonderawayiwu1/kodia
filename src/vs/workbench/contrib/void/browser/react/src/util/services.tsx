@@ -89,6 +89,10 @@ import { IFirstPassReliabilityService } from '../../../firstPassReliabilityServi
 import { IKodiaFirstPassReliabilityMainService } from '../../../../common/firstPassReliabilityTypes.js';
 import { IUniversalAppBuilderService } from '../../../universalAppBuilderService.js';
 import { IUniversalAutomationService } from '../../../universalAutomationService.js';
+import { ICodeReviewService } from '../../../codeReviewService.js';
+import { IKodiaKacraeMainService } from '../../../../common/kacraeTypes.js';
+import { IArpeiService } from '../../../arpeiService.js';
+import { IKodiaArpeiMainService } from '../../../../common/arpeiTypes.js';
 import { DebuggerActivity } from '../../../../common/debuggerActivityServiceTypes.js';
 
 
@@ -283,6 +287,8 @@ const SERVICE_ID_MAP = {
 	IFirstPassReliabilityService,
 	IUniversalAppBuilderService,
 	IUniversalAutomationService,
+	ICodeReviewService,
+	IArpeiService,
 } as const
 
 const OPTIONAL_SERVICE_ID_MAP = {
@@ -297,6 +303,8 @@ const OPTIONAL_SERVICE_ID_MAP = {
 	IKodiaLiveIntelligenceMainService,
 	IKodiaDiagnosticReliabilityMainService,
 	IKodiaFirstPassReliabilityMainService,
+	IKodiaKacraeMainService,
+	IKodiaArpeiMainService,
 } as const
 
 type ServiceInstanceOf<T> = T extends { _serviceBrand: unknown } ? T : never

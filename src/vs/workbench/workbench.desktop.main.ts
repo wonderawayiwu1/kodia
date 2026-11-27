@@ -68,6 +68,8 @@ import '../workbench/contrib/void/electron-browser/kodiaOpsService.js';
 import '../workbench/contrib/void/electron-browser/designAssetService.js';
 import '../workbench/contrib/void/electron-browser/aiEngineService.js';
 import '../workbench/contrib/void/electron-browser/apiStudioService.js';
+import '../workbench/contrib/void/electron-browser/codeReviewService.js';
+import '../workbench/contrib/void/electron-browser/arpeiService.js';
 import '../workbench/contrib/void/electron-browser/correctnessService.js';
 import '../workbench/contrib/void/electron-browser/evolutionService.js';
 import '../workbench/contrib/void/electron-browser/mobileEngineeringService.js';

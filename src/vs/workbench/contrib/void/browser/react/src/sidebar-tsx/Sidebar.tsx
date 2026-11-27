@@ -5,7 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAccessor, useChatThreadsState, useIsDark } from '../util/services.js';
-import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, Globe, History, MessageCircle, Palette, Radar, Rocket, Server, Settings, ShieldCheck, Smartphone, Users, Workflow } from 'lucide-react';
+import { Activity, BookOpen, Brain, ClipboardList, Compass, Factory, FileSearch, Globe, History, MessageCircle, Palette, Radar, Rocket, Server, Settings, ShieldCheck, Smartphone, Sparkles, Users, Workflow } from 'lucide-react';
 
 import '../styles.css';
 import { SidebarChat } from './SidebarChat.js';
@@ -30,6 +30,8 @@ import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringSe
 import { KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID } from '../../../liveIntelligenceService.js';
 import { KODIA_OPEN_APP_BUILDER_ACTION_ID } from '../../../universalAppBuilderService.js';
 import { KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID } from '../../../universalAutomationService.js';
+import { KODIA_OPEN_CODE_REVIEW_ACTION_ID } from '../../../codeReviewService.js';
+import { KODIA_OPEN_ARPEI_ACTION_ID } from '../../../arpeiService.js';
 
 type SidebarTab = 'chat' | 'ai-engine' | 'design' | 'factory' | 'health' | 'task-plan' | 'agents' | 'changes' | 'ops' | 'workflows' | 'activity' | 'context';
 
@@ -208,6 +210,24 @@ const SidebarTabBar = React.memo(({ activePanel, setActivePanel }: { activePanel
 				className='p-1 rounded-md text-void-fg-3 hover:text-violet-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
 			>
 				<Compass size={13} />
+			</button>
+			<button
+				type='button'
+				title='Open Kodia Autonomous Code Review & Functional Completeness (KACRAE — Ctrl+Alt+R)'
+				aria-label='Open Kodia Code Review (KACRAE)'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_CODE_REVIEW_ACTION_ID)}
+				className='p-1 rounded-md text-void-fg-3 hover:text-amber-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<FileSearch size={13} />
+			</button>
+			<button
+				type='button'
+				title='Open Kodia Research-to-Product Intelligence (ARPEI — Ctrl+Alt+P)'
+				aria-label='Open Kodia Research-to-Product (ARPEI)'
+				onClick={() => void commandService.executeCommand(KODIA_OPEN_ARPEI_ACTION_ID)}
+				className='p-1 rounded-md text-void-fg-3 hover:text-cyan-400 hover:bg-void-bg-2 transition-colors flex-shrink-0 cursor-pointer'
+			>
+				<Sparkles size={13} />
 			</button>
 			<button
 				type='button'

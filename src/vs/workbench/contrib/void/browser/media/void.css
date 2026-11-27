@@ -150,3 +150,69 @@
 .void-scrollable-element *::-webkit-scrollbar-corner {
 	background-color: var(--void-bg-3) !important;
 }
+
+/* Sleek, unobtrusive thin scrollbars across all Kodia views & panes */
+.void-scope::-webkit-scrollbar,
+.void-scope *::-webkit-scrollbar {
+	width: 5px !important;
+	height: 5px !important;
+}
+.void-scope::-webkit-scrollbar-button,
+.void-scope *::-webkit-scrollbar-button {
+	display: none !important;
+	width: 0 !important;
+	height: 0 !important;
+}
+.void-scope::-webkit-scrollbar-track,
+.void-scope *::-webkit-scrollbar-track,
+.void-scope::-webkit-scrollbar-corner,
+.void-scope *::-webkit-scrollbar-corner {
+	background: transparent !important;
+}
+.void-scope::-webkit-scrollbar-thumb,
+.void-scope *::-webkit-scrollbar-thumb {
+	background: rgba(148, 163, 184, 0.24) !important;
+	border-radius: 9999px !important;
+	border: none !important;
+}
+.void-scope::-webkit-scrollbar-thumb:hover,
+.void-scope *::-webkit-scrollbar-thumb:hover {
+	background: rgba(148, 163, 184, 0.5) !important;
+}
+
+/* KACRAE Inline Editor Review Decorations */
+.monaco-editor .kacrae-inline-line.kacrae-sev-critical {
+	background-color: rgba(239, 68, 68, 0.12);
+}
+.monaco-editor .kacrae-inline-line.kacrae-sev-high {
+	background-color: rgba(249, 115, 22, 0.10);
+}
+.monaco-editor .kacrae-inline-line.kacrae-sev-medium {
+	background-color: rgba(234, 179, 8, 0.08);
+}
+.monaco-editor .kacrae-inline-line.kacrae-resolved {
+	background-color: rgba(16, 185, 129, 0.08);
+}
+.monaco-editor .kacrae-gutter-marker {
+	border-radius: 50%;
+	width: 8px !important;
+	height: 8px !important;
+	margin-top: 5px;
+	margin-left: 5px;
+}
+.monaco-editor .kacrae-gutter-marker.kacrae-sev-critical { background-color: #ef4444; }
+.monaco-editor .kacrae-gutter-marker.kacrae-sev-high { background-color: #f97316; }
+.monaco-editor .kacrae-gutter-marker.kacrae-sev-medium { background-color: #eab308; }
+.monaco-editor .kacrae-gutter-marker.kacrae-sev-low,
+.monaco-editor .kacrae-gutter-marker.kacrae-sev-info { background-color: #3b82f6; }
+.monaco-editor .kacrae-gutter-marker.kacrae-resolved { background-color: #10b981; }
+.monaco-editor .kacrae-inline-annotation {
+	font-size: 11px;
+	opacity: 0.78;
+	font-style: italic;
+	margin-left: 12px;
+}
+.monaco-editor .kacrae-inline-annotation.kacrae-sev-critical { color: #f87171; }
+.monaco-editor .kacrae-inline-annotation.kacrae-sev-high { color: #fb923c; }
+.monaco-editor .kacrae-inline-annotation.kacrae-sev-medium { color: #facc15; }
+.monaco-editor .kacrae-inline-annotation.kacrae-resolved { color: #34d399; }

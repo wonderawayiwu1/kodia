@@ -11,6 +11,8 @@ export default defineConfig({
 		'./src2/sidebar-tsx/index.tsx',
 		'./src2/void-settings-tsx/index.tsx',
 		'./src2/api-studio-tsx/index.tsx',
+		'./src2/code-review-tsx/index.tsx',
+		'./src2/arpei-tsx/index.tsx',
 		'./src2/correctness-hub-tsx/index.tsx',
 		'./src2/evolution-hub-tsx/index.tsx',
 		'./src2/mobile-studio-tsx/index.tsx',

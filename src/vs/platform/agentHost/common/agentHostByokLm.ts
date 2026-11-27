@@ -208,6 +208,19 @@ export const IAgentHostByokLmHandler = createDecorator<IAgentHostByokLmHandler>(
  * `ILanguageModelsService` lives) and reached from the node agent host over
  * the reverse bridge.
  */
+export interface IByokLmToolExecutionRequest {
+	readonly name: string;
+	readonly argumentsJson: string;
+	readonly workingDirectory?: string;
+}
+
+export interface IByokLmToolExecutionResult {
+	readonly success: boolean;
+	readonly output: string;
+	readonly didWrite?: boolean;
+	readonly path?: string;
+}
+
 export interface IAgentHostByokLmHandler {
 	readonly _serviceBrand: undefined;
 
@@ -231,6 +244,17 @@ export interface IAgentHostByokLmHandler {
 	 * provider/model config for the SDK runtime.
 	 */
 	listModels(token: CancellationToken): Promise<IByokLmModelInfo[]>;
+
+	/**
+	 * Optional Kodia extension: enumerate additional window-hosted engine tools
+	 * (KACRAE, ARPEI, LEI, UABE, UAEP, Browser, Web Search, API/Design/AI/Mobile/Ops).
+	 */
+	listTools?(token: CancellationToken): Promise<IByokLmFunctionTool[]>;
+
+	/**
+	 * Optional Kodia extension: execute a window-hosted engine tool by name.
+	 */
+	executeTool?(request: IByokLmToolExecutionRequest, token: CancellationToken): Promise<IByokLmToolExecutionResult>;
 }
 
 /**
@@ -243,4 +267,8 @@ export interface IByokLmBridgeConnection {
 	chat(request: IByokLmChatRequest, token?: CancellationToken): Promise<IByokLmChatResult>;
 	/** Emits the renderer's current BYOK model snapshot on subscribe and on every change. */
 	readonly onDidChangeModels: Event<IByokLmModelInfo[]>;
+	/** Optional Kodia extension: enumerate window-hosted Kodia engine tools. */
+	listTools?(token?: CancellationToken): Promise<IByokLmFunctionTool[]>;
+	/** Optional Kodia extension: execute a window-hosted Kodia engine tool. */
+	executeTool?(request: IByokLmToolExecutionRequest, token?: CancellationToken): Promise<IByokLmToolExecutionResult>;
 }

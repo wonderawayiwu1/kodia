@@ -12,6 +12,8 @@ import { KODIA_OPEN_APP_BUILDER_ACTION_ID } from '../../../universalAppBuilderSe
 import { KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID } from '../../../universalAutomationService.js';
 import { KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID } from '../../../liveIntelligenceService.js';
 import { KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID } from '../../../correctnessService.js';
+import { KODIA_OPEN_CODE_REVIEW_ACTION_ID } from '../../../codeReviewService.js';
+import { KODIA_OPEN_ARPEI_ACTION_ID } from '../../../arpeiService.js';
 import { KODIA_OPEN_MOBILE_STUDIO_ACTION_ID } from '../../../mobileEngineeringService.js';
 import { KODIA_OPEN_API_STUDIO_ACTION_ID } from '../../../apiStudioService.js';
 import {
@@ -32,6 +34,8 @@ export type SettingsNavigateTarget =
 	| 'automation'
 	| 'ai_engine'
 	| 'api_studio'
+	| 'code_review'
+	| 'arpei'
 	| 'correctness'
 	| 'evolution'
 	| 'design'
@@ -84,6 +88,8 @@ export const SettingsHomeSection = ({
 		{ id: 'agent' as const, title: 'Agent, Hooks & Policy', desc: 'Autonomy, approvals, lifecycle hooks, tool allow/deny & MCP', icon: <Bot size={15} /> },
 		{ id: 'ai_engine' as const, title: 'AI Engineering Engine', desc: 'Dual-engine orchestrator, compute, RAG, evals & AI security', icon: <Sparkles size={15} /> },
 		{ id: 'api_studio' as const, title: 'API Engineering Studio', desc: 'Native API workspace, live runner, load testing & security probes', icon: <Sliders size={15} /> },
+		{ id: 'code_review' as const, title: 'Autonomous Code Review (KACRAE)', desc: 'Review scopes, functional completeness, Multi-Model Council & enterprise assurance', icon: <Shield size={15} /> },
+		{ id: 'arpei' as const, title: 'Research Intelligence (ARPEI)', desc: 'Deep product discovery, live reference browsing, visual memory & readiness gates', icon: <Radar size={15} /> },
 		{ id: 'correctness' as const, title: 'Deep Debugging & Correctness', desc: 'Compilers, taint tracking, fuzz/mutation, independent verification & proofs', icon: <Shield size={15} /> },
 		{ id: 'evolution' as const, title: 'Evolution, SBOM & Cloud Ops', desc: 'Capability radar, CycloneDX SBOM, IaC/FinOps, incidents, releases & GDPR', icon: <Cpu size={15} /> },
 		{ id: 'design' as const, title: 'Design Intelligence & Brand', desc: 'Autonomous UI/UX, imagery providers, visual QA & brand systems', icon: <Palette size={15} /> },
@@ -134,6 +140,8 @@ export const SettingsHomeSection = ({
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_APP_BUILDER_ACTION_ID)}><Rocket size={12} /> Universal App Builder (Ctrl+Alt+U)</KodiaSecondaryButton>
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_AUTOMATION_STUDIO_ACTION_ID)}><Workflow size={12} /> Automation Studio (Ctrl+Alt+W)</KodiaSecondaryButton>
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_LIVE_INTELLIGENCE_ACTION_ID)}><Radar size={12} /> Live Intelligence (Ctrl+Alt+I)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_CODE_REVIEW_ACTION_ID)}><Shield size={12} /> Code Review (KACRAE) (Ctrl+Alt+R)</KodiaSecondaryButton>
+					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_ARPEI_ACTION_ID)}><Radar size={12} /> Research Intelligence (ARPEI) (Ctrl+Alt+P)</KodiaSecondaryButton>
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_CORRECTNESS_HUB_ACTION_ID)}><Shield size={12} /> Correctness &amp; ERIC Hub (Ctrl+Alt+D)</KodiaSecondaryButton>
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_MOBILE_STUDIO_ACTION_ID)}><Smartphone size={12} /> Mobile Studio (Ctrl+Alt+M)</KodiaSecondaryButton>
 					<KodiaSecondaryButton onClick={() => void commandService.executeCommand(KODIA_OPEN_API_STUDIO_ACTION_ID)}><Globe size={12} /> API Studio (Ctrl+Alt+A)</KodiaSecondaryButton>

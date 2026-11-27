@@ -2634,6 +2634,162 @@ export const builtinTools: {
 		},
 	},
 
+	// Kodia Autonomous Code Review & Software Assurance Engine (KACRAE — 8 tools)
+	kacrae_open_workbench: {
+		name: 'kacrae_open_workbench',
+		description: 'Opens and focuses the native Kodia Code Review & Software Assurance Workbench (KACRAE) to any of its 23 sections (overview, current_review, security_intelligence, architecture_intelligence, database_review, api_contract_review, test_intelligence, compliance_governance, review_reports, etc.).',
+		params: {
+			section: { description: 'Optional section id (default: overview).' },
+		},
+	},
+	kacrae_run_review: {
+		name: 'kacrae_run_review',
+		description: 'Runs KACRAE universal code review across files, Git changes, commits, branches, or the entire repository, covering technical correctness, business logic, concurrency, security attack paths, multi-tenant isolation, database migrations, OpenAPI contracts, architecture cycles, test coverage, and adversarial counterexamples.',
+		params: {
+			scope: { description: 'Scope: modified_files, git_staged, git_unstaged, latest_commit, branch_comparison, pull_request, current_file, entire_project, monorepo.' },
+			depth: { description: 'Depth: quick, standard, deep, security, enterprise_assurance (default: standard).' },
+			target_files: { description: 'Optional JSON array of relative file paths to scope the review.' },
+			git_base_ref: { description: 'Optional Git base ref for branch_comparison / pull_request scope.' },
+			git_head_ref: { description: 'Optional Git head ref for branch_comparison / pull_request scope.' },
+			test_command: { description: 'Optional real test command to run and record as verification evidence.' },
+		},
+	},
+	kacrae_index_repository: {
+		name: 'kacrae_index_repository',
+		description: 'Runs incremental, disk-backed, bounded-concurrency enterprise repository indexing and constructs the navigable repository intelligence graph with measured throughput and memory telemetry.',
+		params: {
+			incremental: { description: 'Optional boolean (default true) to skip unchanged files using mtime/size/SHA-256.' },
+			max_files: { description: 'Optional max files budget.' },
+		},
+	},
+	kacrae_query_graph: {
+		name: 'kacrae_query_graph',
+		description: 'Queries KACRAE repository intelligence graph for dependents, API consumers, covering tests, database table users, circular dependencies, or blast-radius impact.',
+		params: {
+			kind: { description: 'Query kind: dependents, apis, tests, db_table, blast_radius, cycles.' },
+			target: { description: 'Target file path, symbol, or database table name.' },
+		},
+	},
+	kacrae_update_finding: {
+		name: 'kacrae_update_finding',
+		description: 'Transitions a KACRAE finding lifecycle state (confirmed, investigating, accepted, suppressed, false_positive, reopened) and records an immutable audit trail entry. Suppressing requires a non-empty reason.',
+		params: {
+			session_id: { description: 'Review session ID.' },
+			finding_id: { description: 'Finding ID.' },
+			next_state: { description: 'Target lifecycle state.' },
+			reason: { description: 'Justification or notes (mandatory for suppressed).' },
+		},
+	},
+	kacrae_apply_repair: {
+		name: 'kacrae_apply_repair',
+		description: 'Proposes a minimal diff preview (dry_run=true) or applies a controlled autonomous repair with atomic backup rollback and runs independent verification (re-analyzers, compilers, and tests) before marking the finding resolved.',
+		params: {
+			session_id: { description: 'Review session ID.' },
+			finding_id: { description: 'Finding ID to repair.' },
+			dry_run: { description: 'If true (default), previews the patch without modifying disk.' },
+			test_command: { description: 'Optional test command for independent verification.' },
+		},
+	},
+	kacrae_export_report: {
+		name: 'kacrae_export_report',
+		description: 'Generates and writes a KACRAE assurance report (executive, technical, security, architecture, compliance, release_readiness) in HTML, print-ready PDF HTML, Markdown, JSON, or SARIF 2.1.0.',
+		params: {
+			session_id: { description: 'Optional review session ID (defaults to latest).' },
+			report_type: { description: 'executive, technical, security, architecture, compliance, or release_readiness.' },
+			format: { description: 'html, pdf_html, markdown, json, or sarif.' },
+		},
+	},
+	kacrae_run_benchmark: {
+		name: 'kacrae_run_benchmark',
+		description: 'Runs KACRAE permanent reproducible quality & scalability benchmark measuring precision, recall, false-positive rate, latency, and optional large-repository incremental indexing throughput.',
+		params: {
+			include_scale_files: { description: 'Optional synthetic monorepo file count for scalability measurement (e.g. 500).' },
+		},
+	},
+	kacrae_verify_functional_completeness: {
+		name: 'kacrae_verify_functional_completeness',
+		description: 'Runs KACRAE Functional Completeness & Static-UI Verification across source code, frontend-backend wiring, stubbed endpoints, hardcoded mock datasets, requirement-blocking TODOs, live HTTP API probes, and optional live Chromium browser click-outcome testing, returning a 7-column Functional Completeness Matrix.',
+		params: {
+			app_url: { description: 'Optional running application URL (e.g. http://localhost:3000) for real live browser interaction & observable outcome verification.' },
+			api_base_url: { description: 'Optional backend API base URL for live HTTP probing.' },
+			use_browser: { description: 'Optional boolean (default true when app_url is given) to launch Playwright Chromium and test real UI controls.' },
+			test_command: { description: 'Optional automated test command to include in the completeness matrix.' },
+		},
+	},
+
+	// Kodia Autonomous Research-to-Product Engineering Intelligence (ARPEI — 8 tools)
+	arpei_open_workspace: {
+		name: 'arpei_open_workspace',
+		description: 'Opens Kodia native Research-to-Product Intelligence (ARPEI) workspace to inspect domain discovery, reference coverage, live browser activity, screenshots, design spec, assets, technical research, and the 13-point Pre-Implementation Readiness Gate.',
+		params: {
+			section: { description: 'Optional section: overview, reference_explorer, live_browser, screenshot_gallery, design_intelligence, asset_intelligence, technical_research, requirements_traceability, research_history.' },
+		},
+	},
+	arpei_plan_research: {
+		name: 'arpei_plan_research',
+		description: 'Initializes an ARPEI deep product discovery session for ANY software category: classifies research necessity/depth, discovers industry/domain/roles/workflows/regulations/entities, builds initial 8-stage traceability and research gaps, and evaluates the Pre-Implementation Research Readiness Gate.',
+		params: {
+			user_prompt: { description: 'The user request describing the software product or enhancement to research and build.' },
+			reference_urls: { description: 'Optional JSON array of user-supplied reference website/product URLs.' },
+			mode: { description: 'Optional mode: autonomous_research_and_build, research_only, plan_first, user_directed_research, existing_project_enhancement, fast_implementation.' },
+		},
+	},
+	arpei_explore_reference: {
+		name: 'arpei_explore_reference',
+		description: 'Explores a reference product across public landing, navigation/nested pages, robots.txt/sitemap, and documentation using Kodia real Playwright Chromium browser: scrolls, tests safe interactions (expected vs observed), captures persistent desktop/mobile screenshots, extracts design tokens, and builds Reference & Deep Discovery Coverage Matrices.',
+		params: {
+			session_id: { description: 'ARPEI research session ID.' },
+			root_url: { description: 'Optional reference root URL (if omitted, discovers via live web search).' },
+			max_pages: { description: 'Optional max pages to visit (default 8).' },
+			capture_screenshots: { description: 'Optional boolean (default true) to capture & persist desktop/mobile screenshots.' },
+			test_interactions: { description: 'Optional boolean (default true) to test safe UI controls and record expected vs observed behavior.' },
+		},
+	},
+	arpei_research_technical: {
+		name: 'arpei_research_technical',
+		description: 'Researches current official documentation, APIs, SDKs, protocols, and domain standards via live web search and HTTP fetch, strips untrusted webpage prompt injections, corroborates across independent sources, and tracks freshness.',
+		params: {
+			session_id: { description: 'ARPEI research session ID.' },
+			queries: { description: 'JSON array of technical/domain search queries.' },
+			doc_urls: { description: 'Optional JSON array of official documentation URLs to fetch and verify.' },
+		},
+	},
+	arpei_discover_assets: {
+		name: 'arpei_discover_assets',
+		description: 'Discovers and downloads legitimately licensed application assets (images/icons/fallbacks) into the project workspace with full source, license, attribution, dimensions, and availability verification.',
+		params: {
+			session_id: { description: 'ARPEI research session ID.' },
+			queries: { description: 'JSON array of objects { query, usage, altText } describing needed domain-appropriate assets.' },
+			download_to_local: { description: 'Optional boolean (default true) to save verified assets locally.' },
+		},
+	},
+	arpei_evaluate_readiness_gate: {
+		name: 'arpei_evaluate_readiness_gate',
+		description: 'Evaluates the 13-point Pre-Implementation Research Readiness Gate to verify whether domain, references, roles, workflows, technical specs, unknowns, and acceptance criteria are ready for implementation.',
+		params: {
+			session_id: { description: 'ARPEI research session ID.' },
+			user_fast_track: { description: 'Optional boolean if user explicitly requested immediate implementation with limited research.' },
+		},
+	},
+	arpei_compare_visuals: {
+		name: 'arpei_compare_visuals',
+		description: 'Launches the implemented application in Playwright Chromium at the matching reference viewport, captures an implementation screenshot, computes real pixel-level diff & layout discrepancies against the persisted reference screenshot, and clearly separates visual similarity from functional correctness.',
+		params: {
+			session_id: { description: 'ARPEI research session ID.' },
+			reference_screenshot_id: { description: 'ID of persisted reference screenshot to compare against.' },
+			implementation_url: { description: 'Live URL of the implemented application page.' },
+			page_label: { description: 'Optional label for the compared page.' },
+		},
+	},
+	arpei_query_research_memory: {
+		name: 'arpei_query_research_memory',
+		description: 'Retrieves persisted ARPEI research evidence, reference screenshots, requirements traceability nodes, and licensed assets by topic/feature so implementation agents build from verified evidence rather than assumptions.',
+		params: {
+			query: { description: 'Topic, feature, page, or requirement keyword to retrieve.' },
+			session_id: { description: 'Optional session ID filter.' },
+		},
+	},
+
 	// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
 	correctness_open_hub: {
 		name: 'correctness_open_hub',

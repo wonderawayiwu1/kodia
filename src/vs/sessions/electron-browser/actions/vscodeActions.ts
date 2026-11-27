@@ -35,8 +35,9 @@ import { IOpenedMainWindow } from '../../../platform/window/common/window.js';
 import { isSingleFolderWorkspaceIdentifier } from '../../../platform/workspace/common/workspace.js';
 import { OPEN_VSCODE_WINDOW_COMMAND_ID, RETURN_TO_VSCODE_EDITOR_COMMAND_ID, SHOULD_SHOW_RETURN_TO_VSCODE_EDITOR_COMMAND_ID } from '../../common/sessionCommands.js';
 import { IActiveSession } from '../../services/sessions/common/sessionsManagement.js';
-import { CommandsRegistry } from '../../../platform/commands/common/commands.js';
-import { IKodiaWindowsService } from '../../../platform/windows/common/kodiaWindows.js';
+import { CommandsRegistry, ICommandService } from '../../../platform/commands/common/commands.js';
+import { IKodiaWindowsService, KODIA_OPEN_SETTINGS_COMMAND_ID } from '../../../platform/windows/common/kodiaWindows.js';
+import { MenuId, MenuRegistry } from '../../../platform/actions/common/actions.js';
 
 export class OpenSessionInVSCodeAction extends Action2 {
 	static readonly ID = 'agents.openSessionInVSCode';
@@ -186,11 +187,27 @@ export async function openKodiaSettingsInIDE(
 	}
 }
 
+const KODIA_STUDIOS_SUBMENU_ID = new MenuId('SessionsKodiaStudiosSubmenu');
+
+const KODIA_SESSIONS_STUDIO_ITEMS: readonly { readonly id: string; readonly title: string; readonly icon: typeof Codicon.settingsGear; readonly order: number }[] = [
+	{ id: KODIA_OPEN_SETTINGS_COMMAND_ID, title: 'Kodia Settings (Models, Providers & All Engines)', icon: Codicon.settingsGear, order: 1 },
+	{ id: 'kodia.openUniversalAppBuilder', title: 'Universal App Builder (UABE & IRIRE)', icon: Codicon.rocket, order: 2 },
+	{ id: 'kodia.openUniversalAutomationStudio', title: 'Automation Studio (UAEP)', icon: Codicon.circuitBoard, order: 3 },
+	{ id: 'workbench.action.kodia.openCodeReview', title: 'Autonomous Code Review & Functional Completeness (KACRAE)', icon: Codicon.shield, order: 4 },
+	{ id: 'workbench.action.kodia.openArpeiWorkspace', title: 'Research-to-Product Intelligence (ARPEI)', icon: Codicon.compass, order: 5 },
+	{ id: 'kodia.openLiveEngineeringIntelligence', title: 'Live Engineering Intelligence (LEI)', icon: Codicon.radioTower, order: 6 },
+	{ id: 'workbench.action.kodia.openApiStudio', title: 'API Engineering Studio', icon: Codicon.globe, order: 7 },
+	{ id: 'workbench.action.kodia.openMobileStudio', title: 'Mobile Engineering Studio', icon: Codicon.deviceMobile, order: 8 },
+	{ id: 'workbench.action.kodia.openCorrectnessHub', title: 'Deep Debugging & Correctness Hub', icon: Codicon.beaker, order: 9 },
+	{ id: 'workbench.action.kodia.openEvolutionHub', title: 'Evolution, Supply-Chain & Ops Hub', icon: Codicon.pulse, order: 10 },
+];
+
 /**
- * Kodia: "Manage Models..." in the Agents Window's model picker opens Kodia's settings instead of VS Code's language
- * models screen, which never lists Kodia's providers. The chat's own action registers the command once the workbench
- * has restored; this handler is registered right after it, so it takes precedence (the latest registration wins).
- * Registering it first would make the chat's action throw, and its other model actions would go missing.
+ * Kodia:
+ * 1. Overrides "Manage Models..." (`workbench.action.chat.manage`) to open Kodia's full
+ *    native Settings pane directly inside the Agents Window (falling back to IDE only if unavailable).
+ * 2. Contributes a native "Kodia Studios & Settings" launcher to the Agents Window titlebar,
+ *    sidebar footer, and account menu so every Kodia setting and engineering studio is 1 click away.
  */
 export class KodiaManageModelsContribution extends Disposable implements IWorkbenchContribution {
 
@@ -198,23 +215,68 @@ export class KodiaManageModelsContribution extends Disposable implements IWorkbe
 
 	constructor() {
 		super();
-		const override = () => this._register(CommandsRegistry.registerCommand(MANAGE_MODELS_COMMAND_ID, accessor => openKodiaSettingsInIDE(
-			accessor.get(INativeHostService),
-			accessor.get(IKodiaWindowsService),
-			getWindowId(mainWindow),
-			accessor.get(ISessionsService).activeSession.get(),
-			accessor.get(ISessionsProvidersService),
-			accessor.get(IRemoteAgentHostService),
-		)));
+		const override = () => this._register(CommandsRegistry.registerCommand(MANAGE_MODELS_COMMAND_ID, async accessor => {
+			if (CommandsRegistry.getCommand(KODIA_OPEN_SETTINGS_COMMAND_ID)) {
+				await accessor.get(ICommandService).executeCommand(KODIA_OPEN_SETTINGS_COMMAND_ID);
+				return;
+			}
+			await openKodiaSettingsInIDE(
+				accessor.get(INativeHostService),
+				accessor.get(IKodiaWindowsService),
+				getWindowId(mainWindow),
+				accessor.get(ISessionsService).activeSession.get(),
+				accessor.get(ISessionsProvidersService),
+				accessor.get(IRemoteAgentHostService),
+			);
+		}));
 		if (CommandsRegistry.getCommand(MANAGE_MODELS_COMMAND_ID)) {
 			override();
-			return;
+		} else {
+			const listener = this._register(CommandsRegistry.onDidRegisterCommand(id => {
+				if (id === MANAGE_MODELS_COMMAND_ID) {
+					listener.dispose();
+					override();
+				}
+			}));
 		}
-		const listener = this._register(CommandsRegistry.onDidRegisterCommand(id => {
-			if (id === MANAGE_MODELS_COMMAND_ID) {
-				listener.dispose();
-				override();
-			}
+
+		// Register Kodia Settings + All Engineering Studios natively in the Agents Window menus
+		for (const item of KODIA_SESSIONS_STUDIO_ITEMS) {
+			this._register(MenuRegistry.appendMenuItem(KODIA_STUDIOS_SUBMENU_ID, {
+				command: { id: item.id, title: item.title, icon: item.icon },
+				group: item.order === 1 ? '1_settings' : '2_studios',
+				order: item.order,
+			}));
+		}
+
+		// Quick Kodia Settings button in the Agents Window Account menu & Sidebar footer
+		this._register(MenuRegistry.appendMenuItem(Menus.AccountMenu, {
+			command: {
+				id: KODIA_OPEN_SETTINGS_COMMAND_ID,
+				title: localize2('kodiaSettingsInAgents', 'Kodia Settings & All Engines'),
+				icon: Codicon.sparkle,
+			},
+			when: IsPhoneLayoutContext.negate(),
+			group: '2_settings',
+			order: 0,
+		}));
+
+		this._register(MenuRegistry.appendMenuItem(Menus.SidebarFooter, {
+			submenu: KODIA_STUDIOS_SUBMENU_ID,
+			title: localize2('kodiaStudiosFooter', 'Kodia Studios & Settings'),
+			icon: Codicon.sparkle,
+			group: 'navigation',
+			order: 1,
+		}));
+
+		// Compact Kodia Studios & Settings dropdown button right beside "Switch to IDE" in the top-right titlebar
+		this._register(MenuRegistry.appendMenuItem(Menus.TitleBarRightLayout, {
+			submenu: KODIA_STUDIOS_SUBMENU_ID,
+			title: localize2('kodiaStudiosTitlebar', 'Kodia Studios & Settings'),
+			icon: Codicon.sparkle,
+			group: 'navigation',
+			order: 990,
+			when: ContextKeyExpr.and(IsAuxiliaryWindowContext.toNegated(), IsPhoneLayoutContext.negate()),
 		}));
 	}
 }

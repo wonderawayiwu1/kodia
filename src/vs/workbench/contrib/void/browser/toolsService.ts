@@ -188,6 +188,23 @@ import {
 	importFromCurl,
 	importFromPostmanCollection,
 } from '../common/apiStudioIntelligence.js'
+import { ICodeReviewService } from './codeReviewService.js'
+import { IArpeiService } from './arpeiService.js'
+import {
+	ArpeiResearchMode,
+	ArpeiWorkspaceSection,
+	IKodiaArpeiMainService,
+	KODIA_ARPEI_CHANNEL,
+} from '../common/arpeiTypes.js'
+import {
+	IKodiaKacraeMainService,
+	KODIA_KACRAE_CHANNEL,
+	KacraeExportReportRequest,
+	KacraeFindingLifecycleState,
+	KacraeReviewDepth,
+	KacraeReviewScope,
+	KacraeWorkbenchSection,
+} from '../common/kacraeTypes.js'
 import { ICorrectnessService } from './correctnessService.js'
 import {
 	CorrectnessHubSection,
@@ -595,6 +612,8 @@ export class ToolsService implements IToolsService {
 		const aiEngineMainService = ProxyChannel.toService<IKodiaAIEngineMainService>(mainProcessService.getChannel(KODIA_AI_ENGINE_CHANNEL))
 		const apiStudioMainService = ProxyChannel.toService<IKodiaApiStudioMainService>(mainProcessService.getChannel(KODIA_API_STUDIO_CHANNEL))
 		const correctnessMainService = ProxyChannel.toService<IKodiaCorrectnessMainService>(mainProcessService.getChannel(KODIA_CORRECTNESS_CHANNEL))
+		const kacraeMainService = ProxyChannel.toService<IKodiaKacraeMainService>(mainProcessService.getChannel(KODIA_KACRAE_CHANNEL))
+		const arpeiMainService = ProxyChannel.toService<IKodiaArpeiMainService>(mainProcessService.getChannel(KODIA_ARPEI_CHANNEL))
 		const evolutionMainService = ProxyChannel.toService<IKodiaEvolutionMainService>(mainProcessService.getChannel(KODIA_EVOLUTION_CHANNEL))
 		const mobileMainService = ProxyChannel.toService<IKodiaMobileMainService>(mainProcessService.getChannel(KODIA_MOBILE_CHANNEL))
 		const leiMainService = ProxyChannel.toService<IKodiaLiveIntelligenceMainService>(mainProcessService.getChannel(KODIA_LEI_CHANNEL))
@@ -807,6 +826,12 @@ export class ToolsService implements IToolsService {
 		}
 		const getCorrectnessService = (): ICorrectnessService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(ICorrectnessService)) } catch { return undefined }
+		}
+		const getCodeReviewService = (): ICodeReviewService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(ICodeReviewService)) } catch { return undefined }
+		}
+		const getArpeiService = (): IArpeiService | undefined => {
+			try { return instantiationService.invokeFunction(a => a.get(IArpeiService)) } catch { return undefined }
 		}
 		const getEvolutionService = (): IEvolutionService | undefined => {
 			try { return instantiationService.invokeFunction(a => a.get(IEvolutionService)) } catch { return undefined }
@@ -2659,6 +2684,101 @@ export class ToolsService implements IToolsService {
 			api_assess_production_readiness: () => ({}),
 			api_correlate_failure: (params: RawToolParamsObj) => ({
 				history_index: validateNumber(params.history_index, { default: 0 }) ?? 0,
+			}),
+
+			// KACRAE Autonomous Code Review & Software Assurance Engine (8 tools)
+			kacrae_open_workbench: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? undefined) as KacraeWorkbenchSection | undefined,
+			}),
+			kacrae_run_review: (params: RawToolParamsObj) => ({
+				scope: (validateOptionalStr('scope', params.scope) ?? 'modified_files') as KacraeReviewScope,
+				depth: (validateOptionalStr('depth', params.depth) ?? 'standard') as KacraeReviewDepth,
+				target_files: validateOptionalStrList(params.target_files),
+				git_base_ref: validateOptionalStr('git_base_ref', params.git_base_ref) ?? undefined,
+				git_head_ref: validateOptionalStr('git_head_ref', params.git_head_ref) ?? undefined,
+				test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+			}),
+			kacrae_index_repository: (params: RawToolParamsObj) => ({
+				incremental: validateBoolean(params.incremental, { default: true }),
+				max_files: validateNumber(params.max_files, { default: 50000 }) ?? undefined,
+			}),
+			kacrae_query_graph: (params: RawToolParamsObj) => ({
+				kind: (validateOptionalStr('kind', params.kind) ?? 'blast_radius') as 'dependents' | 'apis' | 'tests' | 'db_table' | 'blast_radius' | 'cycles',
+				target: validateOptionalStr('target', params.target) ?? undefined,
+			}),
+			kacrae_update_finding: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				finding_id: validateStr('finding_id', params.finding_id).trim(),
+				next_state: validateStr('next_state', params.next_state).trim() as KacraeFindingLifecycleState,
+				reason: validateOptionalStr('reason', params.reason) ?? undefined,
+			}),
+			kacrae_apply_repair: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				finding_id: validateStr('finding_id', params.finding_id).trim(),
+				dry_run: validateBoolean(params.dry_run, { default: true }),
+				test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+			}),
+			kacrae_export_report: (params: RawToolParamsObj) => ({
+				session_id: validateOptionalStr('session_id', params.session_id) ?? undefined,
+				report_type: (validateOptionalStr('report_type', params.report_type) ?? 'technical') as KacraeExportReportRequest['reportType'],
+				format: (validateOptionalStr('format', params.format) ?? 'html') as KacraeExportReportRequest['format'],
+			}),
+			kacrae_run_benchmark: (params: RawToolParamsObj) => ({
+				include_scale_files: validateNumber(params.include_scale_files, { default: 0 }) ?? undefined,
+			}),
+			kacrae_verify_functional_completeness: (params: RawToolParamsObj) => ({
+				app_url: validateOptionalStr('app_url', params.app_url) ?? undefined,
+				api_base_url: validateOptionalStr('api_base_url', params.api_base_url) ?? undefined,
+				use_browser: validateBoolean(params.use_browser, { default: true }),
+				test_command: validateOptionalStr('test_command', params.test_command) ?? undefined,
+			}),
+			// ARPEI Autonomous Research-to-Product Engineering Intelligence (8 tools)
+			arpei_open_workspace: (params: RawToolParamsObj) => ({
+				section: (validateOptionalStr('section', params.section) ?? undefined) as ArpeiWorkspaceSection | undefined,
+			}),
+			arpei_plan_research: (params: RawToolParamsObj) => ({
+				user_prompt: validateStr('user_prompt', params.user_prompt).trim(),
+				reference_urls: validateOptionalStrList(params.reference_urls),
+				mode: (validateOptionalStr('mode', params.mode) ?? undefined) as ArpeiResearchMode | undefined,
+			}),
+			arpei_explore_reference: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				root_url: validateOptionalStr('root_url', params.root_url) ?? undefined,
+				max_pages: validateNumber(params.max_pages, { default: 8 }) ?? 8,
+				capture_screenshots: validateBoolean(params.capture_screenshots, { default: true }),
+				test_interactions: validateBoolean(params.test_interactions, { default: true }),
+			}),
+			arpei_research_technical: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				queries: validateOptionalStrList(params.queries) ?? [],
+				doc_urls: validateOptionalStrList(params.doc_urls),
+			}),
+			arpei_discover_assets: (params: RawToolParamsObj) => {
+				const raw = typeof params.queries === 'string' ? (() => { try { return JSON.parse(params.queries) } catch { return [] } })() : (Array.isArray(params.queries) ? params.queries : [])
+				const queries = (Array.isArray(raw) ? raw : []).map((q: any) => ({
+					query: String(q?.query ?? q ?? ''),
+					usage: String(q?.usage ?? 'application-visual'),
+					altText: String(q?.altText ?? q?.query ?? 'Application visual'),
+				})).filter(q => q.query.trim().length > 0)
+				return {
+					session_id: validateStr('session_id', params.session_id).trim(),
+					queries,
+					download_to_local: validateBoolean(params.download_to_local, { default: true }),
+				}
+			},
+			arpei_evaluate_readiness_gate: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				user_fast_track: validateBoolean(params.user_fast_track, { default: false }),
+			}),
+			arpei_compare_visuals: (params: RawToolParamsObj) => ({
+				session_id: validateStr('session_id', params.session_id).trim(),
+				reference_screenshot_id: validateStr('reference_screenshot_id', params.reference_screenshot_id).trim(),
+				implementation_url: validateStr('implementation_url', params.implementation_url).trim(),
+				page_label: validateOptionalStr('page_label', params.page_label) ?? undefined,
+			}),
+			arpei_query_research_memory: (params: RawToolParamsObj) => ({
+				query: validateOptionalStr('query', params.query) ?? '',
+				session_id: validateOptionalStr('session_id', params.session_id) ?? undefined,
 			}),
 
 			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
@@ -6030,6 +6150,145 @@ export class ToolsService implements IToolsService {
 				return { result: report }
 			},
 
+			// KACRAE Autonomous Code Review & Software Assurance Engine (8 tools)
+			kacrae_open_workbench: async ({ section }) => {
+				const target: KacraeWorkbenchSection = section ?? 'overview'
+				await getCodeReviewService()?.openWorkbench(target)
+				return { result: { opened: true, section: target } }
+			},
+			kacrae_run_review: async ({ scope, depth, target_files, git_base_ref, git_head_ref, test_command }) => {
+				const svc = getCodeReviewService()
+				if (svc) {
+					const session = await svc.startReview({
+						scope,
+						depth,
+						targetFiles: target_files,
+						gitBaseRef: git_base_ref,
+						gitHeadRef: git_head_ref,
+						testCommand: test_command,
+					})
+					return { result: session }
+				}
+				const root = workspaceFolderPaths()[0] ?? ''
+				const session = await kacraeMainService.startReview({
+					workspaceRoot: root,
+					scope,
+					depth: depth ?? 'standard',
+					targetFiles: target_files,
+					gitBaseRef: git_base_ref,
+					gitHeadRef: git_head_ref,
+					testCommand: test_command,
+				})
+				return { result: session }
+			},
+			kacrae_index_repository: async ({ incremental, max_files }) => {
+				const svc = getCodeReviewService()
+				if (svc) {
+					return { result: await svc.indexRepository({ incremental, maxFiles: max_files }) }
+				}
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kacraeMainService.indexRepository(root, { incremental, maxFiles: max_files }) }
+			},
+			kacrae_query_graph: async ({ kind, target }) => {
+				const svc = getCodeReviewService()
+				if (svc) {
+					return { result: await svc.queryGraph(kind, target) }
+				}
+				const root = workspaceFolderPaths()[0] ?? ''
+				return { result: await kacraeMainService.queryRepositoryGraph(root, { kind, target }) }
+			},
+			kacrae_update_finding: async ({ session_id, finding_id, next_state, reason }) => {
+				const svc = getCodeReviewService()
+				const updated = svc
+					? await svc.updateFindingLifecycle(session_id, finding_id, next_state, reason)
+					: await kacraeMainService.updateFindingLifecycle(workspaceFolderPaths()[0] ?? '', { sessionId: session_id, findingId: finding_id, nextState: next_state, reason })
+				return { result: { updated } }
+			},
+			kacrae_apply_repair: async ({ session_id, finding_id, dry_run, test_command }) => {
+				const svc = getCodeReviewService()
+				const rec = svc
+					? await svc.proposeOrApplyRepair({ sessionId: session_id, findingId: finding_id, dryRun: dry_run !== false, testCommand: test_command })
+					: await kacraeMainService.proposeOrApplyRepair({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, findingId: finding_id, dryRun: dry_run !== false, testCommand: test_command })
+				return { result: rec }
+			},
+			kacrae_export_report: async ({ session_id, report_type, format }) => {
+				const svc = getCodeReviewService()
+				const sid = session_id ?? svc?.getActiveSession()?.id ?? 'latest'
+				const res = svc
+					? await svc.exportReport({ sessionId: sid, reportType: report_type ?? 'technical', format: format ?? 'html' })
+					: await kacraeMainService.exportReport({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: sid, reportType: report_type ?? 'technical', format: format ?? 'html' })
+				return { result: res }
+			},
+			kacrae_run_benchmark: async ({ include_scale_files }) => {
+				const svc = getCodeReviewService()
+				const report = svc
+					? await svc.runQualityBenchmark(include_scale_files)
+					: await kacraeMainService.runQualityBenchmark(workspaceFolderPaths()[0] ?? '', { includeScaleFiles: include_scale_files })
+				return { result: report }
+			},
+			kacrae_verify_functional_completeness: async ({ app_url, api_base_url, use_browser, test_command }) => {
+				const svc = getCodeReviewService()
+				const report = svc
+					? await svc.verifyFunctionalCompleteness({ appUrl: app_url, apiBaseUrl: api_base_url, useBrowser: use_browser, testCommand: test_command })
+					: await kacraeMainService.verifyFunctionalCompleteness(workspaceFolderPaths()[0] ?? '', { appUrl: app_url, apiBaseUrl: api_base_url, useBrowser: use_browser, testCommand: test_command })
+				return { result: report }
+			},
+			// ARPEI Autonomous Research-to-Product Engineering Intelligence (8 tools)
+			arpei_open_workspace: async ({ section }) => {
+				const target: ArpeiWorkspaceSection = section ?? 'overview'
+				await getArpeiService()?.openWorkspace(target)
+				return { result: { opened: true, section: target } }
+			},
+			arpei_plan_research: async ({ user_prompt, reference_urls, mode }) => {
+				const svc = getArpeiService()
+				const session = svc
+					? await svc.planAndInitResearch({ userPrompt: user_prompt, referenceUrls: reference_urls, mode })
+					: await arpeiMainService.planAndInitResearch({ workspaceRoot: workspaceFolderPaths()[0] ?? '', userPrompt: user_prompt, referenceUrls: reference_urls, mode })
+				return { result: session }
+			},
+			arpei_explore_reference: async ({ session_id, root_url, max_pages, capture_screenshots, test_interactions }) => {
+				const svc = getArpeiService()
+				const session = svc
+					? await svc.exploreReferenceProduct({ sessionId: session_id, rootUrl: root_url, maxPages: max_pages, captureScreenshots: capture_screenshots, testInteractions: test_interactions })
+					: await arpeiMainService.exploreReferenceProduct({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, rootUrl: root_url, maxPages: max_pages, captureScreenshots: capture_screenshots, testInteractions: test_interactions })
+				return { result: session }
+			},
+			arpei_research_technical: async ({ session_id, queries, doc_urls }) => {
+				const svc = getArpeiService()
+				const session = svc
+					? await svc.researchTechnicalAndDomain({ sessionId: session_id, queries, docUrls: doc_urls })
+					: await arpeiMainService.researchTechnicalAndDomain({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, queries, docUrls: doc_urls })
+				return { result: session }
+			},
+			arpei_discover_assets: async ({ session_id, queries, download_to_local }) => {
+				const svc = getArpeiService()
+				const assets = svc
+					? await svc.discoverAndDownloadAssets({ sessionId: session_id, queries, downloadToLocal: download_to_local })
+					: await arpeiMainService.discoverAndDownloadAssets({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, queries, downloadToLocal: download_to_local })
+				return { result: { assets } }
+			},
+			arpei_evaluate_readiness_gate: async ({ session_id, user_fast_track }) => {
+				const svc = getArpeiService()
+				const gate = svc
+					? await svc.evaluateReadinessGate(session_id, user_fast_track)
+					: await arpeiMainService.evaluateReadinessGate({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, userFastTrack: user_fast_track })
+				return { result: gate }
+			},
+			arpei_compare_visuals: async ({ session_id, reference_screenshot_id, implementation_url, page_label }) => {
+				const svc = getArpeiService()
+				const cmp = svc
+					? await svc.compareReferenceVsImplementation({ sessionId: session_id, referenceScreenshotId: reference_screenshot_id, implementationUrl: implementation_url, pageLabel: page_label })
+					: await arpeiMainService.compareReferenceVsImplementation({ workspaceRoot: workspaceFolderPaths()[0] ?? '', sessionId: session_id, referenceScreenshotId: reference_screenshot_id, implementationUrl: implementation_url, pageLabel: page_label })
+				return { result: cmp }
+			},
+			arpei_query_research_memory: async ({ query, session_id }) => {
+				const svc = getArpeiService()
+				const res = svc
+					? await svc.queryResearchMemory(query, session_id)
+					: await arpeiMainService.queryResearchMemory({ workspaceRoot: workspaceFolderPaths()[0] ?? '', query, sessionId: session_id })
+				return { result: res }
+			},
+
 			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
 			correctness_open_hub: async ({ section }) => {
 				const target: CorrectnessHubSection = section ?? 'diagnostics'
@@ -8874,6 +9133,35 @@ export class ToolsService implements IToolsService {
 				...(r.matchedLogLines.length ? [`Correlated Runtime Logs:\n${r.matchedLogLines.map(l => `  ${l}`).join('\n')}`] : []),
 				`Repair Steps:\n${r.repairSteps.map(s => `- ${s}`).join('\n')}`,
 			].join('\n'),
+
+			// KACRAE Autonomous Code Review & Software Assurance Engine (8 tools)
+			kacrae_open_workbench: (_params, r) => `Opened Kodia Code Review Workbench (KACRAE, section=${r.section}).`,
+			kacrae_run_review: (_params, r) => [
+				`# KACRAE Review Session (${r.id}) — ${r.status.toUpperCase()}`,
+				r.summary,
+				`Health Score: ${r.healthScore.score}/100 | Readiness: ${r.readiness.verdict}`,
+				...r.findings.slice(0, 25).map(f => `- [${f.severity.toUpperCase()}/${f.classification}] ${f.ruleId} ${f.location.file}:${f.location.startLine} — ${f.title}`),
+			].join('\n'),
+			kacrae_index_repository: (_params, r) => `Indexed ${r.stats.indexedFiles} file(s) (${r.stats.unchangedCachedFiles} cached unchanged) in ${r.stats.durationMs}ms (${r.stats.throughputFilesPerSec} files/s, peak heap ${r.stats.peakHeapMb}MB). Graph: ${r.graph.totalNodeCount} nodes, ${r.graph.totalEdgeCount} edges.`,
+			kacrae_query_graph: (_params, r) => `${r.answer}\nFiles: ${r.files.slice(0, 25).join(', ') || 'none'}`,
+			kacrae_update_finding: (_params, r) => r.updated ? `Updated finding ${r.updated.id} -> ${r.updated.lifecycle}.` : 'Finding not found.',
+			kacrae_apply_repair: (_params, r) => `Repair ${r.id} (${r.file}): status=${r.status}${r.independentVerdict ? `, independentVerdict=${r.independentVerdict}` : ''}\n${r.diffPreview}`,
+			kacrae_export_report: (_params, r) => `Exported KACRAE ${r.format} report (${r.bytes} bytes) to ${r.filePath}.`,
+			kacrae_run_benchmark: (_params, r) => `KACRAE Benchmark: Precision=${r.precision}, Recall=${r.recall}, FPR=${r.falsePositiveRate}, F1=${r.f1Score}, AvgLatency=${r.avgLatencyMs}ms.${r.scaleBenchmark ? ` Scale (${r.scaleBenchmark.fileCount} files): full=${r.scaleBenchmark.fullIndexMs}ms (${r.scaleBenchmark.throughputFilesPerSec} f/s), incremental=${r.scaleBenchmark.incrementalRescanMs}ms (${r.scaleBenchmark.unchangedSkipped} cached).` : ''}`,
+			kacrae_verify_functional_completeness: (_params, r) => [
+				`# KACRAE Functional Completeness Matrix`,
+				r.summary,
+				...r.matrix.slice(0, 20).map(m => `- [${m.status.toUpperCase()} / ${m.verificationMethod}] ${m.feature}: ${m.testResults} | Remediation: ${m.remediation}`),
+			].join('\n'),
+			// ARPEI Autonomous Research-to-Product Engineering Intelligence
+			arpei_open_workspace: (_params, r) => `Opened Kodia Research Intelligence (ARPEI, section=${r.section}).`,
+			arpei_plan_research: (_params, r) => `Initialized ARPEI session ${r.id} (${r.domainDiscovery.softwareCategory}, depth=${r.decision.recommendedDepth}, gate=${r.readinessGate.verdict}). Proposed queries: ${r.decision.proposedQueries.join('; ') || 'none'}.`,
+			arpei_explore_reference: (_params, r) => `ARPEI explored ${r.pages.filter(p => p.status === 'inspected').length}/${r.pages.length} page(s), captured ${r.screenshots.length} screenshot(s), tested ${r.interactions.length} interaction(s). Gate: ${r.readinessGate.verdict}.`,
+			arpei_research_technical: (_params, r) => `ARPEI technical research updated session ${r.id}: ${r.evidence.length} evidence record(s), gate=${r.readinessGate.verdict}.`,
+			arpei_discover_assets: (_params, r) => `ARPEI discovered ${r.assets.length} licensed asset(s): ${r.assets.map(a => `${a.altText} [${a.downloadStatus}, ${a.license}] -> ${a.localPath ?? a.originalUrl}`).join('; ')}.`,
+			arpei_evaluate_readiness_gate: (_params, r) => `${r.summary}\nHigh-impact unknowns: ${r.highImpactUnknowns.join('; ') || 'none'}.`,
+			arpei_compare_visuals: (_params, r) => `Visual comparison (${r.pageLabel}, ${r.viewport.width}x${r.viewport.height}): similarity=${r.similarityPct}%, diff=${r.diffPercentage}%, passed=${r.passedVisualThreshold}. ${r.functionalVerificationNote}`,
+			arpei_query_research_memory: (_params, r) => `ARPEI Memory: ${r.matchedEvidence.length} evidence, ${r.matchedScreenshots.length} screenshots, ${r.matchedRequirements.length} requirements, ${r.matchedAssets.length} assets (${r.staleEvidenceCount} stale).`,
 
 			// Kodia Deep Debugging, Software Correctness & Independent Verification (14 tools)
 			correctness_open_hub: (_params, r) => `Opened Kodia Debugging & Correctness Hub (section=${r.section}).`,

@@ -48,10 +48,31 @@ node --experimental-strip-types --max-old-space-size=8192 build/next/index.ts bu
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 Write-Host '==> [4/5] Syncing bundles and stamping build metadata into VSCode-win32-x64...' -ForegroundColor Cyan
-$gitCommit = (git rev-parse HEAD).Trim()
+$headCommit = (git rev-parse HEAD).Trim()
+$isDirty = [bool]((git status --porcelain) -join '').Trim()
 $buildNowUtc = [DateTimeOffset]::UtcNow
 $buildIsoDate = $buildNowUtc.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
 $buildTimestamp = $buildNowUtc.ToUnixTimeMilliseconds()
+
+# When the working tree has uncommitted changes, derive a deterministic 40-char build revision
+# from HEAD + compiled bundle contents so installed Kodia detects the update without needing a git commit,
+# and stops prompting once that exact build is installed (matching product.json commit).
+$gitCommit = $headCommit
+if ($isDirty) {
+    $revScript = @"
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const h = crypto.createHash('sha1').update(process.argv[1]);
+for (const rel of ['mainImpl.js', 'vs/workbench/workbench.desktop.main.js', 'vs/sessions/sessions.desktop.main.js', 'vs/platform/agentHost/node/agentHostMain.js']) {
+    const fp = path.join(process.argv[2], rel);
+    if (fs.existsSync(fp)) { h.update(rel).update(fs.readFileSync(fp)); }
+}
+process.stdout.write(h.digest('hex'));
+"@
+    $gitCommit = (node -e $revScript $headCommit $OutMinDir).Trim()
+    Write-Host "    Uncommitted changes detected -> content-derived build revision: $($gitCommit.Substring(0, 10)) (HEAD $($headCommit.Substring(0, 7)))" -ForegroundColor Yellow
+}
 
 $syncScript = @"
 const fs = require('fs');
@@ -69,6 +90,7 @@ const repoProd = JSON.parse(fs.readFileSync(path.join(process.argv[5], 'product.
 const toCopy = [
     'mainImpl.js',
     'mainImpl.js.map',
+    'nls.messages.js',
     'nls.messages.json',
     'nls.keys.json',
     'nls.metadata.json',
@@ -76,6 +98,12 @@ const toCopy = [
     'vs/workbench/workbench.desktop.main.js.map',
     'vs/workbench/workbench.desktop.main.css',
     'vs/workbench/workbench.desktop.main.css.map',
+    'vs/sessions/sessions.desktop.main.js',
+    'vs/sessions/sessions.desktop.main.js.map',
+    'vs/sessions/sessions.desktop.main.css',
+    'vs/sessions/sessions.desktop.main.css.map',
+    'vs/platform/agentHost/node/agentHostMain.js',
+    'vs/platform/agentHost/node/agentHostMain.js.map',
 ];
 
 for (const rel of toCopy) {
